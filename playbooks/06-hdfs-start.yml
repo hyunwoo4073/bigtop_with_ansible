@@ -1,0 +1,119 @@
+---
+- name: Start HDFS NameNode
+  hosts: master
+  become: true
+  tasks:
+    - name: Check NameNode formatted
+      ansible.builtin.stat:
+        path: "{{ hdfs_namenode_dir }}/current"
+      register: namenode_current
+
+    - name: Fail if NameNode is not formatted
+      ansible.builtin.fail:
+        msg: "NameNode is not formatted. {{ hdfs_namenode_dir }}/current does not exist."
+      when: not namenode_current.stat.exists
+
+    - name: Check master hostname resolution
+      ansible.builtin.command: getent hosts "{{ hdfs_namenode_host }}"
+      changed_when: false
+
+    - name: Reset failed NameNode service state
+      ansible.builtin.command: systemctl reset-failed hadoop-hdfs-namenode
+      changed_when: false
+
+    - name: Start and enable NameNode
+      block:
+        - name: Start hadoop-hdfs-namenode
+          ansible.builtin.service:
+            name: hadoop-hdfs-namenode
+            state: started
+            enabled: true
+
+        - name: Wait for NameNode RPC port
+          ansible.builtin.wait_for:
+            host: "{{ hdfs_namenode_host }}"
+            port: 9000
+            timeout: 60
+
+        - name: Wait for NameNode Web UI port
+          ansible.builtin.wait_for:
+            host: "{{ hdfs_namenode_host }}"
+            port: 9870
+            timeout: 60
+
+      rescue:
+        - name: Show NameNode systemd status
+          ansible.builtin.shell: systemctl status hadoop-hdfs-namenode --no-pager -l || true
+          changed_when: false
+
+        - name: Show NameNode journal
+          ansible.builtin.shell: journalctl -u hadoop-hdfs-namenode -n 120 --no-pager || true
+          changed_when: false
+
+        - name: Show NameNode Hadoop logs
+          ansible.builtin.shell: tail -120 /var/log/hadoop-hdfs/*namenode*.log 2>/dev/null || true
+          changed_when: false
+
+        - name: Fail after NameNode debug output
+          ansible.builtin.fail:
+            msg: "NameNode failed to start. See logs above."
+
+
+- name: Start HDFS DataNodes
+  hosts: workers
+  become: true
+  tasks:
+    - name: Check DataNode directory exists
+      ansible.builtin.file:
+        path: "{{ hdfs_datanode_dir }}"
+        state: directory
+        owner: hdfs
+        group: hadoop
+        mode: "0755"
+
+    - name: Reset failed DataNode service state
+      ansible.builtin.command: systemctl reset-failed hadoop-hdfs-datanode
+      changed_when: false
+
+    - name: Start and enable DataNode
+      block:
+        - name: Start hadoop-hdfs-datanode
+          ansible.builtin.service:
+            name: hadoop-hdfs-datanode
+            state: started
+            enabled: true
+
+      rescue:
+        - name: Show DataNode systemd status
+          ansible.builtin.shell: systemctl status hadoop-hdfs-datanode --no-pager -l || true
+          changed_when: false
+
+        - name: Show DataNode journal
+          ansible.builtin.shell: journalctl -u hadoop-hdfs-datanode -n 120 --no-pager || true
+          changed_when: false
+
+        - name: Show DataNode Hadoop logs
+          ansible.builtin.shell: tail -120 /var/log/hadoop-hdfs/*datanode*.log 2>/dev/null || true
+          changed_when: false
+
+        - name: Fail after DataNode debug output
+          ansible.builtin.fail:
+            msg: "DataNode failed to start. See logs above."
+
+
+- name: Check HDFS status
+  hosts: master
+  become: true
+  tasks:
+    - name: Check NameNode service active
+      ansible.builtin.command: systemctl is-active hadoop-hdfs-namenode
+      changed_when: false
+
+    - name: Show HDFS datanode report
+      ansible.builtin.shell: sudo -u hdfs hdfs dfsadmin -report
+      register: hdfs_report
+      changed_when: false
+
+    - name: Print HDFS report summary
+      ansible.builtin.debug:
+        msg: "{{ hdfs_report.stdout_lines }}"

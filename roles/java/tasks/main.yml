@@ -1,0 +1,41 @@
+---
+- name: Install OpenJDK 11
+  ansible.builtin.apt:
+    name:
+      - openjdk-11-jdk
+      - openjdk-11-jre
+    state: present
+    update_cache: true
+  become: true
+
+- name: Set JAVA_HOME system-wide
+  ansible.builtin.copy:
+    dest: /etc/profile.d/java.sh
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+      export PATH=$JAVA_HOME/bin:$PATH
+  become: true
+
+- name: Configure default java
+  ansible.builtin.command: update-alternatives --set java /usr/lib/jvm/java-11-openjdk-amd64/bin/java
+  become: true
+  changed_when: false
+  failed_when: false
+
+- name: Configure default javac
+  ansible.builtin.command: update-alternatives --set javac /usr/lib/jvm/java-11-openjdk-amd64/bin/javac
+  become: true
+  changed_when: false
+  failed_when: false
+
+- name: Verify Java version
+  ansible.builtin.command: java -version
+  register: java_version
+  changed_when: false
+
+- name: Print Java version
+  ansible.builtin.debug:
+    var: java_version.stderr_lines

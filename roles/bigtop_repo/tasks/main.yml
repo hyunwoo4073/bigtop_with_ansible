@@ -1,0 +1,46 @@
+---
+- name: Remove invalid Bigtop apt repository if exists
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/bigtop.list
+    state: absent
+  become: true
+
+- name: Update apt cache before installing repository tools
+  ansible.builtin.apt:
+    update_cache: true
+    lock_timeout: 300
+  become: true
+
+- name: Install packages required for apt repository
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      - apt-transport-https
+    state: present
+    lock_timeout: 300
+  become: true
+
+- name: Download Bigtop GPG key
+  ansible.builtin.get_url:
+    url: https://downloads.apache.org/bigtop/bigtop-3.5.0/repos/GPG-KEY-bigtop.asc
+    dest: /usr/share/keyrings/bigtop.asc
+    mode: "0644"
+  become: true
+
+- name: Add Bigtop apt repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/bigtop.list
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      deb [signed-by=/usr/share/keyrings/bigtop.asc] http://repos.bigtop.apache.org/releases/3.5.0/ubuntu/24.04/$(ARCH) bigtop contrib
+  become: true
+
+- name: Update apt cache after adding Bigtop repository
+  ansible.builtin.apt:
+    update_cache: true
+    lock_timeout: 300
+  become: true

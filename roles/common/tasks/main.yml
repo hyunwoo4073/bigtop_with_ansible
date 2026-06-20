@@ -1,0 +1,86 @@
+---
+- name: Set timezone
+  ansible.builtin.timezone:
+    name: "{{ timezone }}"
+  become: true
+
+- name: Install common packages
+  ansible.builtin.apt:
+    name: "{{ common_packages }}"
+    state: present
+    update_cache: true
+  become: true
+
+- name: Create hadoop group
+  ansible.builtin.group:
+    name: "{{ hadoop_group }}"
+    state: present
+  become: true
+
+- name: Create hadoop user
+  ansible.builtin.user:
+    name: "{{ hadoop_user }}"
+    group: "{{ hadoop_group }}"
+    shell: /bin/bash
+    create_home: true
+    state: present
+  become: true
+
+- name: Configure /etc/hosts
+  ansible.builtin.template:
+    src: hosts.j2
+    dest: /etc/hosts
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+- name: Disable swap immediately
+  ansible.builtin.command: swapoff -a
+  become: true
+  changed_when: false
+
+- name: Disable swap in fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#].*\sswap\s.*)$'
+    replace: '# \1'
+  become: true
+
+- name: Configure limits for hadoop user
+  ansible.builtin.copy:
+    dest: /etc/security/limits.d/99-hadoop.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {{ hadoop_user }} soft nofile 65536
+      {{ hadoop_user }} hard nofile 65536
+      {{ hadoop_user }} soft nproc 32768
+      {{ hadoop_user }} hard nproc 32768
+  become: true
+
+- name: Configure sysctl for data platform
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-data-platform.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      vm.swappiness = 1
+      vm.overcommit_memory = 1
+      net.core.somaxconn = 1024
+      net.ipv4.tcp_tw_reuse = 1
+  become: true
+
+- name: Apply sysctl
+  ansible.builtin.command: sysctl --system
+  become: true
+  changed_when: false
+
+- name: Enable and start chrony
+  ansible.builtin.service:
+    name: chrony
+    state: started
+    enabled: true
+  become: true

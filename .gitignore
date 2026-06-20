@@ -1,0 +1,38 @@
+# Ansible runtime
+*.retry
+.retry
+
+# Inventory with real host/IP info
+inventory/hosts.ini
+inventory/group_vars/all.yml
+inventory/host_vars/
+
+# Secrets / keys
+*.pem
+*.key
+*.crt
+*.p12
+*.jks
+id_rsa
+id_rsa.pub
+*.ppk
+vault_password*
+.vault_pass
+*.vault
+
+# Logs
+*.log
+logs/
+tmp/
+
+# Python / editor
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/

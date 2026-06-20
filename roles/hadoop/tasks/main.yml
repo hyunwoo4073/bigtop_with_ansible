@@ -1,0 +1,29 @@
+---
+- name: Install common Hadoop packages
+  ansible.builtin.apt:
+    name:
+      - hadoop
+      - hadoop-client
+      - hadoop-hdfs
+    state: present
+    update_cache: true
+    lock_timeout: 300
+  become: true
+
+- name: Install HDFS NameNode package on master
+  ansible.builtin.apt:
+    name:
+      - hadoop-hdfs-namenode
+    state: present
+    lock_timeout: 300
+  become: true
+  when: "'master' in group_names"
+
+- name: Install HDFS DataNode package on workers
+  ansible.builtin.apt:
+    name:
+      - hadoop-hdfs-datanode
+    state: present
+    lock_timeout: 300
+  become: true
+  when: "'workers' in group_names"

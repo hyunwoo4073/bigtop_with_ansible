@@ -1,0 +1,6 @@
+---
+- name: Install Java on all nodes
+  hosts: all
+  become: true
+  roles:
+    - java

@@ -1,0 +1,6 @@
+---
+- name: Configure HDFS
+  hosts: hadoop_cluster
+  become: true
+  roles:
+    - hdfs_config

@@ -1,0 +1,37 @@
+cluster_domain: "local"
+
+cluster_hosts:
+  - name: "master"
+    ip: "192.168.56.101"
+  - name: "worker1"
+    ip: "192.168.56.102"
+  - name: "worker2"
+    ip: "192.168.56.103"
+  - name: "worker3"
+    ip: "192.168.56.104"
+
+timezone: "Asia/Seoul"
+
+common_packages:
+  - vim
+  - curl
+  - wget
+  - net-tools
+  - lsof
+  - tar
+  - unzip
+  - chrony
+  - rsync
+  - tree
+  - jq
+
+hadoop_user: "hadoop"
+hadoop_group: "hadoop"
+
+hdfs_namenode_host: "master"
+hdfs_default_fs: "hdfs://master:9000"
+hdfs_replication: 2
+hdfs_namenode_dir: "/data/hadoop/hdfs/namenode"
+hdfs_datanode_dir: "/data/hadoop/hdfs/datanode"
+hadoop_conf_dir: "/etc/hadoop/conf"
+java_home: "/usr/lib/jvm/java-11-openjdk-amd64"

@@ -1,0 +1,18 @@
+---
+- name: Stop HDFS DataNodes
+  hosts: workers
+  become: true
+  tasks:
+    - name: Stop DataNode
+      ansible.builtin.service:
+        name: hadoop-hdfs-datanode
+        state: stopped
+
+- name: Stop HDFS NameNode
+  hosts: master
+  become: true
+  tasks:
+    - name: Stop NameNode
+      ansible.builtin.service:
+        name: hadoop-hdfs-namenode
+        state: stopped

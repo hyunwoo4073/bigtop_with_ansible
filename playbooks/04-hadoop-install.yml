@@ -1,0 +1,6 @@
+---
+- name: Install Hadoop HDFS packages
+  hosts: hadoop_cluster
+  become: true
+  roles:
+    - hadoop

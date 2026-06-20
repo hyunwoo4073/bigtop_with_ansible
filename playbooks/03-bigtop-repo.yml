@@ -1,0 +1,6 @@
+---
+- name: Configure Bigtop apt repository
+  hosts: all
+  become: true
+  roles:
+    - bigtop_repo
