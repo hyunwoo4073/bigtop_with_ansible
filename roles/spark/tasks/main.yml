@@ -1,0 +1,24 @@
+---
+- name: Install Spark common packages
+  ansible.builtin.apt:
+    name: "{{ spark_packages }}"
+    state: present
+    update_cache: true
+    lock_timeout: 300
+  become: true
+
+- name: Install Spark Python package if available
+  ansible.builtin.apt:
+    name: "{{ spark_python_packages }}"
+    state: present
+    lock_timeout: 300
+  become: true
+  ignore_errors: true
+
+- name: Install Spark History Server on master
+  ansible.builtin.apt:
+    name: "{{ spark_history_packages }}"
+    state: present
+    lock_timeout: 300
+  become: true
+  when: "'master' in group_names"

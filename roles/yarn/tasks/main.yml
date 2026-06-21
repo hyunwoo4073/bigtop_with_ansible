@@ -1,0 +1,28 @@
+---
+- name: Install common YARN packages
+  ansible.builtin.apt:
+    name:
+      - hadoop-yarn
+      - hadoop-mapreduce
+    state: present
+    update_cache: true
+    lock_timeout: 300
+  become: true
+
+- name: Install ResourceManager package on master
+  ansible.builtin.apt:
+    name:
+      - hadoop-yarn-resourcemanager
+    state: present
+    lock_timeout: 300
+  become: true
+  when: "'master' in group_names"
+
+- name: Install NodeManager package on workers
+  ansible.builtin.apt:
+    name:
+      - hadoop-yarn-nodemanager
+    state: present
+    lock_timeout: 300
+  become: true
+  when: "'workers' in group_names"

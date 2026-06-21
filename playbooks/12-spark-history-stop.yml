@@ -1,0 +1,9 @@
+---
+- name: Stop Spark History Server
+  hosts: master
+  become: true
+  tasks:
+    - name: Stop spark-history-server
+      ansible.builtin.service:
+        name: spark-history-server
+        state: stopped

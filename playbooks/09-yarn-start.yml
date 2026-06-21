@@ -1,0 +1,113 @@
+---
+- name: Start YARN ResourceManager
+  hosts: master
+  become: true
+  tasks:
+    - name: Check ResourceManager hostname resolution
+      ansible.builtin.command: getent hosts "{{ yarn_resourcemanager_host }}"
+      changed_when: false
+
+    - name: Reset failed ResourceManager service state
+      ansible.builtin.command: systemctl reset-failed hadoop-yarn-resourcemanager
+      changed_when: false
+
+    - name: Start and enable ResourceManager
+      block:
+        - name: Start hadoop-yarn-resourcemanager
+          ansible.builtin.service:
+            name: hadoop-yarn-resourcemanager
+            state: started
+            enabled: true
+
+        - name: Wait for ResourceManager Web UI
+          ansible.builtin.wait_for:
+            host: "{{ yarn_resourcemanager_host }}"
+            port: 8088
+            timeout: 60
+
+      rescue:
+        - name: Show ResourceManager systemd status
+          ansible.builtin.shell: systemctl status hadoop-yarn-resourcemanager --no-pager -l || true
+          changed_when: false
+
+        - name: Show ResourceManager journal
+          ansible.builtin.shell: journalctl -u hadoop-yarn-resourcemanager -n 120 --no-pager || true
+          changed_when: false
+
+        - name: Show YARN logs
+          ansible.builtin.shell: tail -120 /var/log/hadoop-yarn/*resourcemanager*.log 2>/dev/null || true
+          changed_when: false
+
+        - name: Fail after ResourceManager debug output
+          ansible.builtin.fail:
+            msg: "ResourceManager failed to start. See logs above."
+
+
+- name: Start YARN NodeManagers
+  hosts: workers
+  become: true
+  tasks:
+    - name: Ensure YARN local directory ownership
+      ansible.builtin.file:
+        path: "{{ yarn_nodemanager_local_dirs }}"
+        state: directory
+        owner: yarn
+        group: hadoop
+        mode: "0755"
+        recurse: true
+
+    - name: Ensure YARN log directory ownership
+      ansible.builtin.file:
+        path: "{{ yarn_nodemanager_log_dirs }}"
+        state: directory
+        owner: yarn
+        group: hadoop
+        mode: "0755"
+        recurse: true
+
+    - name: Reset failed NodeManager service state
+      ansible.builtin.command: systemctl reset-failed hadoop-yarn-nodemanager
+      changed_when: false
+
+    - name: Start and enable NodeManager
+      block:
+        - name: Start hadoop-yarn-nodemanager
+          ansible.builtin.service:
+            name: hadoop-yarn-nodemanager
+            state: started
+            enabled: true
+
+      rescue:
+        - name: Show NodeManager systemd status
+          ansible.builtin.shell: systemctl status hadoop-yarn-nodemanager --no-pager -l || true
+          changed_when: false
+
+        - name: Show NodeManager journal
+          ansible.builtin.shell: journalctl -u hadoop-yarn-nodemanager -n 120 --no-pager || true
+          changed_when: false
+
+        - name: Show YARN NodeManager logs
+          ansible.builtin.shell: tail -120 /var/log/hadoop-yarn/*nodemanager*.log 2>/dev/null || true
+          changed_when: false
+
+        - name: Fail after NodeManager debug output
+          ansible.builtin.fail:
+            msg: "NodeManager failed to start. See logs above."
+
+
+- name: Check YARN status
+  hosts: master
+  become: true
+  tasks:
+    - name: Check ResourceManager active
+      ansible.builtin.command: systemctl is-active hadoop-yarn-resourcemanager
+      changed_when: false
+
+    - name: Show YARN nodes
+      ansible.builtin.shell: sudo -u yarn yarn node -list
+      register: yarn_nodes
+      changed_when: false
+
+    - name: Print YARN node list
+      ansible.builtin.debug:
+        msg: "{{ yarn_nodes.stdout_lines }}"

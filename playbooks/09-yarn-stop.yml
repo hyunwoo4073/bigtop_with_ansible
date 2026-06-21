@@ -1,0 +1,18 @@
+---
+- name: Stop YARN NodeManagers
+  hosts: workers
+  become: true
+  tasks:
+    - name: Stop NodeManager
+      ansible.builtin.service:
+        name: hadoop-yarn-nodemanager
+        state: stopped
+
+- name: Stop YARN ResourceManager
+  hosts: master
+  become: true
+  tasks:
+    - name: Stop ResourceManager
+      ansible.builtin.service:
+        name: hadoop-yarn-resourcemanager
+        state: stopped

@@ -1,0 +1,45 @@
+---
+- name: Ensure Spark config directory exists
+  ansible.builtin.file:
+    path: "{{ spark_conf_dir }}"
+    state: directory
+    owner: root
+    group: hadoop
+    mode: "0755"
+  become: true
+
+- name: Deploy spark-defaults.conf
+  ansible.builtin.template:
+    src: spark-defaults.conf.j2
+    dest: "{{ spark_conf_dir }}/spark-defaults.conf"
+    owner: root
+    group: hadoop
+    mode: "0644"
+  become: true
+
+- name: Deploy spark-env.sh
+  ansible.builtin.template:
+    src: spark-env.sh.j2
+    dest: "{{ spark_conf_dir }}/spark-env.sh"
+    owner: root
+    group: hadoop
+    mode: "0644"
+  become: true
+
+- name: Create Spark history directory in HDFS
+  ansible.builtin.shell: |
+    hdfs dfs -mkdir -p /spark-history
+    hdfs dfs -chmod 1777 /spark-history
+  become: true
+  become_user: hdfs
+  run_once: true
+  when: "'master' in group_names"
+
+- name: Create HDFS user directory for hadoop user
+  ansible.builtin.shell: |
+    hdfs dfs -mkdir -p /user/hadoop
+    hdfs dfs -chown hadoop:hadoop /user/hadoop
+  become: true
+  become_user: hdfs
+  run_once: true
+  when: "'master' in group_names"

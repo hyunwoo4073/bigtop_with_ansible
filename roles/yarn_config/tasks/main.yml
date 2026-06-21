@@ -1,0 +1,38 @@
+---
+- name: Ensure YARN local directory exists
+  ansible.builtin.file:
+    path: "{{ yarn_nodemanager_local_dirs }}"
+    state: directory
+    owner: yarn
+    group: hadoop
+    mode: "0755"
+  become: true
+  when: "'workers' in group_names"
+
+- name: Ensure YARN log directory exists
+  ansible.builtin.file:
+    path: "{{ yarn_nodemanager_log_dirs }}"
+    state: directory
+    owner: yarn
+    group: hadoop
+    mode: "0755"
+  become: true
+  when: "'workers' in group_names"
+
+- name: Deploy yarn-site.xml
+  ansible.builtin.template:
+    src: yarn-site.xml.j2
+    dest: "{{ hadoop_conf_dir }}/yarn-site.xml"
+    owner: root
+    group: hadoop
+    mode: "0644"
+  become: true
+
+- name: Deploy mapred-site.xml
+  ansible.builtin.template:
+    src: mapred-site.xml.j2
+    dest: "{{ hadoop_conf_dir }}/mapred-site.xml"
+    owner: root
+    group: hadoop
+    mode: "0644"
+  become: true

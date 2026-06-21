@@ -1,0 +1,6 @@
+---
+- name: Configure Spark on YARN
+  hosts: hadoop_cluster
+  become: true
+  roles:
+    - spark_config

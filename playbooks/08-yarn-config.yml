@@ -1,0 +1,6 @@
+---
+- name: Configure YARN
+  hosts: hadoop_cluster
+  become: true
+  roles:
+    - yarn_config

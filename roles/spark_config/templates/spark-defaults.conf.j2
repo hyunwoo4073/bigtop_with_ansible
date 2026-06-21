@@ -1,0 +1,14 @@
+spark.master                     yarn
+spark.submit.deployMode          client
+
+spark.eventLog.enabled           true
+spark.eventLog.dir               {{ spark_event_log_dir }}
+
+spark.history.fs.logDirectory    {{ spark_history_dir }}
+
+spark.driver.memory              {{ spark_driver_memory }}
+spark.executor.memory            {{ spark_executor_memory }}
+spark.executor.cores             {{ spark_executor_cores }}
+spark.executor.instances         {{ spark_executor_instances }}
+
+spark.yarn.historyServer.address {{ yarn_resourcemanager_host }}:18080
