@@ -1,0 +1,60 @@
+---
+- name: Install Grafana repository dependencies
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - wget
+      - gnupg
+    state: present
+    update_cache: true
+    lock_timeout: 300
+  become: true
+
+- name: Ensure apt keyrings directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Download Grafana GPG key
+  ansible.builtin.get_url:
+    url: https://apt.grafana.com/gpg-full.key
+    dest: /etc/apt/keyrings/grafana.asc
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+- name: Add Grafana apt repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/grafana.list
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main
+  become: true
+
+- name: Install Grafana OSS
+  ansible.builtin.apt:
+    name: grafana
+    state: present
+    update_cache: true
+    lock_timeout: 300
+  become: true
+
+- name: Start and enable Grafana
+  ansible.builtin.service:
+    name: grafana-server
+    state: started
+    enabled: true
+  become: true
+
+- name: Wait for Grafana port
+  ansible.builtin.wait_for:
+    host: "{{ monitoring_host }}"
+    port: "{{ grafana_port }}"
+    timeout: 60

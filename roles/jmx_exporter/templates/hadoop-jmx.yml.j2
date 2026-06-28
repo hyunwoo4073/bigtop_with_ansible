@@ -1,0 +1,8 @@
+---
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+
+rules:
+  - pattern: "Hadoop<service=(.*), name=(.*)><>(.*)"
+    name: "hadoop_$1_$2_$3"
+    type: GAUGE

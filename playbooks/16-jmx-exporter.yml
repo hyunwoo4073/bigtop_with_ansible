@@ -1,0 +1,6 @@
+---
+- name: Install JMX Exporter
+  hosts: hadoop_cluster
+  become: true
+  roles:
+    - jmx_exporter

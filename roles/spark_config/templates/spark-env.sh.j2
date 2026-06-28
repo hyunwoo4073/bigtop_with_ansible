@@ -2,3 +2,4 @@ export JAVA_HOME={{ java_home }}
 export HADOOP_CONF_DIR={{ hadoop_conf_dir }}
 export YARN_CONF_DIR={{ hadoop_conf_dir }}
 export SPARK_CONF_DIR={{ spark_conf_dir }}
+export SPARK_HISTORY_OPTS="$SPARK_HISTORY_OPTS -javaagent:{{ jmx_exporter_jar }}={{ jmx_spark_history_port }}:{{ jmx_exporter_dir }}/spark-jmx.yml"

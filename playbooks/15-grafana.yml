@@ -1,0 +1,6 @@
+---
+- name: Install and start Grafana
+  hosts: ops
+  become: true
+  roles:
+    - grafana

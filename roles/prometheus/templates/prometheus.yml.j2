@@ -1,0 +1,48 @@
+global:
+  scrape_interval: {{ prometheus_scrape_interval | default('15s') }}
+
+scrape_configs:
+  - job_name: "prometheus"
+    static_configs:
+      - targets:
+          - "localhost:{{ prometheus_port | default(9090) }}"
+
+  - job_name: "node-exporter"
+    static_configs:
+      - targets:
+{% for host in cluster_hosts %}
+          - "{{ host.name }}:{{ node_exporter_port | default(9100) }}"
+{% endfor %}
+
+  - job_name: "hdfs-namenode-jmx"
+    static_configs:
+      - targets:
+          - "{{ hdfs_namenode_host }}:{{ jmx_namenode_port }}"
+
+  - job_name: "hdfs-datanode-jmx"
+    static_configs:
+      - targets:
+{% for host in cluster_hosts %}
+{% if host.name in ['worker1', 'worker2'] %}
+          - "{{ host.name }}:{{ jmx_datanode_port }}"
+{% endif %}
+{% endfor %}
+
+  - job_name: "yarn-resourcemanager-jmx"
+    static_configs:
+      - targets:
+          - "{{ yarn_resourcemanager_host }}:{{ jmx_resourcemanager_port }}"
+
+  - job_name: "yarn-nodemanager-jmx"
+    static_configs:
+      - targets:
+{% for host in cluster_hosts %}
+{% if host.name in ['worker1', 'worker2'] %}
+          - "{{ host.name }}:{{ jmx_nodemanager_port }}"
+{% endif %}
+{% endfor %}
+
+  - job_name: "spark-history-jmx"
+    static_configs:
+      - targets:
+          - "{{ yarn_resourcemanager_host }}:{{ jmx_spark_history_port }}"

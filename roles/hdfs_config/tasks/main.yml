@@ -57,3 +57,20 @@
     group: hadoop
     mode: "0644"
   become: true
+
+- name: Configure HDFS JMX Exporter options
+  ansible.builtin.blockinfile:
+    path: "{{ hadoop_conf_dir }}/hadoop-env.sh"
+    marker: "# {mark} ANSIBLE MANAGED HDFS JMX EXPORTER"
+    block: |
+      {% if 'master' in group_names %}
+      export HDFS_NAMENODE_OPTS="$HDFS_NAMENODE_OPTS -javaagent:{{ jmx_exporter_jar }}={{ jmx_namenode_port }}:{{ jmx_exporter_dir }}/hadoop-jmx.yml"
+      {% endif %}
+      {% if 'workers' in group_names %}
+      export HDFS_DATANODE_OPTS="$HDFS_DATANODE_OPTS -javaagent:{{ jmx_exporter_jar }}={{ jmx_datanode_port }}:{{ jmx_exporter_dir }}/hadoop-jmx.yml"
+      {% endif %}
+    create: true
+    owner: root
+    group: hadoop
+    mode: "0644"
+  become: true

@@ -1,0 +1,36 @@
+---
+- name: Ensure JMX Exporter directory exists
+  ansible.builtin.file:
+    path: "{{ jmx_exporter_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Download JMX Exporter Java agent jar
+  ansible.builtin.get_url:
+    url: "https://github.com/prometheus/jmx_exporter/releases/download/{{ jmx_exporter_version }}/jmx_prometheus_javaagent-{{ jmx_exporter_version }}.jar"
+    dest: "{{ jmx_exporter_jar }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+- name: Deploy Hadoop JMX Exporter config
+  ansible.builtin.template:
+    src: hadoop-jmx.yml.j2
+    dest: "{{ jmx_exporter_dir }}/hadoop-jmx.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+- name: Deploy Spark JMX Exporter config
+  ansible.builtin.template:
+    src: spark-jmx.yml.j2
+    dest: "{{ jmx_exporter_dir }}/spark-jmx.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true

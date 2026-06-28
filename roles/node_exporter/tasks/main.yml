@@ -1,0 +1,21 @@
+---
+- name: Install prometheus-node-exporter
+  ansible.builtin.apt:
+    name: prometheus-node-exporter
+    state: present
+    update_cache: true
+    lock_timeout: 300
+  become: true
+
+- name: Start and enable prometheus-node-exporter
+  ansible.builtin.service:
+    name: prometheus-node-exporter
+    state: started
+    enabled: true
+  become: true
+
+- name: Wait for node exporter port
+  ansible.builtin.wait_for:
+    host: "127.0.0.1"
+    port: "{{ node_exporter_port }}"
+    timeout: 30

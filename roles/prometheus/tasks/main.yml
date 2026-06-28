@@ -1,0 +1,49 @@
+---
+- name: Install prometheus
+  ansible.builtin.apt:
+    name: prometheus
+    state: present
+    update_cache: true
+    lock_timeout: 300
+  become: true
+
+- name: Ensure prometheus config directory exists
+  ansible.builtin.file:
+    path: "{{ prometheus_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Ensure prometheus data directory exists
+  ansible.builtin.file:
+    path: "{{ prometheus_data_dir }}"
+    state: directory
+    owner: prometheus
+    group: prometheus
+    mode: "0755"
+  become: true
+
+- name: Deploy prometheus.yml
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: "{{ prometheus_config_dir }}/prometheus.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Restart prometheus
+
+- name: Start and enable prometheus
+  ansible.builtin.service:
+    name: prometheus
+    state: started
+    enabled: true
+  become: true
+
+- name: Wait for prometheus port
+  ansible.builtin.wait_for:
+    host: "127.0.0.1"
+    port: "{{ prometheus_port }}"
+    timeout: 60
