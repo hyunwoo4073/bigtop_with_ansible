@@ -1,0 +1,56 @@
+groups:
+  - name: platform-health
+    rules:
+      - alert: TargetDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus target is down"
+          description: "{{ '{{' }} $labels.job {{ '}}' }} target {{ '{{' }} $labels.instance {{ '}}' }} is down."
+
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage"
+          description: "{{ '{{' }} $labels.instance {{ '}}' }} memory usage is over 85%."
+
+      - alert: HighDiskUsage
+        expr: (1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"})) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High disk usage"
+          description: "{{ '{{' }} $labels.instance {{ '}}' }} disk usage is over 85%."
+
+      - alert: HDFSNameNodeJMXDown
+        expr: up{job="hdfs-namenode-jmx"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HDFS NameNode JMX target down"
+          description: "NameNode JMX exporter is not reachable."
+
+      - alert: YARNResourceManagerJMXDown
+        expr: up{job="yarn-resourcemanager-jmx"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "YARN ResourceManager JMX target down"
+          description: "ResourceManager JMX exporter is not reachable."
+
+      - alert: SparkHistoryServerJMXDown
+        expr: up{job="spark-history-jmx"} == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Spark History Server JMX target down"
+          description: "Spark History Server JMX exporter is not reachable."

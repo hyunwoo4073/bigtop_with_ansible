@@ -1,6 +1,15 @@
 global:
   scrape_interval: {{ prometheus_scrape_interval | default('15s') }}
 
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - "{{ alertmanager_host }}:{{ alertmanager_port }}"
+
+rule_files:
+  - "{{ prometheus_rule_dir }}/*.yml"
+
 scrape_configs:
   - job_name: "prometheus"
     static_configs:

@@ -1,0 +1,51 @@
+---
+- name: Install Alertmanager
+  ansible.builtin.apt:
+    name: prometheus-alertmanager
+    state: present
+    update_cache: true
+    lock_timeout: 300
+  become: true
+
+- name: Ensure Alertmanager data directory exists
+  ansible.builtin.file:
+    path: /var/lib/prometheus/alertmanager
+    state: directory
+    owner: prometheus
+    group: prometheus
+    mode: "0755"
+  become: true
+
+- name: Deploy alertmanager.yml
+  ansible.builtin.template:
+    src: alertmanager.yml.j2
+    dest: "{{ alertmanager_config_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Restart alertmanager
+
+- name: Configure Alertmanager default arguments
+  ansible.builtin.copy:
+    dest: /etc/default/prometheus-alertmanager
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      ARGS="--config.file={{ alertmanager_config_file }} --storage.path=/var/lib/prometheus/alertmanager --web.listen-address=0.0.0.0:{{ alertmanager_port }} --cluster.listen-address="
+  become: true
+  notify: Restart alertmanager
+
+- name: Start and enable Alertmanager
+  ansible.builtin.service:
+    name: prometheus-alertmanager
+    state: started
+    enabled: true
+  become: true
+
+- name: Wait for Alertmanager port
+  ansible.builtin.wait_for:
+    host: "127.0.0.1"
+    port: "{{ alertmanager_port }}"
+    timeout: 60
