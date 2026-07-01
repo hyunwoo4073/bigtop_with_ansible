@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: "Bigtop Platform"
+    orgId: 1
+    folder: "Bigtop Cluster"
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    options:
+      path: {{ grafana_dashboard_dir }}

@@ -46,6 +46,63 @@
     lock_timeout: 300
   become: true
 
+- name: Ensure Grafana datasource provisioning directory exists
+  ansible.builtin.file:
+    path: "{{ grafana_provisioning_datasource_dir }}"
+    state: directory
+    owner: root
+    group: grafana
+    mode: "0755"
+  become: true
+
+- name: Ensure Grafana dashboard provisioning directory exists
+  ansible.builtin.file:
+    path: "{{ grafana_provisioning_dashboard_dir }}"
+    state: directory
+    owner: root
+    group: grafana
+    mode: "0755"
+  become: true
+
+- name: Ensure Grafana dashboard directory exists
+  ansible.builtin.file:
+    path: "{{ grafana_dashboard_dir }}"
+    state: directory
+    owner: grafana
+    group: grafana
+    mode: "0755"
+  become: true
+
+- name: Provision Prometheus datasource
+  ansible.builtin.template:
+    src: datasources/prometheus.yml.j2
+    dest: "{{ grafana_provisioning_datasource_dir }}/prometheus.yml"
+    owner: root
+    group: grafana
+    mode: "0644"
+  become: true
+  notify: Restart grafana
+
+- name: Provision dashboard provider
+  ansible.builtin.template:
+    src: dashboards/platform.yml.j2
+    dest: "{{ grafana_provisioning_dashboard_dir }}/platform.yml"
+    owner: root
+    group: grafana
+    mode: "0644"
+  become: true
+  notify: Restart grafana
+
+- name: Deploy Bigtop platform overview dashboard
+  ansible.builtin.template:
+    src: dashboard_json/bigtop-platform-overview.json.j2
+    dest: "{{ grafana_dashboard_dir }}/bigtop-platform-overview.json"
+    owner: grafana
+    group: grafana
+    mode: "0644"
+  become: true
+  notify: Restart grafana
+
 - name: Start and enable Grafana
   ansible.builtin.service:
     name: grafana-server
@@ -55,6 +112,6 @@
 
 - name: Wait for Grafana port
   ansible.builtin.wait_for:
-    host: "{{ monitoring_host }}"
+    host: "127.0.0.1"
     port: "{{ grafana_port }}"
     timeout: 60
