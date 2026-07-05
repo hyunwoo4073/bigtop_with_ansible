@@ -2,7 +2,9 @@
 
 Apache Bigtop과 Ansible을 사용해 Hadoop 기반 미니 데이터 플랫폼을 자동화 방식으로 구성하는 프로젝트입니다.
 
-개인 VM 환경에서 Ambari 같은 통합 관리 도구 없이, Ansible playbook과 role 구조를 통해 서버 공통 설정, Java 설치, Bigtop repository 등록, Hadoop/HDFS/YARN/Spark 설치, 설정 파일 배포, 서비스 기동, 모니터링, 대시보드, 알림 구성을 자동화하는 것을 목표로 합니다.
+개인 VM 환경에서 Ambari 같은 통합 관리 도구 없이, Ansible playbook과 role 구조를 통해 서버 공통 설정, Java 설치, Bigtop repository 등록, Hadoop/HDFS/YARN/Spark 설치, 설정 파일 배포, 서비스 기동, 모니터링, 대시보드, 알림, 백업 자동화까지 구성하는 것을 목표로 합니다.
+
+현재는 HDFS, YARN, Spark on YARN, Prometheus/Grafana 기반 모니터링, JMX Exporter 기반 JVM 메트릭 수집, Alertmanager 기반 알림, Grafana datasource/dashboard provisioning, NameNode metadata 보호 및 백업 자동화, HDFS 상태 기반 alert 구성을 완료한 상태입니다.
 
 ## 구성
 
@@ -15,9 +17,26 @@ worker2  - HDFS DataNode / YARN NodeManager
 worker3  - Ansible Control Node / Ops Node / Prometheus / Grafana / Alertmanager
 ```
 
-현재는 HDFS, YARN, Spark on YARN, Prometheus/Grafana 기반 모니터링, JMX Exporter 기반 JVM 메트릭 수집, Alertmanager 기반 알림, Grafana datasource/dashboard provisioning 구성을 완료한 상태입니다.
+HA 구성은 적용하지 않았습니다.
 
-HA 구성은 적용하지 않았으며, 개인 VM 환경에서 Non-HA 구조로 먼저 구성했습니다.
+개인 VM 리소스 제약으로 NameNode Active-Standby HA, JournalNode, ZKFC 구성은 제외하고, 단일 NameNode 환경에서 metadata 보호와 복구성을 높이는 방향으로 구성했습니다.
+
+```text
+NameNode HA = 장애 시 서비스 연속성 확보
+NameNode metadata backup = 장애 후 복구 지점 확보
+```
+
+본 프로젝트에서는 NameNode HA를 대체하지는 않지만, 단일 NameNode 구조의 위험을 줄이기 위해 다음 개선을 적용했습니다.
+
+```text
+1. dfs.namenode.name.dir 복수 디렉터리 구성
+2. dfs.namenode.edits.dir 복수 디렉터리 구성
+3. fetchImage 기반 NameNode metadata online backup
+4. systemd timer 기반 정기 백업
+5. worker3 Ops Node로 백업 archive 원격 보관
+6. Node Exporter textfile collector 기반 백업 성공/실패 metric 수집
+7. Prometheus alert rule 기반 백업 실패/지연 감지
+```
 
 ## 주요 구성 요소
 
@@ -27,12 +46,13 @@ Apache Bigtop  - Hadoop/Spark 패키지 repository
 Hadoop HDFS    - 분산 파일 시스템
 YARN           - 리소스 관리 및 작업 실행
 Spark on YARN  - Spark 작업 실행 환경
-systemd        - Hadoop/YARN/Spark 서비스 관리
+systemd        - Hadoop/YARN/Spark/backup timer 서비스 관리
 Prometheus     - 메트릭 수집 및 alert rule 평가
 Grafana        - 메트릭 시각화 및 dashboard provisioning
 Alertmanager   - Prometheus alert 수신 및 알림 관리
-Node Exporter  - OS 메트릭 수집
+Node Exporter  - OS 메트릭 및 textfile collector 메트릭 수집
 JMX Exporter   - Hadoop/YARN/Spark JVM 메트릭 수집
+rsync/ssh      - NameNode metadata backup 원격 동기화
 ```
 
 ## 디렉터리 구조
@@ -63,7 +83,9 @@ bigtop-cluster-ansible/
 │   ├── 14-prometheus.yml
 │   ├── 15-grafana.yml
 │   ├── 16-jmx-exporter.yml
-│   └── 17-alertmanager.yml
+│   ├── 17-alertmanager.yml
+│   ├── 18-namenode-backup.yml
+│   └── 19-namenode-remote-backup.yml
 └── roles/
     ├── common/
     ├── java/
@@ -79,7 +101,8 @@ bigtop-cluster-ansible/
     ├── prometheus/
     ├── grafana/
     ├── jmx_exporter/
-    └── alertmanager/
+    ├── alertmanager/
+    └── namenode_backup/
 ```
 
 ## 사전 준비
@@ -163,6 +186,51 @@ ansible-inventory --graph
   |  |  |--worker2
 ```
 
+## 주요 변수 예시
+
+`inventory/group_vars/all.yml.example`에는 다음 항목을 포함합니다.
+
+```yaml
+# HDFS
+hdfs_namenode_host: "master"
+hdfs_replication: 2
+
+hdfs_namenode_name_dirs:
+  - "/data/hadoop/hdfs/namenode"
+  - "/data2/hadoop/hdfs/namenode"
+
+hdfs_namenode_edits_dirs:
+  - "/data/hadoop/hdfs/namenode"
+  - "/data2/hadoop/hdfs/namenode"
+
+hdfs_datanode_dir: "/data/hadoop/hdfs/datanode"
+
+# NameNode metadata backup
+hdfs_namenode_backup_dir: "/backup/hdfs/namenode"
+hdfs_namenode_backup_script: "/usr/local/sbin/backup-namenode-metadata.sh"
+hdfs_namenode_backup_retention_days: 7
+hdfs_namenode_backup_on_calendar: "*-*-* 03:30:00"
+
+# NameNode remote backup
+hdfs_namenode_remote_backup_enabled: true
+hdfs_namenode_remote_backup_host: "worker3"
+hdfs_namenode_remote_backup_user: "hdfsbackup"
+hdfs_namenode_remote_backup_dir: "/backup/remote/hdfs/namenode/master"
+hdfs_namenode_remote_backup_ssh_key: "/root/.ssh/namenode_backup_ed25519"
+
+# Node Exporter textfile collector
+node_exporter_textfile_dir: "/var/lib/prometheus/node-exporter"
+
+# NameNode backup metrics
+hdfs_namenode_backup_metric_file: "{{ node_exporter_textfile_dir }}/namenode_backup.prom"
+hdfs_namenode_backup_max_age_seconds: 93600
+
+# HDFS alert thresholds
+hdfs_expected_live_datanodes: 2
+hdfs_capacity_warning_percent: 80
+hdfs_capacity_critical_percent: 90
+```
+
 ## 실행 순서
 
 전체 구성은 다음 순서로 실행합니다.
@@ -185,6 +253,8 @@ ansible-playbook playbooks/14-prometheus.yml
 ansible-playbook playbooks/15-grafana.yml
 ansible-playbook playbooks/16-jmx-exporter.yml
 ansible-playbook playbooks/17-alertmanager.yml
+ansible-playbook playbooks/18-namenode-backup.yml
+ansible-playbook playbooks/19-namenode-remote-backup.yml
 ```
 
 서비스 중지는 다음 playbook으로 수행합니다.
@@ -202,7 +272,12 @@ NameNode: master
 DataNode: worker1, worker2
 fs.defaultFS: hdfs://master:9000
 dfs.replication: 2
-NameNode dir: /data/hadoop/hdfs/namenode
+NameNode name dirs:
+  - /data/hadoop/hdfs/namenode
+  - /data2/hadoop/hdfs/namenode
+NameNode edits dirs:
+  - /data/hadoop/hdfs/namenode
+  - /data2/hadoop/hdfs/namenode
 DataNode dir: /data/hadoop/hdfs/datanode
 ```
 
@@ -220,6 +295,20 @@ NameNode RPC/Web UI 포트 확인:
 
 ```bash
 ansible master -m shell -a "ss -lntp | grep -E '9000|9870' || true"
+```
+
+NameNode metadata directory 확인:
+
+```bash
+ansible master -b -m shell -a "ls -lh /data/hadoop/hdfs/namenode/current/fsimage_* | tail"
+ansible master -b -m shell -a "ls -lh /data2/hadoop/hdfs/namenode/current/fsimage_* | tail"
+```
+
+복수 metadata directory가 정상 적용되면 NameNode 로그에서 다음 warning이 더 이상 발생하지 않습니다.
+
+```text
+Only one image storage directory configured.
+Only one namespace edits storage directory configured.
 ```
 
 ## YARN 설정 기준
@@ -276,6 +365,13 @@ Node Exporter: all nodes:9100
 
 Prometheus, Grafana, Alertmanager는 `worker3`에서 실행합니다.
 Node Exporter는 전체 노드에 설치하여 CPU, Memory, Disk, Network 등 OS 메트릭을 수집합니다.
+
+Node Exporter는 textfile collector를 활성화하여 NameNode metadata backup 결과도 metric으로 수집합니다.
+
+```text
+Textfile collector dir: /var/lib/prometheus/node-exporter
+NameNode backup metric file: /var/lib/prometheus/node-exporter/namenode_backup.prom
+```
 
 상태 확인:
 
@@ -385,6 +481,113 @@ Prometheus에서 JMX target 상태 확인:
 ansible ops -m shell -a "curl -s 'http://127.0.0.1:9090/api/v1/query?query=up%7Bjob%3D~%22.*jmx%22%7D'"
 ```
 
+NameNode FSNamesystem metric 확인:
+
+```bash
+ansible master -m shell -a "curl -s http://127.0.0.1:19101/metrics | grep -Ei 'numlive|numdead|missing|lowredundancy|capacity' | head -100"
+```
+
+현재 JMX Exporter rule 특성상 일부 metric은 다음처럼 metric name 뒤에 값 suffix가 붙는 형태로 생성됩니다.
+
+```text
+hadoop_namenode_fsnamesystem_numlivedatanodes__2 2.0
+hadoop_namenode_fsnamesystem_numdeaddatanodes__0 0.0
+hadoop_namenode_fsnamesystem_capacityused__335872 335872.0
+hadoop_namenode_fsnamesystem_capacitytotal__100807254016 1.00807254016E11
+```
+
+따라서 HDFS 상태 alert rule은 `__name__=~"...__.*"` 형태의 정규식 query로 구성합니다.
+
+## NameNode metadata backup
+
+NameNode FSImage 손상 복구 경험을 바탕으로 metadata 보호 체계를 구성했습니다.
+
+백업 구성은 다음과 같습니다.
+
+```text
+Backup method: hdfs dfsadmin -fetchImage
+Local backup dir: /backup/hdfs/namenode
+Backup script: /usr/local/sbin/backup-namenode-metadata.sh
+Timer: namenode-metadata-backup.timer
+Retention: 7 days
+Remote backup target: worker3:/backup/remote/hdfs/namenode/master
+```
+
+백업은 실행 중인 NameNode에서 `fetchImage`를 통해 최신 fsimage를 가져오고, VERSION 파일과 주요 Hadoop 설정 파일을 함께 archive로 묶습니다.
+
+백업 archive에는 다음 항목이 포함됩니다.
+
+```text
+fsimage_*
+VERSION
+MANIFEST.txt
+conf/core-site.xml
+conf/hdfs-site.xml
+conf/hadoop-env.sh
+```
+
+백업 timer 확인:
+
+```bash
+ansible master -b -m command -a "systemctl status namenode-metadata-backup.timer --no-pager -l"
+ansible master -b -m shell -a "systemctl list-timers --all | grep namenode || true"
+```
+
+수동 백업 실행:
+
+```bash
+ansible master -b -m shell -a "/usr/local/sbin/backup-namenode-metadata.sh"
+```
+
+systemd service로 실행:
+
+```bash
+ansible master -b -m command -a "systemctl start namenode-metadata-backup.service"
+```
+
+백업 로그 확인:
+
+```bash
+ansible master -b -m shell -a "journalctl -u namenode-metadata-backup.service -n 100 --no-pager"
+```
+
+local backup 확인:
+
+```bash
+ansible master -b -m shell -a "ls -lh /backup/hdfs/namenode"
+```
+
+remote backup 확인:
+
+```bash
+ansible ops -b -m shell -a "ls -lh /backup/remote/hdfs/namenode/master"
+```
+
+checksum 검증:
+
+```bash
+ansible ops -b -m shell -a "cd /backup/remote/hdfs/namenode/master && sha256sum -c *.sha256"
+```
+
+압축 내용 확인:
+
+```bash
+ansible ops -b -m shell -a "tar tzf \$(ls -1t /backup/remote/hdfs/namenode/master/namenode-metadata-*.tgz | head -1) | head -30"
+```
+
+백업 결과 metric 확인:
+
+```bash
+ansible master -b -m shell -a "cat /var/lib/prometheus/node-exporter/namenode_backup.prom"
+ansible master -m shell -a "curl -s http://127.0.0.1:9100/metrics | grep hdfs_namenode_backup || true"
+```
+
+Prometheus query:
+
+```bash
+ansible ops -m shell -a "curl -s 'http://127.0.0.1:9090/api/v1/query?query=hdfs_namenode_backup_success'"
+```
+
 ## Alertmanager 설정 기준
 
 Alertmanager는 Prometheus에서 발생한 alert를 수신하고 관리하는 역할을 합니다.
@@ -425,7 +628,7 @@ ARGS="--config.file=/etc/prometheus/alertmanager.yml --storage.path=/var/lib/pro
 
 ## Alert Rule 기준
 
-현재 기본 alert rule은 다음 항목을 포함합니다.
+현재 alert rule은 다음 항목을 포함합니다.
 
 ```text
 TargetDown
@@ -434,9 +637,39 @@ HighDiskUsage
 HDFSNameNodeJMXDown
 YARNResourceManagerJMXDown
 SparkHistoryServerJMXDown
+NameNodeMetadataBackupMetricsMissing
+NameNodeMetadataBackupFailed
+NameNodeMetadataBackupStale
+HDFSNameNodeMetricsMissing
+HDFSLiveDataNodeLow
+HDFSDeadDataNodeDetected
+HDFSMissingBlocks
+HDFSMissingReplicatedBlocks
+HDFSLowRedundancyBlocks
+HDFSLowRedundancyReplicatedBlocks
+HDFSCorruptBlocks
+HDFSCorruptReplicatedBlocks
+HDFSPendingReconstructionBlocks
+HDFSExpiredHeartbeats
+HDFSCapacityUsageHigh
+HDFSCapacityUsageCritical
 ```
 
-Alert 테스트는 Node Exporter를 잠시 중지해서 확인할 수 있습니다.
+Alert rule 확인:
+
+```bash
+ansible ops -m shell -a "curl -s http://127.0.0.1:9090/api/v1/rules | grep -E 'TargetDown|HDFSLiveDataNodeLow|NameNodeMetadataBackup' || true"
+```
+
+Alert 확인:
+
+```bash
+ansible ops -m shell -a "curl -s http://127.0.0.1:9090/api/v1/alerts"
+```
+
+### TargetDown 테스트
+
+Node Exporter를 잠시 중지해서 확인할 수 있습니다.
 
 ```bash
 ansible worker1 -b -m service -a "name=prometheus-node-exporter state=stopped"
@@ -455,7 +688,47 @@ http://worker3:9093
 ansible worker1 -b -m service -a "name=prometheus-node-exporter state=started"
 ```
 
-Grafana dashboard에서도 `Targets Down`, `Active Alerts`, `Target Availability` 패널 변화를 확인할 수 있습니다.
+### HDFS DataNode 장애 테스트
+
+DataNode를 잠시 중지해서 HDFS 상태 기반 alert를 확인할 수 있습니다.
+
+```bash
+ansible worker1 -b -m service -a "name=hadoop-hdfs-datanode state=stopped"
+```
+
+Prometheus query:
+
+```bash
+ansible ops -m shell -a "curl -sG 'http://127.0.0.1:9090/api/v1/query' --data-urlencode 'query=max({job=\"hdfs-namenode-jmx\",__name__=~\"hadoop_namenode_fsnamesystem_numlivedatanodes__.*\"})'"
+ansible ops -m shell -a "curl -sG 'http://127.0.0.1:9090/api/v1/query' --data-urlencode 'query=max({job=\"hdfs-namenode-jmx\",__name__=~\"hadoop_namenode_fsnamesystem_numdeaddatanodes__.*\"})'"
+```
+
+기대 alert:
+
+```text
+HDFSLiveDataNodeLow
+HDFSDeadDataNodeDetected
+TargetDown - worker1 hdfs-datanode-jmx
+```
+
+복구:
+
+```bash
+ansible worker1 -b -m service -a "name=hadoop-hdfs-datanode state=started"
+```
+
+HDFS report 확인:
+
+```bash
+ansible master -b -m shell -a "sudo -u hdfs hdfs dfsadmin -report | grep -E 'Live datanodes|Dead datanodes'"
+```
+
+정상 상태:
+
+```text
+Live datanodes (2)
+Dead datanodes (0)
+```
 
 ## 주요 트러블슈팅
 
@@ -530,21 +803,6 @@ Found both group and host with same name: master
 
 장기적으로 warning을 제거하려면 group 이름을 `hadoop_master`, `hadoop_workers`처럼 바꾸고 playbook의 `hosts` 값도 함께 수정합니다.
 
-예시:
-
-```ini
-[hadoop_master]
-master ansible_host=192.168.56.101
-
-[hadoop_workers]
-worker1 ansible_host=192.168.56.102
-worker2 ansible_host=192.168.56.103
-
-[hadoop_cluster:children]
-hadoop_master
-hadoop_workers
-```
-
 ### hostname 불일치 문제
 
 Hadoop 설정에는 임시 inventory alias가 아니라 실제 클러스터 hostname을 사용합니다.
@@ -556,16 +814,17 @@ worker2
 worker3
 ```
 
-각 노드 내부에서 자기 자신의 포트를 확인할 때는 `inventory_hostname` 대신 `127.0.0.1`을 사용하는 것이 안전합니다.
+각 노드 내부에서 자기 자신의 포트를 확인할 때는 `127.0.0.1`을 사용할 수 있습니다.
+다만 Hadoop NameNode RPC처럼 특정 hostname에 bind되는 서비스는 `127.0.0.1`이 아니라 `hdfs_namenode_host` 또는 실제 hostname으로 확인해야 합니다.
 
 예시:
 
 ```yaml
-- name: Wait for service port
+- name: Wait for NameNode RPC port
   ansible.builtin.wait_for:
-    host: "127.0.0.1"
-    port: "{{ service_port }}"
-    timeout: 60
+    host: "{{ hdfs_namenode_host }}"
+    port: 9000
+    timeout: 120
 ```
 
 ### Prometheus YAML 오류
@@ -624,17 +883,37 @@ duplicate metric name: jvm_threads_current
 
 이 경우 `java.lang` 기반 JVM metric rule을 제거하고 Hadoop/Spark 관련 rule만 별도로 관리합니다.
 
+### JMX Exporter metric suffix 문제
+
+현재 JMX Exporter rule은 일부 Hadoop JMX attribute 값을 metric name suffix로 포함합니다.
+
 예시:
 
-```yaml
----
-lowercaseOutputName: true
-lowercaseOutputLabelNames: true
+```text
+hadoop_namenode_fsnamesystem_numlivedatanodes__2 2.0
+hadoop_namenode_fsnamesystem_numdeaddatanodes__0 0.0
+hadoop_namenode_fsnamesystem_capacityused__335872 335872.0
+```
 
-rules:
-  - pattern: "Hadoop<service=(.*), name=(.*)><>(.*)"
-    name: "hadoop_$1_$2_$3"
-    type: GAUGE
+이 구조에서는 다음과 같은 고정 metric 이름 query가 동작하지 않습니다.
+
+```promql
+hadoop_namenode_fsnamesystem_numlivedatanodes
+```
+
+대신 정규식 기반 query를 사용합니다.
+
+```promql
+max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_numlivedatanodes__.*"})
+```
+
+장기적으로는 JMX Exporter rule을 정리해서 다음처럼 안정적인 metric 이름을 만들 예정입니다.
+
+```text
+hadoop_namenode_fsnamesystem_numlivedatanodes 2
+hadoop_namenode_fsnamesystem_numdeaddatanodes 0
+hadoop_namenode_fsnamesystem_capacityused 335872
+hadoop_namenode_fsnamesystem_capacitytotal 100807254016
 ```
 
 ### JMX target down alert
@@ -793,7 +1072,7 @@ Only one namespace edits storage directory configured.
 ```
 
 이는 `dfs.namenode.name.dir`, `dfs.namenode.edits.dir`이 단일 경로만 사용 중이라는 의미입니다.
-실습 환경에서는 단일 디렉터리로도 구성할 수 있지만, 운영 환경에서는 NameNode metadata 손상에 대비해 복수 디렉터리를 사용하는 것이 안전합니다.
+운영 환경에서는 NameNode metadata 손상에 대비해 복수 디렉터리를 사용하는 것이 안전합니다.
 
 예시:
 
@@ -807,6 +1086,58 @@ Only one namespace edits storage directory configured.
   <name>dfs.namenode.edits.dir</name>
   <value>file:///data/hadoop/hdfs/namenode,file:///data2/hadoop/hdfs/namenode</value>
 </property>
+```
+
+기존 단일 metadata directory에서 복수 directory로 전환할 때는 기존 `current` 디렉터리를 새 metadata 경로로 복사해야 합니다.
+
+```bash
+ansible master -b -m service -a "name=hadoop-hdfs-namenode state=stopped"
+ansible master -b -m shell -a "mkdir -p /data2/hadoop/hdfs/namenode"
+ansible master -b -m shell -a "rsync -aH /data/hadoop/hdfs/namenode/current /data2/hadoop/hdfs/namenode/"
+ansible master -b -m shell -a "chown -R hdfs:hadoop /data2/hadoop/hdfs/namenode"
+```
+
+그 후 HDFS 설정을 배포하고 NameNode를 시작합니다.
+
+```bash
+ansible-playbook playbooks/05-hdfs-config.yml
+ansible-playbook playbooks/06-hdfs-start.yml
+```
+
+### NameNode backup metric missing
+
+다음 alert가 발생할 수 있습니다.
+
+```text
+NameNodeMetadataBackupMetricsMissing
+```
+
+이는 `/var/lib/prometheus/node-exporter/namenode_backup.prom` 파일이 없거나 Node Exporter textfile collector가 해당 파일을 수집하지 못하는 상태입니다.
+
+확인:
+
+```bash
+ansible master -b -m shell -a "ls -lh /var/lib/prometheus/node-exporter"
+ansible master -b -m shell -a "cat /var/lib/prometheus/node-exporter/namenode_backup.prom 2>/dev/null || true"
+ansible master -m shell -a "curl -s http://127.0.0.1:9100/metrics | grep hdfs_namenode_backup || true"
+```
+
+백업 스크립트를 한 번 실행해 metric 파일을 생성합니다.
+
+```bash
+ansible master -b -m shell -a "/usr/local/sbin/backup-namenode-metadata.sh"
+```
+
+Node Exporter textfile collector 에러 확인:
+
+```bash
+ansible master -m shell -a "curl -s http://127.0.0.1:9100/metrics | grep node_textfile || true"
+```
+
+정상 상태에서는 다음 값이 0이어야 합니다.
+
+```text
+node_textfile_scrape_error 0
 ```
 
 ## Git에 포함하지 않는 파일
@@ -862,18 +1193,37 @@ inventory/group_vars/all.yml.example
 22. inventory alias를 실제 hostname 기준으로 정리
 23. NameNode FSImage 손상 상황 복구 확인
 24. Prometheus/Grafana/Alertmanager 기반 장애 감지 흐름 확인
+25. NameNode metadata 이중 디렉터리 구성
+26. dfs.namenode.name.dir / dfs.namenode.edits.dir 복수 경로 적용
+27. saveNamespace 기반 fsimage 복수 경로 저장 확인
+28. NameNode metadata online backup 스크립트 구성
+29. systemd timer 기반 NameNode metadata 정기 백업 자동화
+30. master local backup archive 생성 및 checksum 검증
+31. worker3 Ops Node로 NameNode metadata backup 원격 보관 구성
+32. master → worker3 rsync 기반 backup sync 자동화
+33. remote backup checksum 검증 절차 구성
+34. Node Exporter textfile collector 활성화
+35. NameNode metadata backup 결과 metric 수집
+36. 백업 실패/지연 alert rule 구성
+37. HDFS 상태 기반 alert rule 구성
+38. Live/Dead DataNode 수 감시
+39. Missing Block / Low Redundancy Block 감시
+40. HDFS Capacity Usage warning/critical alert 구성
+41. DataNode 장애 상황 기반 alert 동작 검증
 ```
 
 ## 향후 계획
 
 ```text
-1. Grafana dashboard 패널 고도화
-2. Hadoop/YARN/Spark 주요 metric 패널 추가
-3. Alertmanager Slack 또는 Email receiver 연동
-4. HDFS/YARN 장애 상황별 alert rule 고도화
-5. 서비스별 runbook 문서화
-6. NameNode metadata 이중 디렉터리 구성 검토
-7. HA 구성 설계 문서화
-8. Ansible role 리팩토링
-9. README 및 운영 문서 보강
+1. JMX Exporter rule 정리로 metric suffix 제거
+2. Grafana dashboard에 HDFS 상태 패널 추가
+3. Grafana dashboard에 NameNode backup 상태 패널 추가
+4. Alertmanager Slack 또는 Email receiver 연동
+5. HDFS/YARN/Spark 주요 metric 기반 alert rule 고도화
+6. 서비스별 runbook 문서화
+7. NameNode metadata 복구 runbook 별도 문서화
+8. HA 구성 설계 문서화
+9. Ansible role 리팩토링
+10. group/host 이름 중복 warning 제거
+11. README 및 운영 문서 보강
 ```

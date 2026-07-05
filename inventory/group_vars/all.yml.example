@@ -135,3 +135,22 @@ hdfs_namenode_backup_dir: "/backup/hdfs/namenode"
 hdfs_namenode_backup_script: "/usr/local/sbin/backup-namenode-metadata.sh"
 hdfs_namenode_backup_retention_days: 7
 hdfs_namenode_backup_on_calendar: "*-*-* 03:30:00"
+
+# NameNode remote backup
+hdfs_namenode_remote_backup_enabled: true
+hdfs_namenode_remote_backup_host: "worker3"
+hdfs_namenode_remote_backup_user: "hdfsbackup"
+hdfs_namenode_remote_backup_dir: "/backup/remote/hdfs/namenode/master"
+hdfs_namenode_remote_backup_ssh_key: "/root/.ssh/namenode_backup_ed25519"
+
+# Node Exporter textfile collector
+node_exporter_textfile_dir: "/var/lib/prometheus/node-exporter"
+
+# NameNode backup metrics
+hdfs_namenode_backup_metric_file: "{{ node_exporter_textfile_dir }}/namenode_backup.prom"
+hdfs_namenode_backup_max_age_seconds: 93600
+
+# HDFS alert thresholds
+hdfs_expected_live_datanodes: 2
+hdfs_capacity_warning_percent: 80
+hdfs_capacity_critical_percent: 90

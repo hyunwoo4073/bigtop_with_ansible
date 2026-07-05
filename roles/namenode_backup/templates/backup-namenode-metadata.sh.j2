@@ -1,21 +1,99 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+METRIC_FILE="{{ hdfs_namenode_backup_metric_file }}"
+START_TS="$(date +%s)"
+PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+umask 027
+
 BACKUP_DIR="{{ hdfs_namenode_backup_dir }}"
 RETENTION_DAYS="{{ hdfs_namenode_backup_retention_days }}"
 PRIMARY_NN_DIR="{{ hdfs_namenode_name_dirs[0] }}"
 TS="$(date +%Y%m%d_%H%M%S)"
 
-mkdir -p "${BACKUP_DIR}"
+OUT_NAME="namenode-metadata-${TS}.tgz"
+SHA_NAME="${OUT_NAME}.sha256"
 
-WORK_DIR="$(mktemp -d "${BACKUP_DIR}/.work-${TS}-XXXXXX")"
-TMP_FILE="${BACKUP_DIR}/namenode-metadata-${TS}.tgz.tmp"
-OUT_FILE="${BACKUP_DIR}/namenode-metadata-${TS}.tgz"
+TMP_FILE="${BACKUP_DIR}/${OUT_NAME}.tmp"
+OUT_FILE="${BACKUP_DIR}/${OUT_NAME}"
+SHA_FILE="${BACKUP_DIR}/${SHA_NAME}"
+
+WORK_DIR="$(mktemp -d "/tmp/namenode-metadata-${TS}-XXXXXX")"
 
 cleanup() {
   rm -rf "${WORK_DIR}"
 }
-trap cleanup EXIT
+
+write_metrics() {
+  local exit_code="$1"
+  local now
+  local duration
+  local success
+  local last_success_ts
+  local metric_dir
+  local tmp_metric
+
+  now="$(date +%s)"
+  duration="$((now - START_TS))"
+  metric_dir="$(dirname "${METRIC_FILE}")"
+  tmp_metric="${METRIC_FILE}.$$"
+
+  mkdir -p "${metric_dir}"
+
+  last_success_ts="$(awk '/^hdfs_namenode_backup_last_success_timestamp_seconds/ {print $2}' "${METRIC_FILE}" 2>/dev/null | tail -1 || true)"
+
+  if [ "${exit_code}" -eq 0 ]; then
+    success="1"
+    last_success_ts="${now}"
+  else
+    success="0"
+    if [ -z "${last_success_ts}" ]; then
+      last_success_ts="0"
+    fi
+  fi
+
+  cat > "${tmp_metric}" <<EOF
+# HELP hdfs_namenode_backup_last_run_timestamp_seconds Last NameNode metadata backup run timestamp.
+# TYPE hdfs_namenode_backup_last_run_timestamp_seconds gauge
+hdfs_namenode_backup_last_run_timestamp_seconds ${now}
+# HELP hdfs_namenode_backup_last_success_timestamp_seconds Last successful NameNode metadata backup timestamp.
+# TYPE hdfs_namenode_backup_last_success_timestamp_seconds gauge
+hdfs_namenode_backup_last_success_timestamp_seconds ${last_success_ts}
+# HELP hdfs_namenode_backup_success Last NameNode metadata backup result. 1 means success, 0 means failure.
+# TYPE hdfs_namenode_backup_success gauge
+hdfs_namenode_backup_success ${success}
+# HELP hdfs_namenode_backup_exit_code Last NameNode metadata backup exit code.
+# TYPE hdfs_namenode_backup_exit_code gauge
+hdfs_namenode_backup_exit_code ${exit_code}
+# HELP hdfs_namenode_backup_duration_seconds Last NameNode metadata backup duration in seconds.
+# TYPE hdfs_namenode_backup_duration_seconds gauge
+hdfs_namenode_backup_duration_seconds ${duration}
+EOF
+
+  mv "${tmp_metric}" "${METRIC_FILE}"
+}
+
+on_exit() {
+  local rc="$?"
+  write_metrics "${rc}" || true
+  cleanup || true
+  exit "${rc}"
+}
+
+trap on_exit EXIT
+
+echo "[INFO] NameNode metadata backup started."
+echo "[INFO] Timestamp: ${TS}"
+echo "[INFO] Backup directory: ${BACKUP_DIR}"
+echo "[INFO] Primary NameNode metadata directory: ${PRIMARY_NN_DIR}"
+
+mkdir -p "${BACKUP_DIR}"
+
+HDFS_BIN="$(command -v hdfs || true)"
+if [ -z "${HDFS_BIN}" ]; then
+  echo "[ERROR] hdfs command not found." >&2
+  exit 1
+fi
 
 if [ ! -f "${PRIMARY_NN_DIR}/current/VERSION" ]; then
   echo "[ERROR] NameNode VERSION file not found: ${PRIMARY_NN_DIR}/current/VERSION" >&2
@@ -32,7 +110,7 @@ chown hdfs:hadoop "${WORK_DIR}"
 chmod 0750 "${WORK_DIR}"
 
 echo "[INFO] Fetching latest NameNode fsimage..."
-sudo -u hdfs /usr/bin/hdfs dfsadmin -fetchImage "${WORK_DIR}"
+sudo -u hdfs "${HDFS_BIN}" dfsadmin -fetchImage "${WORK_DIR}"
 
 echo "[INFO] Copying NameNode VERSION metadata..."
 cp "${PRIMARY_NN_DIR}/current/VERSION" "${WORK_DIR}/VERSION"
@@ -49,6 +127,7 @@ backup_timestamp=${TS}
 hostname=$(hostname)
 primary_namenode_dir=${PRIMARY_NN_DIR}
 backup_type=online_fetchImage
+backup_file=${OUT_NAME}
 EOF
 
 echo "[INFO] Normalizing ownership before archive..."
@@ -58,13 +137,61 @@ echo "[INFO] Creating backup archive..."
 tar --xattrs --acls -czf "${TMP_FILE}" -C "${WORK_DIR}" .
 
 mv "${TMP_FILE}" "${OUT_FILE}"
-sha256sum "${OUT_FILE}" > "${OUT_FILE}.sha256"
+
+echo "[INFO] Creating checksum..."
+(
+  cd "${BACKUP_DIR}"
+  sha256sum "${OUT_NAME}" > "${SHA_NAME}"
+)
 
 echo "[INFO] Backup created:"
-ls -lh "${OUT_FILE}" "${OUT_FILE}.sha256"
+ls -lh "${OUT_FILE}" "${SHA_FILE}"
 
-echo "[INFO] Removing backups older than ${RETENTION_DAYS} days..."
+{% if hdfs_namenode_remote_backup_enabled | default(false) %}
+REMOTE_BACKUP_HOST="{{ hdfs_namenode_remote_backup_host }}"
+REMOTE_BACKUP_USER="{{ hdfs_namenode_remote_backup_user }}"
+REMOTE_BACKUP_DIR="{{ hdfs_namenode_remote_backup_dir }}"
+REMOTE_BACKUP_SSH_KEY="{{ hdfs_namenode_remote_backup_ssh_key }}"
+
+echo "[INFO] Remote backup is enabled."
+echo "[INFO] Remote target: ${REMOTE_BACKUP_USER}@${REMOTE_BACKUP_HOST}:${REMOTE_BACKUP_DIR}"
+
+if ! command -v rsync >/dev/null 2>&1; then
+  echo "[ERROR] rsync command not found." >&2
+  exit 1
+fi
+
+if ! command -v ssh >/dev/null 2>&1; then
+  echo "[ERROR] ssh command not found." >&2
+  exit 1
+fi
+
+if [ ! -f "${REMOTE_BACKUP_SSH_KEY}" ]; then
+  echo "[ERROR] Remote backup SSH key not found: ${REMOTE_BACKUP_SSH_KEY}" >&2
+  exit 1
+fi
+
+echo "[INFO] Syncing backup archive to remote ops node..."
+rsync -av \
+  -e "ssh -i ${REMOTE_BACKUP_SSH_KEY} -o BatchMode=yes -o StrictHostKeyChecking=yes" \
+  "${OUT_FILE}" "${SHA_FILE}" \
+  "${REMOTE_BACKUP_USER}@${REMOTE_BACKUP_HOST}:${REMOTE_BACKUP_DIR}/"
+
+echo "[INFO] Removing remote backups older than ${RETENTION_DAYS} days..."
+ssh -i "${REMOTE_BACKUP_SSH_KEY}" \
+  -o BatchMode=yes \
+  -o StrictHostKeyChecking=yes \
+  "${REMOTE_BACKUP_USER}@${REMOTE_BACKUP_HOST}" \
+  "find '${REMOTE_BACKUP_DIR}' -type f -name 'namenode-metadata-*.tgz' -mtime +${RETENTION_DAYS} -delete && find '${REMOTE_BACKUP_DIR}' -type f -name 'namenode-metadata-*.tgz.sha256' -mtime +${RETENTION_DAYS} -delete"
+
+echo "[INFO] Remote backup sync completed."
+{% else %}
+echo "[INFO] Remote backup is disabled."
+{% endif %}
+
+echo "[INFO] Removing local backups older than ${RETENTION_DAYS} days..."
 find "${BACKUP_DIR}" -type f -name 'namenode-metadata-*.tgz' -mtime +"${RETENTION_DAYS}" -delete
 find "${BACKUP_DIR}" -type f -name 'namenode-metadata-*.tgz.sha256' -mtime +"${RETENTION_DAYS}" -delete
+find "${BACKUP_DIR}" -type f -name 'namenode-metadata-*.tgz.tmp' -delete
 
 echo "[INFO] NameNode metadata backup completed."

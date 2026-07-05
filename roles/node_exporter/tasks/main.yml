@@ -19,3 +19,23 @@
     host: "127.0.0.1"
     port: "{{ node_exporter_port }}"
     timeout: 30
+
+- name: Ensure Node Exporter textfile collector directory exists
+  ansible.builtin.file:
+    path: "{{ node_exporter_textfile_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Configure Node Exporter textfile collector
+  ansible.builtin.copy:
+    dest: /etc/default/prometheus-node-exporter
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      ARGS="--collector.textfile.directory={{ node_exporter_textfile_dir }}"
+  become: true
+  notify: Restart node exporter

@@ -1,0 +1,125 @@
+---
+- name: Prepare NameNode backup SSH key on master
+  hosts: master
+  become: true
+  tasks:
+    - name: Install rsync and openssh client
+      ansible.builtin.apt:
+        name:
+          - rsync
+          - openssh-client
+        state: present
+        update_cache: true
+        lock_timeout: 300
+
+    - name: Ensure root ssh directory exists
+      ansible.builtin.file:
+        path: /root/.ssh
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Generate NameNode backup SSH key
+      ansible.builtin.command:
+        cmd: "ssh-keygen -t ed25519 -f {{ hdfs_namenode_remote_backup_ssh_key }} -N '' -C namenode-backup@master"
+        creates: "{{ hdfs_namenode_remote_backup_ssh_key }}"
+
+    - name: Read NameNode backup public key
+      ansible.builtin.slurp:
+        src: "{{ hdfs_namenode_remote_backup_ssh_key }}.pub"
+      register: namenode_backup_pubkey_raw
+
+    - name: Store NameNode backup public key
+      ansible.builtin.set_fact:
+        namenode_backup_pubkey: "{{ namenode_backup_pubkey_raw.content | b64decode | trim }}"
+
+
+- name: Prepare remote backup storage on ops node
+  hosts: ops
+  become: true
+  tasks:
+    - name: Install rsync and openssh server
+      ansible.builtin.apt:
+        name:
+          - rsync
+          - openssh-server
+        state: present
+        update_cache: true
+        lock_timeout: 300
+
+    - name: Ensure remote backup user exists
+      ansible.builtin.user:
+        name: "{{ hdfs_namenode_remote_backup_user }}"
+        shell: /bin/bash
+        create_home: true
+
+    - name: Ensure remote backup ssh directory exists
+      ansible.builtin.file:
+        path: "/home/{{ hdfs_namenode_remote_backup_user }}/.ssh"
+        state: directory
+        owner: "{{ hdfs_namenode_remote_backup_user }}"
+        group: "{{ hdfs_namenode_remote_backup_user }}"
+        mode: "0700"
+
+    - name: Authorize master backup public key
+      ansible.builtin.lineinfile:
+        path: "/home/{{ hdfs_namenode_remote_backup_user }}/.ssh/authorized_keys"
+        line: "{{ hostvars[groups['master'][0]].namenode_backup_pubkey }}"
+        create: true
+        owner: "{{ hdfs_namenode_remote_backup_user }}"
+        group: "{{ hdfs_namenode_remote_backup_user }}"
+        mode: "0600"
+
+    - name: Ensure remote backup base directory exists
+      ansible.builtin.file:
+        path: /backup
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Ensure remote backup parent directory exists
+      ansible.builtin.file:
+        path: /backup/remote/hdfs/namenode
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Ensure remote NameNode backup directory exists
+      ansible.builtin.file:
+        path: "{{ hdfs_namenode_remote_backup_dir }}"
+        state: directory
+        owner: "{{ hdfs_namenode_remote_backup_user }}"
+        group: "{{ hdfs_namenode_remote_backup_user }}"
+        mode: "0750"
+
+
+- name: Register ops node ssh host key on master
+  hosts: master
+  become: true
+  tasks:
+    - name: Ensure root ssh directory exists
+      ansible.builtin.file:
+        path: /root/.ssh
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Add ops node to known_hosts
+      ansible.builtin.shell: |
+        ssh-keygen -R "{{ hdfs_namenode_remote_backup_host }}" >/dev/null 2>&1 || true
+        ssh-keyscan -H "{{ hdfs_namenode_remote_backup_host }}" >> /root/.ssh/known_hosts
+      changed_when: true
+
+    - name: Test ssh connection from master to ops backup user
+      ansible.builtin.command:
+        cmd: >-
+          ssh -i {{ hdfs_namenode_remote_backup_ssh_key }}
+          -o BatchMode=yes
+          -o StrictHostKeyChecking=yes
+          {{ hdfs_namenode_remote_backup_user }}@{{ hdfs_namenode_remote_backup_host }}
+          'echo remote-backup-ssh-ok'
+      changed_when: false

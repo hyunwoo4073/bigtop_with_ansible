@@ -54,3 +54,147 @@ groups:
         annotations:
           summary: "Spark History Server JMX target down"
           description: "Spark History Server JMX exporter is not reachable."
+
+      - alert: NameNodeMetadataBackupMetricsMissing
+        expr: absent(hdfs_namenode_backup_last_success_timestamp_seconds)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "NameNode metadata backup metrics are missing"
+          description: "NameNode metadata backup metric file is missing or Node Exporter textfile collector is not collecting it."
+
+      - alert: NameNodeMetadataBackupFailed
+        expr: hdfs_namenode_backup_success == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "NameNode metadata backup failed"
+          description: "Last NameNode metadata backup failed on {{ '{{' }} $labels.instance {{ '}}' }}."
+
+      - alert: NameNodeMetadataBackupStale
+        expr: time() - hdfs_namenode_backup_last_success_timestamp_seconds > {{ hdfs_namenode_backup_max_age_seconds }}
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "NameNode metadata backup is stale"
+          description: "NameNode metadata backup has not succeeded within the expected window on {{ '{{' }} $labels.instance {{ '}}' }}."
+
+      - alert: HDFSNameNodeMetricsMissing
+        expr: absent({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_numlivedatanodes__.*"})
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HDFS NameNode FSNamesystem metrics are missing"
+          description: "NameNode JMX target is up, but FSNamesystem metrics are missing."
+
+      - alert: HDFSLiveDataNodeLow
+        expr: max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_numlivedatanodes__.*"}) < {{ hdfs_expected_live_datanodes }}
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HDFS live DataNode count is low"
+          description: "Live DataNode count is below expected value. Expected={{ hdfs_expected_live_datanodes }}, current={{ '{{' }} $value {{ '}}' }}."
+
+      - alert: HDFSDeadDataNodeDetected
+        expr: max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_numdeaddatanodes__.*"}) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HDFS dead DataNode detected"
+          description: "One or more HDFS DataNodes are dead. Current dead DataNode count={{ '{{' }} $value {{ '}}' }}."
+
+      - alert: HDFSMissingBlocks
+        expr: max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_missingblocks__.*"}) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HDFS missing blocks detected"
+          description: "HDFS has missing blocks. Current missing block count={{ '{{' }} $value {{ '}}' }}."
+
+      - alert: HDFSMissingReplicatedBlocks
+        expr: max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_missingreplicatedblocks__.*"}) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HDFS missing replicated blocks detected"
+          description: "HDFS has missing replicated blocks. Current count={{ '{{' }} $value {{ '}}' }}."
+
+      - alert: HDFSLowRedundancyBlocks
+        expr: max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_lowredundancyblocks__.*"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HDFS low redundancy blocks detected"
+          description: "HDFS has low redundancy blocks. Current count={{ '{{' }} $value {{ '}}' }}."
+
+      - alert: HDFSLowRedundancyReplicatedBlocks
+        expr: max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_lowredundancyreplicatedblocks__.*"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HDFS low redundancy replicated blocks detected"
+          description: "HDFS has low redundancy replicated blocks. Current count={{ '{{' }} $value {{ '}}' }}."
+
+      - alert: HDFSCorruptBlocks
+        expr: max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_corruptblocks__.*"}) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HDFS corrupt blocks detected"
+          description: "HDFS has corrupt blocks. Current count={{ '{{' }} $value {{ '}}' }}."
+
+      - alert: HDFSCorruptReplicatedBlocks
+        expr: max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_corruptreplicatedblocks__.*"}) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HDFS corrupt replicated blocks detected"
+          description: "HDFS has corrupt replicated blocks. Current count={{ '{{' }} $value {{ '}}' }}."
+
+      - alert: HDFSPendingReconstructionBlocks
+        expr: max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_pendingreconstructionblocks__.*"}) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HDFS pending reconstruction blocks detected"
+          description: "HDFS has pending reconstruction blocks for more than 10 minutes. Current count={{ '{{' }} $value {{ '}}' }}."
+
+      - alert: HDFSExpiredHeartbeats
+        expr: max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_expiredheartbeats__.*"}) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HDFS expired heartbeats detected"
+          description: "NameNode has expired DataNode heartbeats. Current count={{ '{{' }} $value {{ '}}' }}."
+
+      - alert: HDFSCapacityUsageHigh
+        expr: (max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_capacityused__.*"}) / max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_capacitytotal__.*"})) * 100 > {{ hdfs_capacity_warning_percent }}
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HDFS capacity usage is high"
+          description: "HDFS capacity usage is over {{ hdfs_capacity_warning_percent }}%. Current={{ '{{' }} $value {{ '}}' }}%."
+
+      - alert: HDFSCapacityUsageCritical
+        expr: (max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_capacityused__.*"}) / max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_capacitytotal__.*"})) * 100 > {{ hdfs_capacity_critical_percent }}
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HDFS capacity usage is critical"
+          description: "HDFS capacity usage is over {{ hdfs_capacity_critical_percent }}%. Current={{ '{{' }} $value {{ '}}' }}%."
