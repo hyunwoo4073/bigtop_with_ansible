@@ -3,6 +3,19 @@ lowercaseOutputName: true
 lowercaseOutputLabelNames: true
 
 rules:
-  - pattern: "Hadoop<service=(.*), name=(.*)><>(.*)"
-    name: "hadoop_$1_$2_$3"
+  # Hadoop JMX metrics
+  #
+  # Previous rule used:
+  #   Hadoop<service=(.*), name=(.*)><>(.*)
+  #
+  # That captured both attribute name and value, producing metric names like:
+  #   hadoop_namenode_fsnamesystem_numlivedatanodes__2
+  #
+  # This rule captures only the attribute name before ":".
+  # Example:
+  #   Hadoop<service=NameNode, name=FSNamesystem><>NumLiveDataNodes: 2
+  # becomes:
+  #   hadoop_namenode_fsnamesystem_numlivedatanodes 2
+  - pattern: 'Hadoop<service=([^,>]+), name=([^,>]+)><>([^:]+):.*'
+    name: hadoop_$1_$2_$3
     type: GAUGE

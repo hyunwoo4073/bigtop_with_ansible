@@ -83,7 +83,7 @@ groups:
           description: "NameNode metadata backup has not succeeded within the expected window on {{ '{{' }} $labels.instance {{ '}}' }}."
 
       - alert: HDFSNameNodeMetricsMissing
-        expr: absent({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_numlivedatanodes__.*"})
+        expr: absent(hadoop_namenode_fsnamesystem_numlivedatanodes{job="hdfs-namenode-jmx"})
         for: 2m
         labels:
           severity: critical
@@ -92,7 +92,7 @@ groups:
           description: "NameNode JMX target is up, but FSNamesystem metrics are missing."
 
       - alert: HDFSLiveDataNodeLow
-        expr: max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_numlivedatanodes__.*"}) < {{ hdfs_expected_live_datanodes }}
+        expr: hadoop_namenode_fsnamesystem_numlivedatanodes{job="hdfs-namenode-jmx"} < {{ hdfs_expected_live_datanodes }}
         for: 2m
         labels:
           severity: critical
@@ -101,7 +101,7 @@ groups:
           description: "Live DataNode count is below expected value. Expected={{ hdfs_expected_live_datanodes }}, current={{ '{{' }} $value {{ '}}' }}."
 
       - alert: HDFSDeadDataNodeDetected
-        expr: max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_numdeaddatanodes__.*"}) > 0
+        expr: hadoop_namenode_fsnamesystem_numdeaddatanodes{job="hdfs-namenode-jmx"} > 0
         for: 1m
         labels:
           severity: critical
@@ -110,7 +110,7 @@ groups:
           description: "One or more HDFS DataNodes are dead. Current dead DataNode count={{ '{{' }} $value {{ '}}' }}."
 
       - alert: HDFSMissingBlocks
-        expr: max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_missingblocks__.*"}) > 0
+        expr: hadoop_namenode_fsnamesystem_missingblocks{job="hdfs-namenode-jmx"} > 0
         for: 1m
         labels:
           severity: critical
@@ -119,7 +119,7 @@ groups:
           description: "HDFS has missing blocks. Current missing block count={{ '{{' }} $value {{ '}}' }}."
 
       - alert: HDFSMissingReplicatedBlocks
-        expr: max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_missingreplicatedblocks__.*"}) > 0
+        expr: hadoop_namenode_fsnamesystem_missingreplicatedblocks{job="hdfs-namenode-jmx"} > 0
         for: 1m
         labels:
           severity: critical
@@ -128,7 +128,7 @@ groups:
           description: "HDFS has missing replicated blocks. Current count={{ '{{' }} $value {{ '}}' }}."
 
       - alert: HDFSLowRedundancyBlocks
-        expr: max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_lowredundancyblocks__.*"}) > 0
+        expr: hadoop_namenode_fsnamesystem_lowredundancyblocks{job="hdfs-namenode-jmx"} > 0
         for: 5m
         labels:
           severity: warning
@@ -137,7 +137,7 @@ groups:
           description: "HDFS has low redundancy blocks. Current count={{ '{{' }} $value {{ '}}' }}."
 
       - alert: HDFSLowRedundancyReplicatedBlocks
-        expr: max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_lowredundancyreplicatedblocks__.*"}) > 0
+        expr: hadoop_namenode_fsnamesystem_lowredundancyreplicatedblocks{job="hdfs-namenode-jmx"} > 0
         for: 5m
         labels:
           severity: warning
@@ -146,7 +146,7 @@ groups:
           description: "HDFS has low redundancy replicated blocks. Current count={{ '{{' }} $value {{ '}}' }}."
 
       - alert: HDFSCorruptBlocks
-        expr: max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_corruptblocks__.*"}) > 0
+        expr: hadoop_namenode_fsnamesystem_corruptblocks{job="hdfs-namenode-jmx"} > 0
         for: 1m
         labels:
           severity: critical
@@ -155,7 +155,7 @@ groups:
           description: "HDFS has corrupt blocks. Current count={{ '{{' }} $value {{ '}}' }}."
 
       - alert: HDFSCorruptReplicatedBlocks
-        expr: max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_corruptreplicatedblocks__.*"}) > 0
+        expr: hadoop_namenode_fsnamesystem_corruptreplicatedblocks{job="hdfs-namenode-jmx"} > 0
         for: 1m
         labels:
           severity: critical
@@ -164,7 +164,7 @@ groups:
           description: "HDFS has corrupt replicated blocks. Current count={{ '{{' }} $value {{ '}}' }}."
 
       - alert: HDFSPendingReconstructionBlocks
-        expr: max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_pendingreconstructionblocks__.*"}) > 0
+        expr: hadoop_namenode_fsnamesystem_pendingreconstructionblocks{job="hdfs-namenode-jmx"} > 0
         for: 10m
         labels:
           severity: warning
@@ -173,7 +173,7 @@ groups:
           description: "HDFS has pending reconstruction blocks for more than 10 minutes. Current count={{ '{{' }} $value {{ '}}' }}."
 
       - alert: HDFSExpiredHeartbeats
-        expr: max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_expiredheartbeats__.*"}) > 0
+        expr: hadoop_namenode_fsnamesystem_expiredheartbeats{job="hdfs-namenode-jmx"} > 0
         for: 2m
         labels:
           severity: warning
@@ -182,7 +182,7 @@ groups:
           description: "NameNode has expired DataNode heartbeats. Current count={{ '{{' }} $value {{ '}}' }}."
 
       - alert: HDFSCapacityUsageHigh
-        expr: (max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_capacityused__.*"}) / max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_capacitytotal__.*"})) * 100 > {{ hdfs_capacity_warning_percent }}
+        expr: (hadoop_namenode_fsnamesystem_capacityused{job="hdfs-namenode-jmx"} / hadoop_namenode_fsnamesystem_capacitytotal{job="hdfs-namenode-jmx"}) * 100 > {{ hdfs_capacity_warning_percent }}
         for: 5m
         labels:
           severity: warning
@@ -191,7 +191,7 @@ groups:
           description: "HDFS capacity usage is over {{ hdfs_capacity_warning_percent }}%. Current={{ '{{' }} $value {{ '}}' }}%."
 
       - alert: HDFSCapacityUsageCritical
-        expr: (max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_capacityused__.*"}) / max({job="hdfs-namenode-jmx", __name__=~"hadoop_namenode_fsnamesystem_capacitytotal__.*"})) * 100 > {{ hdfs_capacity_critical_percent }}
+        expr: (hadoop_namenode_fsnamesystem_capacityused{job="hdfs-namenode-jmx"} / hadoop_namenode_fsnamesystem_capacitytotal{job="hdfs-namenode-jmx"}) * 100 > {{ hdfs_capacity_critical_percent }}
         for: 5m
         labels:
           severity: critical

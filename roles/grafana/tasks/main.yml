@@ -103,6 +103,16 @@
   become: true
   notify: Restart grafana
 
+- name: Deploy HDFS health overview dashboard
+  ansible.builtin.template:
+    src: dashboard_json/hdfs-health-overview.json.j2
+    dest: "{{ grafana_dashboard_dir }}/hdfs-health-overview.json"
+    owner: grafana
+    group: grafana
+    mode: "0644"
+  become: true
+  notify: Restart grafana
+  
 - name: Start and enable Grafana
   ansible.builtin.service:
     name: grafana-server
