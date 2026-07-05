@@ -7,7 +7,12 @@
 
   <property>
     <name>dfs.namenode.name.dir</name>
-    <value>file://{{ hdfs_namenode_dir }}</value>
+    <value>{% for dir in hdfs_namenode_name_dirs %}file://{{ dir }}{% if not loop.last %},{% endif %}{% endfor %}</value>
+  </property>
+
+  <property>
+    <name>dfs.namenode.edits.dir</name>
+    <value>{% for dir in hdfs_namenode_edits_dirs %}file://{{ dir }}{% if not loop.last %},{% endif %}{% endfor %}</value>
   </property>
 
   <property>

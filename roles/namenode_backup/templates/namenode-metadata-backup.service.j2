@@ -1,0 +1,8 @@
+[Unit]
+Description=Backup HDFS NameNode metadata
+After=network-online.target hadoop-hdfs-namenode.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart={{ hdfs_namenode_backup_script }}

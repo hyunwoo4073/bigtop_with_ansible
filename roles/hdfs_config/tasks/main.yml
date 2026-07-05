@@ -8,13 +8,14 @@
     mode: "0755"
   become: true
 
-- name: Create NameNode metadata directory
+- name: Ensure NameNode metadata directories exist
   ansible.builtin.file:
-    path: "{{ hdfs_namenode_dir }}"
+    path: "{{ item }}"
     state: directory
     owner: hdfs
     group: hadoop
     mode: "0755"
+  loop: "{{ (hdfs_namenode_name_dirs + hdfs_namenode_edits_dirs) | unique }}"
   become: true
   when: "'master' in group_names"
 

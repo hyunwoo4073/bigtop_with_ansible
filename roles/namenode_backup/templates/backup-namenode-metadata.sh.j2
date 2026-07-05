@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BACKUP_DIR="{{ hdfs_namenode_backup_dir }}"
+RETENTION_DAYS="{{ hdfs_namenode_backup_retention_days }}"
+PRIMARY_NN_DIR="{{ hdfs_namenode_name_dirs[0] }}"
+TS="$(date +%Y%m%d_%H%M%S)"
+
+mkdir -p "${BACKUP_DIR}"
+
+WORK_DIR="$(mktemp -d "${BACKUP_DIR}/.work-${TS}-XXXXXX")"
+TMP_FILE="${BACKUP_DIR}/namenode-metadata-${TS}.tgz.tmp"
+OUT_FILE="${BACKUP_DIR}/namenode-metadata-${TS}.tgz"
+
+cleanup() {
+  rm -rf "${WORK_DIR}"
+}
+trap cleanup EXIT
+
+if [ ! -f "${PRIMARY_NN_DIR}/current/VERSION" ]; then
+  echo "[ERROR] NameNode VERSION file not found: ${PRIMARY_NN_DIR}/current/VERSION" >&2
+  exit 1
+fi
+
+if ! systemctl is-active --quiet hadoop-hdfs-namenode; then
+  echo "[ERROR] hadoop-hdfs-namenode is not active." >&2
+  exit 1
+fi
+
+echo "[INFO] Preparing work directory..."
+chown hdfs:hadoop "${WORK_DIR}"
+chmod 0750 "${WORK_DIR}"
+
+echo "[INFO] Fetching latest NameNode fsimage..."
+sudo -u hdfs /usr/bin/hdfs dfsadmin -fetchImage "${WORK_DIR}"
+
+echo "[INFO] Copying NameNode VERSION metadata..."
+cp "${PRIMARY_NN_DIR}/current/VERSION" "${WORK_DIR}/VERSION"
+
+echo "[INFO] Copying HDFS config files..."
+mkdir -p "${WORK_DIR}/conf"
+cp /etc/hadoop/conf/core-site.xml "${WORK_DIR}/conf/" 2>/dev/null || true
+cp /etc/hadoop/conf/hdfs-site.xml "${WORK_DIR}/conf/" 2>/dev/null || true
+cp /etc/hadoop/conf/hadoop-env.sh "${WORK_DIR}/conf/" 2>/dev/null || true
+
+echo "[INFO] Writing backup manifest..."
+cat > "${WORK_DIR}/MANIFEST.txt" <<EOF
+backup_timestamp=${TS}
+hostname=$(hostname)
+primary_namenode_dir=${PRIMARY_NN_DIR}
+backup_type=online_fetchImage
+EOF
+
+echo "[INFO] Normalizing ownership before archive..."
+chown -R root:root "${WORK_DIR}"
+
+echo "[INFO] Creating backup archive..."
+tar --xattrs --acls -czf "${TMP_FILE}" -C "${WORK_DIR}" .
+
+mv "${TMP_FILE}" "${OUT_FILE}"
+sha256sum "${OUT_FILE}" > "${OUT_FILE}.sha256"
+
+echo "[INFO] Backup created:"
+ls -lh "${OUT_FILE}" "${OUT_FILE}.sha256"
+
+echo "[INFO] Removing backups older than ${RETENTION_DAYS} days..."
+find "${BACKUP_DIR}" -type f -name 'namenode-metadata-*.tgz' -mtime +"${RETENTION_DAYS}" -delete
+find "${BACKUP_DIR}" -type f -name 'namenode-metadata-*.tgz.sha256' -mtime +"${RETENTION_DAYS}" -delete
+
+echo "[INFO] NameNode metadata backup completed."

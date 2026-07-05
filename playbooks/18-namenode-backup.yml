@@ -1,0 +1,6 @@
+---
+- name: Configure HDFS NameNode metadata backup
+  hosts: master
+  become: true
+  roles:
+    - namenode_backup

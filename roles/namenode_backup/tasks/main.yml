@@ -1,0 +1,105 @@
+---
+- name: Ensure backup base directory exists
+  ansible.builtin.file:
+    path: "/backup"
+    state: directory
+    owner: root
+    group: hadoop
+    mode: "0755"
+  become: true
+
+- name: Ensure HDFS backup parent directory exists
+  ansible.builtin.file:
+    path: "/backup/hdfs"
+    state: directory
+    owner: root
+    group: hadoop
+    mode: "0755"
+  become: true
+
+- name: Ensure NameNode backup directory exists
+  ansible.builtin.file:
+    path: "{{ hdfs_namenode_backup_dir }}"
+    state: directory
+    owner: root
+    group: hadoop
+    mode: "0770"
+  become: true
+
+- name: Deploy NameNode metadata backup script
+  ansible.builtin.template:
+    src: backup-namenode-metadata.sh.j2
+    dest: "{{ hdfs_namenode_backup_script }}"
+    owner: root
+    group: root
+    mode: "0750"
+  become: true
+
+- name: Deploy NameNode metadata backup systemd service
+  ansible.builtin.template:
+    src: namenode-metadata-backup.service.j2
+    dest: /etc/systemd/system/namenode-metadata-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+- name: Deploy NameNode metadata backup systemd timer
+  ansible.builtin.template:
+    src: namenode-metadata-backup.timer.j2
+    dest: /etc/systemd/system/namenode-metadata-backup.timer
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+- name: Reload systemd
+  ansible.builtin.command: systemctl daemon-reload
+  changed_when: false
+  become: true
+
+- name: Enable and start NameNode metadata backup timer
+  ansible.builtin.service:
+    name: namenode-metadata-backup.timer
+    state: started
+    enabled: true
+  become: true
+
+- name: Deploy NameNode metadata backup script
+  ansible.builtin.template:
+    src: backup-namenode-metadata.sh.j2
+    dest: "{{ hdfs_namenode_backup_script }}"
+    owner: root
+    group: root
+    mode: "0750"
+  become: true
+
+- name: Deploy NameNode metadata backup systemd service
+  ansible.builtin.template:
+    src: namenode-metadata-backup.service.j2
+    dest: /etc/systemd/system/namenode-metadata-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+- name: Deploy NameNode metadata backup systemd timer
+  ansible.builtin.template:
+    src: namenode-metadata-backup.timer.j2
+    dest: /etc/systemd/system/namenode-metadata-backup.timer
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+- name: Reload systemd
+  ansible.builtin.command: systemctl daemon-reload
+  changed_when: false
+  become: true
+
+- name: Enable and start NameNode metadata backup timer
+  ansible.builtin.service:
+    name: namenode-metadata-backup.timer
+    state: started
+    enabled: true
+  become: true

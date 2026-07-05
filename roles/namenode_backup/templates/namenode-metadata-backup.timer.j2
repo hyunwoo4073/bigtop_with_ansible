@@ -1,0 +1,10 @@
+[Unit]
+Description=Run HDFS NameNode metadata backup periodically
+
+[Timer]
+OnCalendar={{ hdfs_namenode_backup_on_calendar }}
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

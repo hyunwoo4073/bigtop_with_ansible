@@ -3,15 +3,29 @@
   hosts: master
   become: true
   tasks:
-    - name: Check NameNode formatted
-      ansible.builtin.stat:
-        path: "{{ hdfs_namenode_dir }}/current"
-      register: namenode_current
+    - name: Build NameNode metadata directory list
+      ansible.builtin.set_fact:
+        namenode_metadata_dirs: "{{ (hdfs_namenode_name_dirs + hdfs_namenode_edits_dirs) | unique }}"
 
-    - name: Fail if NameNode is not formatted
+    - name: Check NameNode metadata VERSION files
+      ansible.builtin.stat:
+        path: "{{ item }}/current/VERSION"
+      loop: "{{ namenode_metadata_dirs }}"
+      register: namenode_version_results
+
+    - name: Fail if NameNode metadata is not prepared
       ansible.builtin.fail:
-        msg: "NameNode is not formatted. {{ hdfs_namenode_dir }}/current does not exist."
-      when: not namenode_current.stat.exists
+        msg: >-
+          NameNode metadata is not prepared.
+          Missing VERSION file under one or more metadata directories.
+          Check dfs.namenode.name.dir / dfs.namenode.edits.dir values and make sure
+          existing metadata was copied to the new metadata directory before starting NameNode.
+          Metadata dirs: {{ namenode_metadata_dirs }}
+      when: >
+        namenode_version_results.results
+        | selectattr('stat.exists', 'equalto', false)
+        | list
+        | length > 0
 
     - name: Check master hostname resolution
       ansible.builtin.command: getent hosts "{{ hdfs_namenode_host }}"
@@ -33,13 +47,13 @@
           ansible.builtin.wait_for:
             host: "{{ hdfs_namenode_host }}"
             port: 9000
-            timeout: 60
+            timeout: 120
 
         - name: Wait for NameNode Web UI port
           ansible.builtin.wait_for:
             host: "{{ hdfs_namenode_host }}"
             port: 9870
-            timeout: 60
+            timeout: 120
 
       rescue:
         - name: Show NameNode systemd status
@@ -63,7 +77,7 @@
   hosts: workers
   become: true
   tasks:
-    - name: Check DataNode directory exists
+    - name: Ensure DataNode directory exists
       ansible.builtin.file:
         path: "{{ hdfs_datanode_dir }}"
         state: directory
@@ -108,6 +122,15 @@
     - name: Check NameNode service active
       ansible.builtin.command: systemctl is-active hadoop-hdfs-namenode
       changed_when: false
+
+    - name: Check NameNode RPC and Web UI ports
+      ansible.builtin.shell: ss -lntp | grep -E '9000|9870' || true
+      register: namenode_ports
+      changed_when: false
+
+    - name: Print NameNode port status
+      ansible.builtin.debug:
+        msg: "{{ namenode_ports.stdout_lines }}"
 
     - name: Show HDFS datanode report
       ansible.builtin.shell: sudo -u hdfs hdfs dfsadmin -report

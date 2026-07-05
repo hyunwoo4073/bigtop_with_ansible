@@ -1,14 +1,15 @@
+---
 cluster_domain: "local"
 
 cluster_hosts:
   - name: "master"
-    ip: "192.168.56.101"
+    ip: "192.158.2.100"
   - name: "worker1"
-    ip: "192.168.56.102"
+    ip: "192.158.2.101"
   - name: "worker2"
-    ip: "192.168.56.103"
+    ip: "192.158.2.102"
   - name: "worker3"
-    ip: "192.168.56.104"
+    ip: "192.158.2.103"
 
 timezone: "Asia/Seoul"
 
@@ -30,8 +31,107 @@ hadoop_group: "hadoop"
 
 hdfs_namenode_host: "master"
 hdfs_default_fs: "hdfs://master:9000"
+
 hdfs_replication: 2
-hdfs_namenode_dir: "/data/hadoop/hdfs/namenode"
+
+# HDFS NameNode metadata directories
+hdfs_namenode_name_dirs:
+  - "/data/hadoop/hdfs/namenode"
+  - "/data2/hadoop/hdfs/namenode"
+
+hdfs_namenode_edits_dirs:
+  - "/data/hadoop/hdfs/namenode"
+  - "/data2/hadoop/hdfs/namenode"
+
+# HDFS DataNode directory
 hdfs_datanode_dir: "/data/hadoop/hdfs/datanode"
+
 hadoop_conf_dir: "/etc/hadoop/conf"
 java_home: "/usr/lib/jvm/java-11-openjdk-amd64"
+
+# YARN
+yarn_resourcemanager_host: "master"
+
+yarn_rm_address: "master:8032"
+yarn_rm_scheduler_address: "master:8030"
+yarn_rm_resource_tracker_address: "master:8031"
+yarn_rm_admin_address: "master:8033"
+yarn_rm_webapp_address: "master:8088"
+
+# YARN UI2
+yarn_ui2_enable: true
+
+yarn_nodemanager_local_dirs: "/data/hadoop/yarn/local"
+yarn_nodemanager_log_dirs: "/data/hadoop/yarn/logs"
+
+yarn_nodemanager_resource_memory_mb: 2048
+yarn_nodemanager_resource_cpu_vcores: 2
+yarn_scheduler_minimum_allocation_mb: 256
+yarn_scheduler_maximum_allocation_mb: 2048
+
+mapreduce_framework_name: "yarn"
+
+# Spark
+spark_conf_dir: "/etc/spark/conf"
+spark_history_dir: "hdfs:///spark-history"
+spark_event_log_dir: "hdfs:///spark-history"
+
+spark_driver_memory: "512m"
+spark_executor_memory: "512m"
+spark_executor_cores: 1
+spark_executor_instances: 2
+
+spark_packages:
+  - spark-core
+
+spark_history_packages:
+  - spark-history-server
+
+spark_python_packages:
+  - spark-python
+
+# Monitoring
+monitoring_host: "worker3"
+
+prometheus_port: 9090
+grafana_port: 3000
+node_exporter_port: 9100
+
+prometheus_config_dir: "/etc/prometheus"
+prometheus_data_dir: "/var/lib/prometheus"
+
+prometheus_scrape_interval: "15s"
+
+# JMX Exporter
+jmx_exporter_version: "1.1.0"
+jmx_exporter_dir: "/opt/jmx_exporter"
+jmx_exporter_jar: "/opt/jmx_exporter/jmx_prometheus_javaagent.jar"
+
+jmx_namenode_port: 19101
+jmx_datanode_port: 19102
+jmx_resourcemanager_port: 19103
+jmx_nodemanager_port: 19104
+jmx_spark_history_port: 19105
+
+# Alertmanager
+alertmanager_host: "worker3"
+alertmanager_port: 9093
+alertmanager_config_dir: "/etc/prometheus"
+alertmanager_config_file: "/etc/prometheus/alertmanager.yml"
+
+prometheus_rule_dir: "/etc/prometheus/rules"
+
+# Grafana Provisioning
+grafana_datasource_name: "Prometheus"
+grafana_datasource_uid: "prometheus"
+grafana_prometheus_url: "http://localhost:9090"
+
+grafana_dashboard_dir: "/var/lib/grafana/dashboards"
+grafana_provisioning_datasource_dir: "/etc/grafana/provisioning/datasources"
+grafana_provisioning_dashboard_dir: "/etc/grafana/provisioning/dashboards"
+
+# NameNode metadata backup
+hdfs_namenode_backup_dir: "/backup/hdfs/namenode"
+hdfs_namenode_backup_script: "/usr/local/sbin/backup-namenode-metadata.sh"
+hdfs_namenode_backup_retention_days: 7
+hdfs_namenode_backup_on_calendar: "*-*-* 03:30:00"
