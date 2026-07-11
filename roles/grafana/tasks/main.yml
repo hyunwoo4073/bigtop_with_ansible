@@ -112,7 +112,37 @@
     mode: "0644"
   become: true
   notify: Restart grafana
-  
+
+- name: Deploy NameNode backup overview dashboard
+  ansible.builtin.template:
+    src: dashboard_json/namenode-backup-overview.json.j2
+    dest: "{{ grafana_dashboard_dir }}/namenode-backup-overview.json"
+    owner: grafana
+    group: grafana
+    mode: "0644"
+  become: true
+  notify: Restart grafana
+
+- name: Deploy YARN resource overview dashboard
+  ansible.builtin.template:
+    src: dashboard_json/yarn-resource-overview.json.j2
+    dest: "{{ grafana_dashboard_dir }}/yarn-resource-overview.json"
+    owner: grafana
+    group: grafana
+    mode: "0644"
+  become: true
+  notify: Restart grafana
+
+- name: Deploy Spark history overview dashboard
+  ansible.builtin.template:
+    src: dashboard_json/spark-history-overview.json.j2
+    dest: "{{ grafana_dashboard_dir }}/spark-history-overview.json"
+    owner: grafana
+    group: grafana
+    mode: "0644"
+  become: true
+  notify: Restart grafana
+
 - name: Start and enable Grafana
   ansible.builtin.service:
     name: grafana-server

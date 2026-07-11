@@ -69,7 +69,7 @@ hdfs_namenode_backup_exit_code ${exit_code}
 # TYPE hdfs_namenode_backup_duration_seconds gauge
 hdfs_namenode_backup_duration_seconds ${duration}
 EOF
-
+  chmod 0644 "${tmp_metric}"
   mv "${tmp_metric}" "${METRIC_FILE}"
 }
 

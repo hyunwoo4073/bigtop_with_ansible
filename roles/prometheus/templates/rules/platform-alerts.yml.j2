@@ -46,6 +46,87 @@ groups:
           summary: "YARN ResourceManager JMX target down"
           description: "ResourceManager JMX exporter is not reachable."
 
+      - alert: YARNResourceManagerMetricsMissing
+        expr: absent(hadoop_resourcemanager_clustermetrics_numactivenms{job="yarn-resourcemanager-jmx"})
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "YARN ResourceManager cluster metrics are missing"
+          description: "ResourceManager JMX target is up, but ClusterMetrics are missing."
+
+      - alert: YARNActiveNodeManagerLow
+        expr: hadoop_resourcemanager_clustermetrics_numactivenms{job="yarn-resourcemanager-jmx"} < {{ yarn_expected_active_nodemanagers }}
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "YARN active NodeManager count is low"
+          description: "Active NodeManager count is below expected value. Expected={{ yarn_expected_active_nodemanagers }}, current={{ '{{' }} $value {{ '}}' }}."
+
+      - alert: YARNLostNodeManagerDetected
+        expr: hadoop_resourcemanager_clustermetrics_numlostnms{job="yarn-resourcemanager-jmx"} > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "YARN lost NodeManager detected"
+          description: "One or more YARN NodeManagers are marked as lost. Current lost NodeManager count={{ '{{' }} $value {{ '}}' }}."
+
+      - alert: YARNUnhealthyNodeManagerDetected
+        expr: hadoop_resourcemanager_clustermetrics_numunhealthynms{job="yarn-resourcemanager-jmx"} > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "YARN unhealthy NodeManager detected"
+          description: "One or more YARN NodeManagers are unhealthy. Current unhealthy NodeManager count={{ '{{' }} $value {{ '}}' }}."
+
+      - alert: YARNShutdownNodeManagerDetected
+        expr: hadoop_resourcemanager_clustermetrics_numshutdownnms{job="yarn-resourcemanager-jmx"} > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "YARN shutdown NodeManager detected"
+          description: "One or more YARN NodeManagers are marked as shutdown. Current shutdown NodeManager count={{ '{{' }} $value {{ '}}' }}."
+
+      - alert: YARNMemoryUsageHigh
+        expr: (hadoop_resourcemanager_clustermetrics_utilizedmb{job="yarn-resourcemanager-jmx"} / hadoop_resourcemanager_clustermetrics_capabilitymb{job="yarn-resourcemanager-jmx"}) * 100 > {{ yarn_memory_warning_percent }}
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "YARN memory usage is high"
+          description: "YARN memory usage is over {{ yarn_memory_warning_percent }}%. Current={{ '{{' }} $value {{ '}}' }}%."
+
+      - alert: YARNMemoryUsageCritical
+        expr: (hadoop_resourcemanager_clustermetrics_utilizedmb{job="yarn-resourcemanager-jmx"} / hadoop_resourcemanager_clustermetrics_capabilitymb{job="yarn-resourcemanager-jmx"}) * 100 > {{ yarn_memory_critical_percent }}
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "YARN memory usage is critical"
+          description: "YARN memory usage is over {{ yarn_memory_critical_percent }}%. Current={{ '{{' }} $value {{ '}}' }}%."
+
+      - alert: YARNVCoreUsageHigh
+        expr: (hadoop_resourcemanager_clustermetrics_utilizedvirtualcores{job="yarn-resourcemanager-jmx"} / hadoop_resourcemanager_clustermetrics_capabilityvirtualcores{job="yarn-resourcemanager-jmx"}) * 100 > {{ yarn_vcore_warning_percent }}
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "YARN vCore usage is high"
+          description: "YARN vCore usage is over {{ yarn_vcore_warning_percent }}%. Current={{ '{{' }} $value {{ '}}' }}%."
+
+      - alert: YARNVCoreUsageCritical
+        expr: (hadoop_resourcemanager_clustermetrics_utilizedvirtualcores{job="yarn-resourcemanager-jmx"} / hadoop_resourcemanager_clustermetrics_capabilityvirtualcores{job="yarn-resourcemanager-jmx"}) * 100 > {{ yarn_vcore_critical_percent }}
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "YARN vCore usage is critical"
+          description: "YARN vCore usage is over {{ yarn_vcore_critical_percent }}%. Current={{ '{{' }} $value {{ '}}' }}%."
+
       - alert: SparkHistoryServerJMXDown
         expr: up{job="spark-history-jmx"} == 0
         for: 1m

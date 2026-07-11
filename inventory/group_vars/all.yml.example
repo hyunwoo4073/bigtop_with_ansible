@@ -154,3 +154,10 @@ hdfs_namenode_backup_max_age_seconds: 93600
 hdfs_expected_live_datanodes: 2
 hdfs_capacity_warning_percent: 80
 hdfs_capacity_critical_percent: 90
+
+# YARN alert thresholds
+yarn_expected_active_nodemanagers: 2
+yarn_memory_warning_percent: 80
+yarn_memory_critical_percent: 90
+yarn_vcore_warning_percent: 80
+yarn_vcore_critical_percent: 90

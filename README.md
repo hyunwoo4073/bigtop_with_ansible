@@ -4,7 +4,7 @@ Apache Bigtop과 Ansible을 사용해 Hadoop 기반 미니 데이터 플랫폼�
 
 개인 VM 환경에서 Ambari 같은 통합 관리 도구 없이, Ansible playbook과 role 구조를 통해 서버 공통 설정, Java 설치, Bigtop repository 등록, Hadoop/HDFS/YARN/Spark 설치, 설정 파일 배포, 서비스 기동, 모니터링, 대시보드, 알림, 백업 자동화까지 구성하는 것을 목표로 합니다.
 
-현재는 HDFS, YARN, Spark on YARN, Prometheus/Grafana 기반 모니터링, JMX Exporter 기반 JVM 메트릭 수집, Alertmanager 기반 알림, Grafana datasource/dashboard provisioning, NameNode metadata 보호 및 백업 자동화, HDFS 상태 기반 alert, HDFS Health Grafana dashboard 구성을 완료한 상태입니다.
+현재는 HDFS, YARN, Spark on YARN, Prometheus/Grafana 기반 모니터링, JMX Exporter 기반 JVM 메트릭 수집, Alertmanager 기반 알림, Grafana datasource/dashboard provisioning, NameNode metadata 보호 및 백업 자동화, HDFS/YARN 상태 기반 alert, NameNode backup 상태 감시, HDFS/YARN/Spark History Server Grafana dashboard 구성을 완료한 상태입니다.
 
 ## 구성
 
@@ -38,6 +38,7 @@ NameNode metadata backup = 장애 후 복구 지점 확보
 7. Prometheus alert rule 기반 백업 실패/지연 감지
 8. HDFS 상태 기반 alert rule 구성
 9. Grafana HDFS Health dashboard 자동 provisioning
+10. Grafana NameNode Backup dashboard 자동 provisioning
 ```
 
 ## 주요 구성 요소
@@ -237,6 +238,13 @@ hdfs_namenode_backup_max_age_seconds: 93600
 hdfs_expected_live_datanodes: 2
 hdfs_capacity_warning_percent: 80
 hdfs_capacity_critical_percent: 90
+
+# YARN alert thresholds
+yarn_expected_active_nodemanagers: 2
+yarn_memory_warning_percent: 80
+yarn_memory_critical_percent: 90
+yarn_vcore_warning_percent: 80
+yarn_vcore_critical_percent: 90
 ```
 
 ## 실행 순서
@@ -352,6 +360,32 @@ Spark 상태 확인:
 ```bash
 ansible hadoop_cluster -m shell -a "spark-submit --version | head -20"
 ansible master -b -m command -a "systemctl is-active spark-history-server"
+ansible master -m shell -a "ss -lntp | grep -E '18080|19105' || true"
+```
+
+Spark History Server는 VM 재부팅 이후에도 자동으로 기동되도록 `enabled: true`로 관리합니다.
+또한 Bigtop 패키지의 `spark-history-server`가 native systemd unit이 아니라 `/etc/init.d` 기반 SysV generated service로 동작하기 때문에, systemd override를 추가해 부팅 시 네트워크와 NameNode 이후에 기동되고 실패 시 재시도되도록 구성합니다.
+
+```text
+Override path: /etc/systemd/system/spark-history-server.service.d/override.conf
+After: network-online.target hadoop-hdfs-namenode.service
+Wants: network-online.target hadoop-hdfs-namenode.service
+Restart: on-failure
+RestartSec: 30
+```
+
+Spark History Server systemd override 확인:
+
+```bash
+ansible master -b -m shell -a "systemctl cat spark-history-server"
+ansible master -b -m command -a "systemctl is-enabled spark-history-server"
+ansible master -b -m command -a "systemctl is-active spark-history-server"
+```
+
+Spark History Server JMX Exporter 확인:
+
+```bash
+ansible master -m shell -a "curl -s http://127.0.0.1:19105/metrics | grep -E 'jvm_threads_current|jvm_memory_used_bytes' | head"
 ```
 
 SparkPi 테스트:
@@ -448,6 +482,18 @@ Dashboards
 Dashboards
 → Bigtop Cluster
 → HDFS Health Overview
+
+Dashboards
+→ Bigtop Cluster
+→ NameNode Backup Overview
+
+Dashboards
+→ Bigtop Cluster
+→ YARN ResourceManager Overview
+
+Dashboards
+→ Bigtop Cluster
+→ Spark History Server Overview
 ```
 
 ### Bigtop Platform Overview
@@ -494,6 +540,92 @@ ansible ops -b -m shell -a "ls -lh /var/lib/grafana/dashboards"
 ```text
 bigtop-platform-overview.json
 hdfs-health-overview.json
+namenode-backup-overview.json
+yarn-resource-overview.json
+spark-history-overview.json
+```
+
+### NameNode Backup Overview
+
+NameNode Backup dashboard에는 다음 항목을 포함합니다.
+
+```text
+Backup Success
+Backup Exit Code
+Backup Duration
+Last Run Timestamp
+Last Success Timestamp
+Backup Stale Age
+Backup Stale Threshold
+```
+
+NameNode backup metric은 Node Exporter textfile collector를 통해 수집합니다.
+Metric 파일은 Node Exporter가 읽을 수 있도록 `0644` 권한으로 생성합니다.
+
+```text
+Metric file: /var/lib/prometheus/node-exporter/namenode_backup.prom
+Required mode: 0644
+```
+
+확인:
+
+```bash
+ansible master -b -m shell -a "ls -lh /var/lib/prometheus/node-exporter/namenode_backup.prom"
+ansible master -m shell -a "curl -s http://127.0.0.1:9100/metrics | grep hdfs_namenode_backup || true"
+```
+
+### YARN ResourceManager Overview
+
+YARN ResourceManager dashboard에는 다음 항목을 포함합니다.
+
+```text
+Active NodeManagers
+Lost NodeManagers
+Unhealthy NodeManagers
+Shutdown NodeManagers
+YARN Memory Usage
+YARN vCore Usage
+YARN Memory Used / Remaining / Total
+YARN vCore Used / Remaining / Total
+ResourceManager Event Processor CPU
+Scheduler Node Update
+```
+
+YARN metric은 실제 수집된 ResourceManager ClusterMetrics 기준으로 구성합니다.
+
+```promql
+hadoop_resourcemanager_clustermetrics_numactivenms{job="yarn-resourcemanager-jmx"}
+hadoop_resourcemanager_clustermetrics_numlostnms{job="yarn-resourcemanager-jmx"}
+hadoop_resourcemanager_clustermetrics_numunhealthynms{job="yarn-resourcemanager-jmx"}
+hadoop_resourcemanager_clustermetrics_numshutdownnms{job="yarn-resourcemanager-jmx"}
+hadoop_resourcemanager_clustermetrics_utilizedmb{job="yarn-resourcemanager-jmx"}
+hadoop_resourcemanager_clustermetrics_capabilitymb{job="yarn-resourcemanager-jmx"}
+hadoop_resourcemanager_clustermetrics_utilizedvirtualcores{job="yarn-resourcemanager-jmx"}
+hadoop_resourcemanager_clustermetrics_capabilityvirtualcores{job="yarn-resourcemanager-jmx"}
+```
+
+### Spark History Server Overview
+
+Spark History Server dashboard에는 다음 항목을 포함합니다.
+
+```text
+Spark History JMX UP
+JVM Threads
+Heap Used
+Heap Usage %
+JVM Heap Memory
+JVM Non-Heap Memory
+JVM GC Count
+```
+
+Spark History Server JMX Exporter의 JVM metric은 다음 이름을 기준으로 사용합니다.
+
+```promql
+jvm_memory_used_bytes{job="spark-history-jmx", area="heap"}
+jvm_memory_committed_bytes{job="spark-history-jmx", area="heap"}
+jvm_memory_max_bytes{job="spark-history-jmx", area="heap"}
+jvm_threads_current{job="spark-history-jmx"}
+jvm_gc_collection_seconds_count{job="spark-history-jmx"}
 ```
 
 Grafana dashboard provisioning task는 다음 흐름으로 구성합니다.
@@ -503,7 +635,10 @@ Grafana dashboard provisioning task는 다음 흐름으로 구성합니다.
 2. dashboard provider provisioning
 3. bigtop-platform-overview.json 배포
 4. hdfs-health-overview.json 배포
-5. grafana-server 재시작
+5. namenode-backup-overview.json 배포
+6. yarn-resource-overview.json 배포
+7. spark-history-overview.json 배포
+8. grafana-server 재시작
 ```
 
 ## JMX Exporter 설정 기준
@@ -728,6 +863,15 @@ HighMemoryUsage
 HighDiskUsage
 HDFSNameNodeJMXDown
 YARNResourceManagerJMXDown
+YARNResourceManagerMetricsMissing
+YARNActiveNodeManagerLow
+YARNLostNodeManagerDetected
+YARNUnhealthyNodeManagerDetected
+YARNShutdownNodeManagerDetected
+YARNMemoryUsageHigh
+YARNMemoryUsageCritical
+YARNVCoreUsageHigh
+YARNVCoreUsageCritical
 SparkHistoryServerJMXDown
 NameNodeMetadataBackupMetricsMissing
 NameNodeMetadataBackupFailed
@@ -759,10 +903,22 @@ hadoop_namenode_fsnamesystem_lowredundancyblocks{job="hdfs-namenode-jmx"} > 0
 (hadoop_namenode_fsnamesystem_capacityused{job="hdfs-namenode-jmx"} / hadoop_namenode_fsnamesystem_capacitytotal{job="hdfs-namenode-jmx"}) * 100 > 80
 ```
 
+YARN alert rule은 ResourceManager JMX metric 기반으로 구성했습니다.
+
+예시:
+
+```promql
+hadoop_resourcemanager_clustermetrics_numactivenms{job="yarn-resourcemanager-jmx"} < 2
+hadoop_resourcemanager_clustermetrics_numlostnms{job="yarn-resourcemanager-jmx"} > 0
+hadoop_resourcemanager_clustermetrics_numunhealthynms{job="yarn-resourcemanager-jmx"} > 0
+(hadoop_resourcemanager_clustermetrics_utilizedmb{job="yarn-resourcemanager-jmx"} / hadoop_resourcemanager_clustermetrics_capabilitymb{job="yarn-resourcemanager-jmx"}) * 100 > 80
+(hadoop_resourcemanager_clustermetrics_utilizedvirtualcores{job="yarn-resourcemanager-jmx"} / hadoop_resourcemanager_clustermetrics_capabilityvirtualcores{job="yarn-resourcemanager-jmx"}) * 100 > 80
+```
+
 Alert rule 확인:
 
 ```bash
-ansible ops -m shell -a "curl -s http://127.0.0.1:9090/api/v1/rules | grep -E 'TargetDown|HDFSLiveDataNodeLow|NameNodeMetadataBackup' || true"
+ansible ops -m shell -a "curl -s http://127.0.0.1:9090/api/v1/rules | grep -E 'TargetDown|HDFSLiveDataNodeLow|YARNActiveNodeManagerLow|NameNodeMetadataBackup' || true"
 ```
 
 Alert 확인:
@@ -833,6 +989,43 @@ ansible master -b -m shell -a "sudo -u hdfs hdfs dfsadmin -report | grep -E 'Liv
 Live datanodes (2)
 Dead datanodes (0)
 ```
+
+### YARN NodeManager 장애 테스트
+
+NodeManager를 잠시 중지해서 YARN 상태 기반 alert를 확인할 수 있습니다.
+
+```bash
+ansible worker1 -b -m service -a "name=hadoop-yarn-nodemanager state=stopped"
+```
+
+Prometheus query:
+
+```bash
+ansible ops -m shell -a "curl -s 'http://127.0.0.1:9090/api/v1/query?query=hadoop_resourcemanager_clustermetrics_numactivenms'"
+ansible ops -m shell -a "curl -s 'http://127.0.0.1:9090/api/v1/query?query=hadoop_resourcemanager_clustermetrics_numlostnms'"
+```
+
+기대 alert:
+
+```text
+YARNActiveNodeManagerLow
+YARNLostNodeManagerDetected
+TargetDown - worker1 yarn-nodemanager-jmx
+```
+
+복구:
+
+```bash
+ansible worker1 -b -m service -a "name=hadoop-yarn-nodemanager state=started"
+```
+
+YARN node 상태 확인:
+
+```bash
+ansible master -b -m shell -a "sudo -u yarn yarn node -list"
+```
+
+정상 상태에서는 `Total Nodes:2`가 출력됩니다.
 
 ## 주요 트러블슈팅
 
@@ -933,12 +1126,27 @@ worker3
 
 ### Prometheus YAML 오류
 
-Prometheus 설정 파일은 YAML 들여쓰기에 민감합니다.
+Prometheus 설정 파일과 rule 파일은 YAML 들여쓰기에 민감합니다.
+특히 alert rule을 추가할 때 `- alert` 항목은 같은 list depth에 있어야 합니다.
+
+잘못된 예시:
+
+```yaml
+            - alert: YARNResourceManagerMetricsMissing
+```
+
+정상 예시:
+
+```yaml
+      - alert: YARNResourceManagerMetricsMissing
+```
+
 문제가 발생하면 다음 명령으로 확인합니다.
 
 ```bash
 ansible ops -b -m shell -a "promtool check config /etc/prometheus/prometheus.yml"
-ansible ops -b -m shell -a "cat -n /etc/prometheus/prometheus.yml"
+ansible ops -b -m shell -a "promtool check rules /etc/prometheus/rules/platform-alerts.yml"
+ansible ops -b -m shell -a "nl -ba /etc/prometheus/rules/platform-alerts.yml | sed -n '35,65p'"
 ansible ops -b -m shell -a "journalctl -u prometheus -n 100 --no-pager"
 ```
 
@@ -1254,6 +1462,73 @@ ansible master -m shell -a "curl -s http://127.0.0.1:9100/metrics | grep node_te
 node_textfile_scrape_error 0
 ```
 
+
+### Spark History Server 재부팅 후 미기동
+
+VM 재부팅 후 Spark History Server가 꺼져 있으면 먼저 서비스 enable 상태와 active 상태를 확인합니다.
+
+```bash
+ansible master -b -m command -a "systemctl is-enabled spark-history-server"
+ansible master -b -m command -a "systemctl is-active spark-history-server"
+ansible master -b -m shell -a "systemctl status spark-history-server --no-pager -l"
+```
+
+Bigtop 패키지의 Spark History Server는 native systemd unit이 아니라 `/etc/init.d/spark-history-server` 기반 SysV generated service로 동작할 수 있습니다.
+
+```text
+Loaded: loaded (/etc/init.d/spark-history-server; generated)
+```
+
+이 경우 VM 부팅 시 네트워크 또는 HDFS NameNode보다 먼저 기동되어 실패할 수 있으므로 systemd override로 부팅 순서와 재시작 정책을 보강합니다.
+
+```ini
+[Unit]
+After=network-online.target hadoop-hdfs-namenode.service
+Wants=network-online.target hadoop-hdfs-namenode.service
+
+[Service]
+Restart=on-failure
+RestartSec=30
+```
+
+적용 확인:
+
+```bash
+ansible master -b -m shell -a "systemctl cat spark-history-server"
+ansible master -b -m command -a "systemctl is-enabled spark-history-server"
+ansible master -b -m command -a "systemctl is-active spark-history-server"
+ansible master -m shell -a "ss -lntp | grep -E '18080|19105' || true"
+```
+
+### Spark History dashboard No data
+
+Spark History Server dashboard에서 일부 패널이 `No data`로 보이면 dashboard query의 metric name이 실제 JMX Exporter metric과 맞는지 확인합니다.
+
+확인:
+
+```bash
+ansible ops -m shell -a "curl -s 'http://127.0.0.1:9090/api/v1/label/__name__/values' | grep -o 'jvm_[^\"]*' | sort -u | head -100"
+ansible master -m shell -a "curl -s http://127.0.0.1:19105/metrics | grep -Ei 'jvm_memory|jvm_threads|jvm_gc' | head -100"
+```
+
+현재 Spark History Server dashboard는 다음 metric 이름을 기준으로 합니다.
+
+```text
+jvm_memory_used_bytes
+jvm_memory_committed_bytes
+jvm_memory_max_bytes
+jvm_threads_current
+jvm_gc_collection_seconds_count
+```
+
+다음과 같은 이름을 사용하면 현재 환경에서는 `No data`가 발생할 수 있습니다.
+
+```text
+jvm_memory_bytes_used
+jvm_memory_bytes_committed
+jvm_memory_bytes_max
+```
+
 ## Git에 포함하지 않는 파일
 
 실제 IP, 사용자명, SSH key, 로그 파일은 Git에 올리지 않습니다.
@@ -1329,20 +1604,34 @@ inventory/group_vars/all.yml.example
 44. HDFS alert rule을 고정 metric name 기반으로 정리
 45. HDFS Health Overview Grafana dashboard 추가
 46. Grafana dashboard JSON 자동 배포 task 추가
+47. NameNode Backup Overview Grafana dashboard 추가
+48. NameNode backup metric file 권한 문제 수정
+49. Node Exporter textfile collector 기반 백업 metric 수집 검증
+50. YARN ResourceManager Overview Grafana dashboard 추가
+51. YARN ResourceManager 실제 metric name 기준 dashboard query 정리
+52. YARN 상태 기반 alert rule 추가
+53. YARN Active/Lost/Unhealthy/Shutdown NodeManager 감시 구성
+54. YARN memory/vCore usage warning/critical alert 구성
+55. Prometheus alert rule YAML 들여쓰기 오류 수정 및 promtool 검증 절차 보강
+56. Spark History Server Overview Grafana dashboard 추가
+57. Spark History Server JVM metric name 기준 dashboard query 수정
+58. Spark History Server JMX Exporter metric 수집 확인
+59. Spark History Server VM 재부팅 후 자동 기동 설정
+60. Spark History Server systemd override 기반 부팅 순서 및 재시작 정책 보강
 ```
 
 ## 향후 계획
 
 ```text
-1. Grafana dashboard에 NameNode backup 상태 패널 추가
-2. Grafana dashboard에 YARN ResourceManager 상태 패널 추가
-3. Grafana dashboard에 Spark History Server 상태 패널 추가
-4. Alertmanager Slack 또는 Email receiver 연동
-5. HDFS/YARN/Spark 주요 metric 기반 alert rule 추가 고도화
-6. 서비스별 runbook 문서화
-7. NameNode metadata 복구 runbook 별도 문서화
-8. HA 구성 설계 문서화
-9. Ansible role 리팩토링
-10. group/host 이름 중복 warning 제거
-11. README 및 운영 문서 보강
+1. Alertmanager Slack 또는 Email receiver 연동
+2. HDFS/YARN/Spark 주요 metric 기반 alert rule 추가 고도화
+3. Spark application event log 기반 지표 확장 검토
+4. 서비스별 runbook 문서화
+5. NameNode metadata 복구 runbook 별도 문서화
+6. HA 구성 설계 문서화
+7. Spark History Server 관리 playbook role화
+8. Ansible role 리팩토링
+9. group/host 이름 중복 warning 제거
+10. README 및 운영 문서 보강
+11. GitHub 포트폴리오용 아키텍처 다이어그램 추가
 ```

@@ -2,39 +2,49 @@
 - name: Start Spark History Server
   hosts: master
   become: true
+
   tasks:
-    - name: Reset failed Spark History Server state
-      ansible.builtin.shell: |
-        systemctl reset-failed spark-history-server || true
+    - name: Reset failed spark-history-server
+      ansible.builtin.shell: systemctl reset-failed spark-history-server || true
       changed_when: false
 
-    - name: Start and enable Spark History Server
-      block:
-        - name: Start spark-history-server
-          ansible.builtin.service:
-            name: spark-history-server
-            state: started
-            enabled: true
+    - name: Ensure Spark History Server systemd override directory exists
+      ansible.builtin.file:
+        path: /etc/systemd/system/spark-history-server.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
 
-        - name: Wait for Spark History Server UI
-          ansible.builtin.wait_for:
-            host: "{{ yarn_resourcemanager_host }}"
-            port: 18080
-            timeout: 60
+    - name: Configure Spark History Server systemd override
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/spark-history-server.service.d/override.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          After=network-online.target hadoop-hdfs-namenode.service
+          Wants=network-online.target hadoop-hdfs-namenode.service
 
-      rescue:
-        - name: Show Spark History Server status
-          ansible.builtin.shell: systemctl status spark-history-server --no-pager -l || true
-          changed_when: false
+          [Service]
+          Restart=on-failure
+          RestartSec=30
 
-        - name: Show Spark History Server journal
-          ansible.builtin.shell: journalctl -u spark-history-server -n 120 --no-pager || true
-          changed_when: false
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
 
-        - name: Show Spark logs
-          ansible.builtin.shell: tail -120 /var/log/spark/*history*.log 2>/dev/null || true
-          changed_when: false
+    - name: Start and enable spark-history-server
+      ansible.builtin.service:
+        name: spark-history-server
+        state: started
+        enabled: true
 
-        - name: Fail after Spark History Server debug output
-          ansible.builtin.fail:
-            msg: "Spark History Server failed to start. See logs above."
+    - name: Check spark-history-server status
+      ansible.builtin.shell: systemctl status spark-history-server --no-pager -l || true
+      changed_when: false
+
+    - name: Show spark-history-server logs
+      ansible.builtin.shell: journalctl -u spark-history-server -n 120 --no-pager || true
+      changed_when: false
