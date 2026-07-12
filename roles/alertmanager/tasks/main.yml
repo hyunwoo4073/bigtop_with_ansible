@@ -49,3 +49,27 @@
     host: "127.0.0.1"
     port: "{{ alertmanager_port }}"
     timeout: 60
+
+- name: Ensure Alertmanager secret directory exists
+  ansible.builtin.file:
+    path: "{{ alertmanager_slack_webhook_file | dirname }}"
+    state: directory
+    owner: root
+    group: prometheus
+    mode: "0750"
+  become: true
+  when: alertmanager_slack_enabled
+
+- name: Check Slack webhook file exists
+  ansible.builtin.stat:
+    path: "{{ alertmanager_slack_webhook_file }}"
+  register: alertmanager_slack_webhook_stat
+  become: true
+  when: alertmanager_slack_enabled
+
+- name: Fail when Slack webhook file is missing
+  ansible.builtin.fail:
+    msg: "Slack webhook file is missing: {{ alertmanager_slack_webhook_file }}"
+  when:
+    - alertmanager_slack_enabled
+    - not alertmanager_slack_webhook_stat.stat.exists

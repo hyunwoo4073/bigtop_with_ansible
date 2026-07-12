@@ -161,3 +161,8 @@ yarn_memory_warning_percent: 80
 yarn_memory_critical_percent: 90
 yarn_vcore_warning_percent: 80
 yarn_vcore_critical_percent: 90
+
+# Alertmanager Slack receiver
+alertmanager_slack_enabled: false
+alertmanager_slack_channel: "#bigtop-alerts"
+alertmanager_slack_webhook_file: "/etc/prometheus/"

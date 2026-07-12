@@ -1,0 +1,232 @@
+---
+- name: Check base exporter on all nodes
+  hosts: all
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Check Node Exporter service
+      ansible.builtin.command: systemctl is-active prometheus-node-exporter
+      changed_when: false
+
+    - name: Check Node Exporter port
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 9100
+        timeout: 5
+
+
+- name: Check HDFS, YARN and Spark services on master
+  hosts: master
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Check NameNode service
+      ansible.builtin.command: systemctl is-active hadoop-hdfs-namenode
+      changed_when: false
+
+    - name: Check ResourceManager service
+      ansible.builtin.command: systemctl is-active hadoop-yarn-resourcemanager
+      changed_when: false
+
+    - name: Check Spark History Server service
+      ansible.builtin.command: systemctl is-active spark-history-server
+      changed_when: false
+
+    - name: Check HDFS NameNode RPC port
+      ansible.builtin.wait_for:
+        host: "{{ hdfs_namenode_host | default('master') }}"
+        port: 9000
+        timeout: 10
+
+    - name: Check HDFS NameNode Web UI port
+      ansible.builtin.wait_for:
+        host: "{{ hdfs_namenode_host | default('master') }}"
+        port: 9870
+        timeout: 10
+
+    - name: Check YARN ResourceManager Web UI port
+      ansible.builtin.wait_for:
+        host: "{{ yarn_resourcemanager_host | default(hdfs_namenode_host | default('master')) }}"
+        port: 8088
+        timeout: 10
+
+    - name: Check Spark History Server port
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 18080
+        timeout: 10
+
+    - name: Check master JMX Exporter ports
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: "{{ item }}"
+        timeout: 10
+      loop:
+        - 19101
+        - 19103
+        - 19105
+
+    - name: Check HDFS live DataNode count
+      ansible.builtin.shell: sudo -u hdfs hdfs dfsadmin -report
+      register: hdfs_report
+      changed_when: false
+      failed_when: "'Live datanodes (' ~ (hdfs_expected_live_datanodes | default(2) | string) ~ ')' not in hdfs_report.stdout"
+
+    - name: Show HDFS DataNode summary
+      ansible.builtin.shell: sudo -u hdfs hdfs dfsadmin -report | grep -E 'Live datanodes|Dead datanodes'
+      changed_when: false
+
+    - name: Check YARN active NodeManager count
+      ansible.builtin.shell: sudo -u yarn yarn node -list
+      register: yarn_node_list
+      changed_when: false
+      failed_when: "'Total Nodes:' ~ (yarn_expected_active_nodemanagers | default(2) | string) not in yarn_node_list.stdout"
+
+    - name: Show YARN node summary
+      ansible.builtin.shell: sudo -u yarn yarn node -list | grep -E 'Total Nodes|RUNNING'
+      changed_when: false
+
+    - name: Check NameNode JMX metrics
+      ansible.builtin.shell: curl -fsS http://127.0.0.1:19101/metrics | grep -E 'hadoop_namenode_fsnamesystem_numlivedatanodes|hadoop_namenode_fsnamesystem_numdeaddatanodes' | head
+      changed_when: false
+
+    - name: Check ResourceManager JMX metrics
+      ansible.builtin.shell: curl -fsS http://127.0.0.1:19103/metrics | grep -E 'hadoop_resourcemanager_clustermetrics_numactivenms|hadoop_resourcemanager_clustermetrics_utilizedmb' | head
+      changed_when: false
+
+    - name: Check Spark History Server JMX metrics
+      ansible.builtin.shell: curl -fsS http://127.0.0.1:19105/metrics | grep -E 'jvm_threads_current|jvm_memory_used_bytes' | head
+      changed_when: false
+
+    - name: Check NameNode backup metric from Node Exporter
+      ansible.builtin.shell: curl -fsS http://127.0.0.1:9100/metrics | grep hdfs_namenode_backup_success
+      changed_when: false
+
+
+- name: Check DataNode and NodeManager services on workers
+  hosts: workers
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Check DataNode service
+      ansible.builtin.command: systemctl is-active hadoop-hdfs-datanode
+      changed_when: false
+
+    - name: Check NodeManager service
+      ansible.builtin.command: systemctl is-active hadoop-yarn-nodemanager
+      changed_when: false
+
+    - name: Check worker JMX ports
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: "{{ item }}"
+        timeout: 5
+      loop:
+        - 19102
+        - 19104
+
+    - name: Check DataNode JMX metrics
+      ansible.builtin.shell: curl -fsS http://127.0.0.1:19102/metrics | head
+      changed_when: false
+
+    - name: Check NodeManager JMX metrics
+      ansible.builtin.shell: curl -fsS http://127.0.0.1:19104/metrics | head
+      changed_when: false
+
+
+- name: Check monitoring stack on ops node
+  hosts: ops
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Check Prometheus service
+      ansible.builtin.command: systemctl is-active prometheus
+      changed_when: false
+
+    - name: Check Grafana service
+      ansible.builtin.command: systemctl is-active grafana-server
+      changed_when: false
+
+    - name: Check Alertmanager service
+      ansible.builtin.command: systemctl is-active prometheus-alertmanager
+      changed_when: false
+
+    - name: Check monitoring service ports
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: "{{ item }}"
+        timeout: 5
+      loop:
+        - 9090
+        - 3000
+        - 9093
+
+    - name: Check Prometheus config
+      ansible.builtin.command: promtool check config /etc/prometheus/prometheus.yml
+      changed_when: false
+
+    - name: Check Prometheus alert rules
+      ansible.builtin.command: promtool check rules /etc/prometheus/rules/platform-alerts.yml
+      changed_when: false
+
+    - name: Check Alertmanager config
+      ansible.builtin.shell: |
+        if command -v amtool >/dev/null 2>&1; then
+          amtool check-config /etc/prometheus/alertmanager.yml
+        else
+          echo "amtool not found, skip alertmanager config check"
+        fi
+      changed_when: false
+
+    - name: Check Prometheus health endpoint
+      ansible.builtin.shell: curl -fsS http://127.0.0.1:9090/-/healthy
+      changed_when: false
+
+    - name: Check Alertmanager health endpoint
+      ansible.builtin.shell: curl -fsS http://127.0.0.1:9093/-/healthy
+      changed_when: false
+
+    - name: Check Grafana health endpoint
+      ansible.builtin.shell: curl -fsS http://127.0.0.1:3000/api/health
+      changed_when: false
+
+    - name: Check all Prometheus JMX targets are up
+      ansible.builtin.shell: |
+        curl -fsSG 'http://127.0.0.1:9090/api/v1/query' \
+          --data-urlencode 'query=min(up{job=~".*jmx"})' \
+        | grep -q '"value":\[.*,"1"\]'
+      changed_when: false
+
+    - name: Check Grafana dashboard files
+      ansible.builtin.stat:
+        path: "/var/lib/grafana/dashboards/{{ item }}"
+      register: grafana_dashboard_files
+      loop:
+        - bigtop-platform-overview.json
+        - hdfs-health-overview.json
+        - namenode-backup-overview.json
+        - yarn-resource-overview.json
+        - spark-history-overview.json
+
+    - name: Fail when Grafana dashboard file is missing
+      ansible.builtin.fail:
+        msg: "Missing Grafana dashboard file: {{ item.item }}"
+      when: not item.stat.exists
+      loop: "{{ grafana_dashboard_files.results }}"
+
+    - name: Check Slack webhook file when Slack receiver is enabled
+      ansible.builtin.stat:
+        path: "{{ alertmanager_slack_webhook_file | default('/etc/prometheus/alertmanager-secrets/slack_webhook_url') }}"
+      register: slack_webhook_file
+      when: alertmanager_slack_enabled | default(false) | bool
+
+    - name: Fail when Slack webhook file is missing
+      ansible.builtin.fail:
+        msg: "Slack webhook file is missing: {{ alertmanager_slack_webhook_file | default('/etc/prometheus/alertmanager-secrets/slack_webhook_url') }}"
+      when:
+        - alertmanager_slack_enabled | default(false) | bool
+        - not slack_webhook_file.stat.exists
