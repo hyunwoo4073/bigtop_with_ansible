@@ -1,0 +1,336 @@
+{
+  "uid": "yarn-queue-overview",
+  "title": "YARN Queue Overview",
+  "tags": ["bigtop", "yarn", "queue"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "templating": {
+    "list": [
+      {
+        "name": "queue",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(yarn_queue_appsrunning{queue!=\"root\"}, queue)",
+        "refresh": 1,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Queue Metrics UP",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "count(yarn_queue_appsrunning{job=\"yarn-resourcemanager-jmx\", queue!=\"root\"})",
+          "legendFormat": "queue metrics",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Running Apps",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(yarn_queue_appsrunning{job=\"yarn-resourcemanager-jmx\", queue=~\"$queue\"})",
+          "legendFormat": "running",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Pending Apps",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(yarn_queue_appspending{job=\"yarn-resourcemanager-jmx\", queue=~\"$queue\"})",
+          "legendFormat": "pending",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Failed Apps Increase",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(increase(yarn_queue_appsfailed{job=\"yarn-resourcemanager-jmx\", queue=~\"$queue\"}[10m]))",
+          "legendFormat": "failed apps",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Queue Running / Pending Apps",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        {
+          "expr": "yarn_queue_appsrunning{job=\"yarn-resourcemanager-jmx\", queue=~\"$queue\"}",
+          "legendFormat": "{{ '{{' }}queue{{ '}}' }} running",
+          "refId": "A"
+        },
+        {
+          "expr": "yarn_queue_appspending{job=\"yarn-resourcemanager-jmx\", queue=~\"$queue\"}",
+          "legendFormat": "{{ '{{' }}queue{{ '}}' }} pending",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Queue Memory MB",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "expr": "yarn_queue_allocatedmb{job=\"yarn-resourcemanager-jmx\", queue=~\"$queue\"}",
+          "legendFormat": "{{ '{{' }}queue{{ '}}' }} allocated",
+          "refId": "A"
+        },
+        {
+          "expr": "yarn_queue_availablemb{job=\"yarn-resourcemanager-jmx\", queue=~\"$queue\"}",
+          "legendFormat": "{{ '{{' }}queue{{ '}}' }} available",
+          "refId": "B"
+        },
+        {
+          "expr": "yarn_queue_pendingmb{job=\"yarn-resourcemanager-jmx\", queue=~\"$queue\"}",
+          "legendFormat": "{{ '{{' }}queue{{ '}}' }} pending",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "decmbytes" },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Queue vCores",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "expr": "yarn_queue_allocatedvcores{job=\"yarn-resourcemanager-jmx\", queue=~\"$queue\"}",
+          "legendFormat": "{{ '{{' }}queue{{ '}}' }} allocated",
+          "refId": "A"
+        },
+        {
+          "expr": "yarn_queue_availablevcores{job=\"yarn-resourcemanager-jmx\", queue=~\"$queue\"}",
+          "legendFormat": "{{ '{{' }}queue{{ '}}' }} available",
+          "refId": "B"
+        },
+        {
+          "expr": "yarn_queue_pendingvcores{job=\"yarn-resourcemanager-jmx\", queue=~\"$queue\"}",
+          "legendFormat": "{{ '{{' }}queue{{ '}}' }} pending",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Queue Containers",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        {
+          "expr": "yarn_queue_allocatedcontainers{job=\"yarn-resourcemanager-jmx\", queue=~\"$queue\"}",
+          "legendFormat": "{{ '{{' }}queue{{ '}}' }} allocated",
+          "refId": "A"
+        },
+        {
+          "expr": "yarn_queue_pendingcontainers{job=\"yarn-resourcemanager-jmx\", queue=~\"$queue\"}",
+          "legendFormat": "{{ '{{' }}queue{{ '}}' }} pending",
+          "refId": "B"
+        },
+        {
+          "expr": "yarn_queue_reservedcontainers{job=\"yarn-resourcemanager-jmx\", queue=~\"$queue\"}",
+          "legendFormat": "{{ '{{' }}queue{{ '}}' }} reserved",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Queue Memory Usage %",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "targets": [
+        {
+          "expr": "(yarn_queue_allocatedmb{job=\"yarn-resourcemanager-jmx\", queue=~\"$queue\"} / clamp_min(yarn_queue_allocatedmb{job=\"yarn-resourcemanager-jmx\", queue=~\"$queue\"} + yarn_queue_availablemb{job=\"yarn-resourcemanager-jmx\", queue=~\"$queue\"}, 1)) * 100",
+          "legendFormat": "{{ '{{' }}queue{{ '}}' }} memory usage",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "red", "value": 90 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Queue Failed / Killed Apps",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "targets": [
+        {
+          "expr": "increase(yarn_queue_appsfailed{job=\"yarn-resourcemanager-jmx\", queue=~\"$queue\"}[10m])",
+          "legendFormat": "{{ '{{' }}queue{{ '}}' }} failed",
+          "refId": "A"
+        },
+        {
+          "expr": "increase(yarn_queue_appskilled{job=\"yarn-resourcemanager-jmx\", queue=~\"$queue\"}[10m])",
+          "legendFormat": "{{ '{{' }}queue{{ '}}' }} killed",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      }
+    }
+  ]
+}

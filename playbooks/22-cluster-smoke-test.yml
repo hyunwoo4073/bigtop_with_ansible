@@ -1,0 +1,134 @@
+---
+- name: Run cluster smoke test
+  hosts: master
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Set smoke test run id
+      ansible.builtin.set_fact:
+        smoke_test_run_id: "{{ lookup('pipe', 'date +%Y%m%d%H%M%S') }}"
+
+    - name: Set smoke test paths
+      ansible.builtin.set_fact:
+        smoke_test_local_file: "/tmp/bigtop-smoke-test-{{ smoke_test_run_id }}.txt"
+        smoke_test_hdfs_dir: "/tmp/bigtop-smoke-test/{{ smoke_test_run_id }}"
+        smoke_test_hdfs_file: "/tmp/bigtop-smoke-test/{{ smoke_test_run_id }}/sample.txt"
+
+    - name: Show smoke test run id
+      ansible.builtin.debug:
+        msg: "Smoke test run id: {{ smoke_test_run_id }}"
+
+    - name: Check HDFS NameNode service
+      ansible.builtin.command: systemctl is-active hadoop-hdfs-namenode
+      changed_when: false
+
+    - name: Check YARN ResourceManager service
+      ansible.builtin.command: systemctl is-active hadoop-yarn-resourcemanager
+      changed_when: false
+
+    - name: Check Spark History Server service
+      ansible.builtin.command: systemctl is-active spark-history-server
+      changed_when: false
+
+    - name: Create local smoke test file
+      ansible.builtin.copy:
+        dest: "{{ smoke_test_local_file }}"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          bigtop smoke test
+          run_id={{ smoke_test_run_id }}
+          hdfs=write-read-check
+          spark=on-yarn
+
+    - name: Create HDFS smoke test directory
+      ansible.builtin.shell: |
+        sudo -u hdfs hdfs dfs -mkdir -p {{ smoke_test_hdfs_dir }}
+      changed_when: true
+
+    - name: Upload smoke test file to HDFS
+      ansible.builtin.shell: |
+        sudo -u hdfs hdfs dfs -put -f {{ smoke_test_local_file }} {{ smoke_test_hdfs_file }}
+      changed_when: true
+
+    - name: Verify HDFS smoke test file exists
+      ansible.builtin.shell: |
+        sudo -u hdfs hdfs dfs -test -f {{ smoke_test_hdfs_file }}
+      changed_when: false
+
+    - name: Read HDFS smoke test file
+      ansible.builtin.shell: |
+        sudo -u hdfs hdfs dfs -cat {{ smoke_test_hdfs_file }}
+      register: hdfs_smoke_file_content
+      changed_when: false
+      failed_when: "'bigtop smoke test' not in hdfs_smoke_file_content.stdout"
+
+    - name: Show HDFS smoke test file content
+      ansible.builtin.debug:
+        var: hdfs_smoke_file_content.stdout_lines
+
+    - name: Check YARN NodeManager count before Spark test
+      ansible.builtin.shell: |
+        sudo -u yarn yarn node -list
+      register: yarn_node_list
+      changed_when: false
+      failed_when: "'Total Nodes:' ~ (yarn_expected_active_nodemanagers | default(2) | string) not in yarn_node_list.stdout"
+
+    - name: Find Spark examples jar
+      ansible.builtin.shell: |
+        find /usr -name 'spark-examples*.jar' 2>/dev/null | head -1
+      register: spark_examples_jar
+      changed_when: false
+      failed_when: spark_examples_jar.stdout | length == 0
+
+    - name: Show Spark examples jar
+      ansible.builtin.debug:
+        msg: "Spark examples jar: {{ spark_examples_jar.stdout }}"
+
+    - name: Run SparkPi on YARN
+      ansible.builtin.shell: |
+        sudo -u hadoop spark-submit \
+          --master yarn \
+          --deploy-mode client \
+          --class org.apache.spark.examples.SparkPi \
+          {{ spark_examples_jar.stdout }} \
+          10
+      register: spark_pi_result
+      changed_when: true
+      failed_when:
+        - spark_pi_result.rc != 0 or
+          ('Pi is roughly' not in spark_pi_result.stdout and 'Pi is roughly' not in spark_pi_result.stderr)
+
+    - name: Show SparkPi result
+      ansible.builtin.debug:
+        msg: "{{ (spark_pi_result.stdout_lines + spark_pi_result.stderr_lines) | select('search', 'Pi is roughly|application_') | list }}"
+
+    - name: Check Spark History Server API
+      ansible.builtin.shell: |
+        curl -fsS http://127.0.0.1:18080/api/v1/applications | head
+      changed_when: false
+
+    - name: Check Spark History Server JMX metrics
+      ansible.builtin.shell: |
+        curl -fsS http://127.0.0.1:19105/metrics | grep -E 'jvm_threads_current|jvm_memory_used_bytes' | head
+      changed_when: false
+
+    - name: Clean up HDFS smoke test directory
+      ansible.builtin.shell: |
+        sudo -u hdfs hdfs dfs -rm -r -f {{ smoke_test_hdfs_dir }}
+      changed_when: true
+
+    - name: Clean up local smoke test file
+      ansible.builtin.file:
+        path: "{{ smoke_test_local_file }}"
+        state: absent
+
+    - name: Smoke test summary
+      ansible.builtin.debug:
+        msg:
+          - "HDFS write/read test: OK"
+          - "YARN NodeManager count check: OK"
+          - "SparkPi on YARN test: OK"
+          - "Spark History Server API/JMX check: OK"

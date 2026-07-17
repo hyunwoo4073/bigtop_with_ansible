@@ -16,6 +16,18 @@ rules:
   #   Hadoop<service=NameNode, name=FSNamesystem><>NumLiveDataNodes: 2
   # becomes:
   #   hadoop_namenode_fsnamesystem_numlivedatanodes 2
+  - pattern: 'Hadoop<service=ResourceManager, name=QueueMetrics, q0=root, q1=([^,>]+)><>(AppsSubmitted|AppsRunning|AppsPending|AppsCompleted|AppsFailed|AppsKilled|AllocatedMB|AllocatedVCores|AllocatedContainers|AvailableMB|AvailableVCores|PendingMB|PendingVCores|PendingContainers|ReservedMB|ReservedVCores|ReservedContainers|ActiveUsers|ActiveApplications|PendingApplications):.*'
+    name: yarn_queue_$2
+    labels:
+      queue: "$1"
+    type: GAUGE
+
+  - pattern: 'Hadoop<service=ResourceManager, name=QueueMetrics, q0=root><>(AppsSubmitted|AppsRunning|AppsPending|AppsCompleted|AppsFailed|AppsKilled|AllocatedMB|AllocatedVCores|AllocatedContainers|AvailableMB|AvailableVCores|PendingMB|PendingVCores|PendingContainers|ReservedMB|ReservedVCores|ReservedContainers|ActiveUsers|ActiveApplications|PendingApplications):.*'
+    name: yarn_queue_$1
+    labels:
+      queue: "root"
+    type: GAUGE
+
   - pattern: 'Hadoop<service=([^,>]+), name=([^,>]+)><>([^:]+):.*'
     name: hadoop_$1_$2_$3
     type: GAUGE

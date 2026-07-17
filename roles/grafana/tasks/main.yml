@@ -143,6 +143,16 @@
   become: true
   notify: Restart grafana
 
+- name: Deploy YARN Queue Overview dashboard
+  ansible.builtin.template:
+    src: dashboard_json/yarn-queue-overview.json.j2
+    dest: "{{ grafana_dashboard_dir }}/yarn-queue-overview.json"
+    owner: root
+    group: grafana
+    mode: "0644"
+  become: true
+  notify: Restart grafana
+
 - name: Start and enable Grafana
   ansible.builtin.service:
     name: grafana-server

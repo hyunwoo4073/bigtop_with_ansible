@@ -127,6 +127,51 @@ groups:
           summary: "YARN vCore usage is critical"
           description: "YARN vCore usage is over {{ yarn_vcore_critical_percent }}%. Current={{ '{{' }} $value {{ '}}' }}%."
 
+      - alert: YARNQueueMetricsMissing
+        expr: absent(yarn_queue_appsrunning{job="yarn-resourcemanager-jmx", queue="batch"})
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "YARN queue metrics are missing"
+          description: "YARN QueueMetrics are not available from ResourceManager JMX Exporter."
+
+      - alert: YARNQueuePendingApplications
+        expr: yarn_queue_appspending{job="yarn-resourcemanager-jmx", queue!="root"} > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "YARN queue has pending applications"
+          description: "Queue {{ '{{' }} $labels.queue {{ '}}' }} has pending applications for more than 10 minutes. Current pending apps={{ '{{' }} $value {{ '}}' }}."
+
+      - alert: YARNQueuePendingMemory
+        expr: yarn_queue_pendingmb{job="yarn-resourcemanager-jmx", queue!="root"} > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "YARN queue has pending memory"
+          description: "Queue {{ '{{' }} $labels.queue {{ '}}' }} has pending memory for more than 10 minutes. Current pending MB={{ '{{' }} $value {{ '}}' }}."
+
+      - alert: YARNQueueMemoryUsageHigh
+        expr: (yarn_queue_allocatedmb{job="yarn-resourcemanager-jmx", queue!="root"} / (yarn_queue_allocatedmb{job="yarn-resourcemanager-jmx", queue!="root"} + yarn_queue_availablemb{job="yarn-resourcemanager-jmx", queue!="root"})) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "YARN queue memory usage is high"
+          description: "Queue {{ '{{' }} $labels.queue {{ '}}' }} memory usage is over 80%. Current={{ '{{' }} $value {{ '}}' }}%."
+
+      - alert: YARNQueueFailedApplications
+        expr: increase(yarn_queue_appsfailed{job="yarn-resourcemanager-jmx", queue!="root"}[10m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "YARN queue has failed applications"
+          description: "Queue {{ '{{' }} $labels.queue {{ '}}' }} has failed applications in the last 10 minutes."
+
       - alert: SparkHistoryServerJMXDown
         expr: up{job="spark-history-jmx"} == 0
         for: 1m

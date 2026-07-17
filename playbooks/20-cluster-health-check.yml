@@ -211,6 +211,7 @@
         - namenode-backup-overview.json
         - yarn-resource-overview.json
         - spark-history-overview.json
+        - yarn-queue-overview.json
 
     - name: Fail when Grafana dashboard file is missing
       ansible.builtin.fail:

@@ -1,0 +1,182 @@
+---
+- name: Collect YARN application diagnostics
+  hosts: master
+  gather_facts: false
+  become: true
+
+  vars:
+    diagnostics_base_dir: "/tmp/yarn-app-diagnostics"
+    diagnostics_remote_dir: "{{ diagnostics_base_dir }}/{{ yarn_app_id }}"
+    diagnostics_archive: "{{ diagnostics_base_dir }}/{{ yarn_app_id }}.tgz"
+    diagnostics_local_dir: "{{ playbook_dir }}/../artifacts/yarn-app-diagnostics"
+    yarn_diagnostics_user: "hadoop"
+    yarn_logs_timeout_seconds: 120
+
+  tasks:
+    - name: Validate yarn_app_id is provided
+      ansible.builtin.assert:
+        that:
+          - yarn_app_id is defined
+          - yarn_app_id | length > 0
+        fail_msg: "Usage: ansible-playbook playbooks/23-yarn-app-diagnostics.yml -e yarn_app_id=application_XXXXXXXXXXXX_XXXX"
+
+    - name: Create diagnostics directory
+      ansible.builtin.file:
+        path: "{{ diagnostics_remote_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Save diagnostics metadata
+      ansible.builtin.copy:
+        dest: "{{ diagnostics_remote_dir }}/metadata.txt"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          yarn_app_id={{ yarn_app_id }}
+          diagnostics_user={{ yarn_diagnostics_user }}
+          collected_at={{ lookup('pipe', 'date -Iseconds') }}
+          host={{ inventory_hostname }}
+
+    - name: Collect YARN application status
+      ansible.builtin.shell: |
+        sudo -u {{ yarn_diagnostics_user }} yarn application -status {{ yarn_app_id }} \
+          > {{ diagnostics_remote_dir }}/application-status.txt 2>&1
+      changed_when: false
+      failed_when: false
+
+    - name: Collect YARN application report from app list
+      ansible.builtin.shell: |
+        sudo -u {{ yarn_diagnostics_user }} yarn application -list -appStates ALL \
+          | grep -E '{{ yarn_app_id }}|Application-Id|Total number of applications' \
+          > {{ diagnostics_remote_dir }}/application-list-match.txt 2>&1 || true
+      changed_when: false
+      failed_when: false
+
+    - name: Collect ResourceManager app API JSON
+      ansible.builtin.shell: |
+        curl -fsS http://{{ yarn_resourcemanager_host | default(hdfs_namenode_host | default('master')) }}:8088/ws/v1/cluster/apps/{{ yarn_app_id }} \
+          > {{ diagnostics_remote_dir }}/rm-app.json 2>&1
+      changed_when: false
+      failed_when: false
+
+    - name: Collect ResourceManager scheduler snapshot
+      ansible.builtin.shell: |
+        curl -fsS http://{{ yarn_resourcemanager_host | default(hdfs_namenode_host | default('master')) }}:8088/ws/v1/cluster/scheduler \
+          > {{ diagnostics_remote_dir }}/rm-scheduler.json 2>&1
+      changed_when: false
+      failed_when: false
+
+    - name: Collect YARN application logs
+      ansible.builtin.shell: |
+        timeout {{ yarn_logs_timeout_seconds }}s sudo -u {{ yarn_diagnostics_user }} yarn logs -applicationId {{ yarn_app_id }} \
+          > {{ diagnostics_remote_dir }}/yarn-logs.txt 2>&1
+      changed_when: false
+      failed_when: false
+
+    - name: Extract suspicious log lines
+      ansible.builtin.shell: |
+        grep -iEn \
+          'exception|error|failed|failure|killed|diagnostic|exit code|outofmemory|container killed|permission denied|no such file|no space|connection refused|timed out|denied|cannot|unable' \
+          {{ diagnostics_remote_dir }}/yarn-logs.txt \
+          | head -300 \
+          > {{ diagnostics_remote_dir }}/suspected-errors.txt 2>&1 || true
+      changed_when: false
+      failed_when: false
+
+    - name: Extract Spark-related log lines
+      ansible.builtin.shell: |
+        grep -iEn \
+          'sparkcontext|spark-submit|driver|executor|shuffle|stage|task failed|lost executor|applicationmaster|container' \
+          {{ diagnostics_remote_dir }}/yarn-logs.txt \
+          | head -300 \
+          > {{ diagnostics_remote_dir }}/spark-related.txt 2>&1 || true
+      changed_when: false
+      failed_when: false
+
+    - name: Collect current YARN node list
+      ansible.builtin.shell: |
+        sudo -u yarn yarn node -list > {{ diagnostics_remote_dir }}/yarn-node-list.txt 2>&1
+      changed_when: false
+      failed_when: false
+
+    - name: Collect HDFS report summary
+      ansible.builtin.shell: |
+        sudo -u hdfs hdfs dfsadmin -report > {{ diagnostics_remote_dir }}/hdfs-report.txt 2>&1
+      changed_when: false
+      failed_when: false
+
+    - name: Collect queue metrics from Prometheus
+      ansible.builtin.shell: |
+        curl -fsSG http://worker3:9090/api/v1/query \
+          --data-urlencode 'query=yarn_queue_appsrunning' \
+          > {{ diagnostics_remote_dir }}/prom-yarn-queue-appsrunning.json 2>&1 || true
+
+        curl -fsSG http://worker3:9090/api/v1/query \
+          --data-urlencode 'query=yarn_queue_appspending' \
+          > {{ diagnostics_remote_dir }}/prom-yarn-queue-appspending.json 2>&1 || true
+
+        curl -fsSG http://worker3:9090/api/v1/query \
+          --data-urlencode 'query=yarn_queue_allocatedmb' \
+          > {{ diagnostics_remote_dir }}/prom-yarn-queue-allocatedmb.json 2>&1 || true
+
+        curl -fsSG http://worker3:9090/api/v1/query \
+          --data-urlencode 'query=yarn_queue_pendingmb' \
+          > {{ diagnostics_remote_dir }}/prom-yarn-queue-pendingmb.json 2>&1 || true
+      changed_when: false
+      failed_when: false
+
+    - name: Create diagnostics summary
+      ansible.builtin.shell: |
+        {
+          echo "===== YARN Application Status ====="
+          cat {{ diagnostics_remote_dir }}/application-status.txt
+          echo
+          echo "===== Suspicious Log Lines ====="
+          cat {{ diagnostics_remote_dir }}/suspected-errors.txt
+          echo
+          echo "===== Spark Related Lines ====="
+          cat {{ diagnostics_remote_dir }}/spark-related.txt
+        } > {{ diagnostics_remote_dir }}/summary.txt
+      changed_when: false
+      failed_when: false
+
+    - name: Show diagnostics summary
+      ansible.builtin.shell: |
+        sed -n '1,160p' {{ diagnostics_remote_dir }}/summary.txt
+      register: diagnostics_summary
+      changed_when: false
+      failed_when: false
+
+    - name: Print diagnostics summary
+      ansible.builtin.debug:
+        var: diagnostics_summary.stdout_lines
+
+    - name: Create diagnostics archive
+      ansible.builtin.archive:
+        path: "{{ diagnostics_remote_dir }}"
+        dest: "{{ diagnostics_archive }}"
+        format: gz
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Ensure local diagnostics directory exists
+      ansible.builtin.file:
+        path: "{{ diagnostics_local_dir }}"
+        state: directory
+        mode: "0755"
+      delegate_to: localhost
+      become: false
+
+    - name: Show local diagnostics archive path
+      ansible.builtin.debug:
+        msg: "{{ diagnostics_local_dir }}/{{ yarn_app_id }}.tgz"
+
+    - name: Fetch diagnostics archive to control node
+      ansible.builtin.fetch:
+        src: "{{ diagnostics_archive }}"
+        dest: "{{ diagnostics_local_dir }}/{{ yarn_app_id }}.tgz"
+        flat: true

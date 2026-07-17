@@ -53,3 +53,12 @@
     group: hadoop
     mode: "0644"
   become: true
+
+- name: Deploy YARN Capacity Scheduler configuration
+  ansible.builtin.template:
+    src: capacity-scheduler.xml.j2
+    dest: "{{ hadoop_conf_dir | default('/etc/hadoop/conf') }}/capacity-scheduler.xml"
+    owner: root
+    group: hadoop
+    mode: "0644"
+  become: true

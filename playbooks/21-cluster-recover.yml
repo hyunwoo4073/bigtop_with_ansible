@@ -1,0 +1,235 @@
+---
+- name: Recover base exporter on all nodes
+  hosts: all
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Reset failed Node Exporter
+      ansible.builtin.command: systemctl reset-failed prometheus-node-exporter
+      changed_when: false
+      failed_when: false
+
+    - name: Ensure Node Exporter is running
+      ansible.builtin.service:
+        name: prometheus-node-exporter
+        state: started
+        enabled: true
+
+    - name: Wait for Node Exporter port
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 9100
+        timeout: 10
+
+
+- name: Recover HDFS NameNode
+  hosts: master
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Reset failed NameNode
+      ansible.builtin.command: systemctl reset-failed hadoop-hdfs-namenode
+      changed_when: false
+      failed_when: false
+
+    - name: Ensure NameNode is running
+      ansible.builtin.service:
+        name: hadoop-hdfs-namenode
+        state: started
+        enabled: true
+
+    - name: Wait for NameNode RPC port
+      ansible.builtin.wait_for:
+        host: "{{ hdfs_namenode_host | default('master') }}"
+        port: 9000
+        timeout: 60
+
+    - name: Wait for NameNode Web UI port
+      ansible.builtin.wait_for:
+        host: "{{ hdfs_namenode_host | default('master') }}"
+        port: 9870
+        timeout: 60
+
+
+- name: Recover HDFS DataNodes
+  hosts: workers
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Reset failed DataNode
+      ansible.builtin.command: systemctl reset-failed hadoop-hdfs-datanode
+      changed_when: false
+      failed_when: false
+
+    - name: Ensure DataNode is running
+      ansible.builtin.service:
+        name: hadoop-hdfs-datanode
+        state: started
+        enabled: true
+
+    - name: Wait for DataNode JMX Exporter port
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 19102
+        timeout: 30
+
+
+- name: Recover YARN ResourceManager
+  hosts: master
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Reset failed ResourceManager
+      ansible.builtin.command: systemctl reset-failed hadoop-yarn-resourcemanager
+      changed_when: false
+      failed_when: false
+
+    - name: Ensure ResourceManager is running
+      ansible.builtin.service:
+        name: hadoop-yarn-resourcemanager
+        state: started
+        enabled: true
+
+    - name: Wait for ResourceManager Web UI port
+      ansible.builtin.wait_for:
+        host: "{{ yarn_resourcemanager_host | default(hdfs_namenode_host | default('master')) }}"
+        port: 8088
+        timeout: 60
+
+
+- name: Recover YARN NodeManagers
+  hosts: workers
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Reset failed NodeManager
+      ansible.builtin.command: systemctl reset-failed hadoop-yarn-nodemanager
+      changed_when: false
+      failed_when: false
+
+    - name: Ensure NodeManager is running
+      ansible.builtin.service:
+        name: hadoop-yarn-nodemanager
+        state: started
+        enabled: true
+
+    - name: Wait for NodeManager JMX Exporter port
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 19104
+        timeout: 30
+
+
+- name: Recover Spark History Server
+  hosts: master
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Reset failed Spark History Server
+      ansible.builtin.command: systemctl reset-failed spark-history-server
+      changed_when: false
+      failed_when: false
+
+    - name: Ensure Spark History Server is running
+      ansible.builtin.service:
+        name: spark-history-server
+        state: started
+        enabled: true
+
+    - name: Wait for Spark History Server UI port
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 18080
+        timeout: 60
+
+    - name: Wait for Spark History Server JMX Exporter port
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 19105
+        timeout: 30
+
+
+- name: Recover NameNode backup timer
+  hosts: master
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Reset failed NameNode backup timer
+      ansible.builtin.command: systemctl reset-failed namenode-metadata-backup.timer
+      changed_when: false
+      failed_when: false
+
+    - name: Ensure NameNode backup timer is running
+      ansible.builtin.service:
+        name: namenode-metadata-backup.timer
+        state: started
+        enabled: true
+
+
+- name: Recover monitoring stack on ops node
+  hosts: ops
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Reset failed Prometheus
+      ansible.builtin.command: systemctl reset-failed prometheus
+      changed_when: false
+      failed_when: false
+
+    - name: Reset failed Grafana
+      ansible.builtin.command: systemctl reset-failed grafana-server
+      changed_when: false
+      failed_when: false
+
+    - name: Reset failed Alertmanager
+      ansible.builtin.command: systemctl reset-failed prometheus-alertmanager
+      changed_when: false
+      failed_when: false
+
+    - name: Ensure Prometheus is running
+      ansible.builtin.service:
+        name: prometheus
+        state: started
+        enabled: true
+
+    - name: Ensure Grafana is running
+      ansible.builtin.service:
+        name: grafana-server
+        state: started
+        enabled: true
+
+    - name: Ensure Alertmanager is running
+      ansible.builtin.service:
+        name: prometheus-alertmanager
+        state: started
+        enabled: true
+
+    - name: Wait for Prometheus port
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 9090
+        timeout: 30
+
+    - name: Wait for Grafana port
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 3000
+        timeout: 30
+
+    - name: Wait for Alertmanager port
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 9093
+        timeout: 30
+
+
+- name: Run cluster health check after recovery
+  ansible.builtin.import_playbook: 20-cluster-health-check.yml

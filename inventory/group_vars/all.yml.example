@@ -166,3 +166,23 @@ yarn_vcore_critical_percent: 90
 alertmanager_slack_enabled: false
 alertmanager_slack_channel: "#bigtop-alerts"
 alertmanager_slack_webhook_file: "/etc/prometheus/"
+
+# YARN Capacity Scheduler queues
+yarn_capacity_scheduler_queues:
+  - name: default
+    capacity: 40
+    maximum_capacity: 100
+    user_limit_factor: 1
+    maximum_am_resource_percent: 0.2
+
+  - name: batch
+    capacity: 40
+    maximum_capacity: 100
+    user_limit_factor: 2
+    maximum_am_resource_percent: 0.3
+
+  - name: adhoc
+    capacity: 20
+    maximum_capacity: 50
+    user_limit_factor: 1
+    maximum_am_resource_percent: 0.1

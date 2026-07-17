@@ -1,0 +1,71 @@
+<?xml version="1.0"?>
+<configuration>
+
+  <property>
+    <name>yarn.scheduler.capacity.maximum-applications</name>
+    <value>10000</value>
+  </property>
+
+  <property>
+    <name>yarn.scheduler.capacity.maximum-am-resource-percent</name>
+    <value>0.2</value>
+  </property>
+
+  <property>
+    <name>yarn.scheduler.capacity.root.queues</name>
+    <value>{% for queue in yarn_capacity_scheduler_queues %}{{ queue.name }}{% if not loop.last %},{% endif %}{% endfor %}</value>
+  </property>
+
+  <property>
+    <name>yarn.scheduler.capacity.root.capacity</name>
+    <value>100</value>
+  </property>
+
+  <property>
+    <name>yarn.scheduler.capacity.root.acl_submit_applications</name>
+    <value>*</value>
+  </property>
+
+  <property>
+    <name>yarn.scheduler.capacity.root.acl_administer_queue</name>
+    <value>*</value>
+  </property>
+
+{% for queue in yarn_capacity_scheduler_queues %}
+  <property>
+    <name>yarn.scheduler.capacity.root.{{ queue.name }}.capacity</name>
+    <value>{{ queue.capacity }}</value>
+  </property>
+
+  <property>
+    <name>yarn.scheduler.capacity.root.{{ queue.name }}.maximum-capacity</name>
+    <value>{{ queue.maximum_capacity }}</value>
+  </property>
+
+  <property>
+    <name>yarn.scheduler.capacity.root.{{ queue.name }}.state</name>
+    <value>RUNNING</value>
+  </property>
+
+  <property>
+    <name>yarn.scheduler.capacity.root.{{ queue.name }}.acl_submit_applications</name>
+    <value>*</value>
+  </property>
+
+  <property>
+    <name>yarn.scheduler.capacity.root.{{ queue.name }}.acl_administer_queue</name>
+    <value>*</value>
+  </property>
+
+  <property>
+    <name>yarn.scheduler.capacity.root.{{ queue.name }}.user-limit-factor</name>
+    <value>{{ queue.user_limit_factor }}</value>
+  </property>
+
+  <property>
+    <name>yarn.scheduler.capacity.root.{{ queue.name }}.maximum-am-resource-percent</name>
+    <value>{{ queue.maximum_am_resource_percent }}</value>
+  </property>
+
+{% endfor %}
+</configuration>
