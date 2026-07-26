@@ -6,9 +6,23 @@ spark.eventLog.dir               {{ spark_event_log_dir }}
 
 spark.history.fs.logDirectory    {{ spark_history_dir }}
 
+# Spark History Server event log cleaner
+spark.history.fs.cleaner.enabled {{ spark_history_cleaner_enabled | default(true) | lower }}
+spark.history.fs.cleaner.interval {{ spark_history_cleaner_interval | default('1d') }}
+spark.history.fs.cleaner.maxAge {{ spark_history_cleaner_max_age | default('7d') }}
+
 spark.driver.memory              {{ spark_driver_memory }}
 spark.executor.memory            {{ spark_executor_memory }}
 spark.executor.cores             {{ spark_executor_cores }}
 spark.executor.instances         {{ spark_executor_instances }}
 
 spark.yarn.historyServer.address {{ yarn_resourcemanager_host }}:18080
+
+# Spark on YARN default resource profile
+spark.yarn.queue {{ spark_default_yarn_queue | default('batch') }}
+spark.driver.memory {{ spark_driver_memory | default('512m') }}
+spark.driver.cores {{ spark_driver_cores | default(1) }}
+spark.executor.memory {{ spark_executor_memory | default('768m') }}
+spark.executor.cores {{ spark_executor_cores | default(1) }}
+spark.executor.instances {{ spark_executor_instances | default(2) }}
+spark.yarn.am.memory {{ spark_yarn_am_memory | default('512m') }}

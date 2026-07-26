@@ -1,0 +1,30 @@
+---
+- name: Configure YARN log aggregation HDFS directory
+  hosts: master
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Check NameNode is active
+      ansible.builtin.command: systemctl is-active hadoop-hdfs-namenode
+      changed_when: false
+
+    - name: Create YARN remote app log directory on HDFS
+      ansible.builtin.shell: |
+        sudo -u hdfs hdfs dfs -mkdir -p {{ yarn_log_aggregation_remote_app_log_dir | default('/tmp/logs') }}
+      changed_when: true
+
+    - name: Set YARN remote app log directory owner
+      ansible.builtin.shell: |
+        sudo -u hdfs hdfs dfs -chown yarn:hadoop {{ yarn_log_aggregation_remote_app_log_dir | default('/tmp/logs') }}
+      changed_when: true
+
+    - name: Set YARN remote app log directory permission
+      ansible.builtin.shell: |
+        sudo -u hdfs hdfs dfs -chmod 1777 {{ yarn_log_aggregation_remote_app_log_dir | default('/tmp/logs') }}
+      changed_when: true
+
+    - name: Show YARN remote app log directory
+      ansible.builtin.shell: |
+        sudo -u hdfs hdfs dfs -ls -d {{ yarn_log_aggregation_remote_app_log_dir | default('/tmp/logs') }}
+      changed_when: false

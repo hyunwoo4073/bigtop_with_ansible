@@ -3,13 +3,13 @@ cluster_domain: "local"
 
 cluster_hosts:
   - name: "master"
-    ip: "192.158.2.100"
+    ip: "192.168.56.101"
   - name: "worker1"
-    ip: "192.158.2.101"
+    ip: "192.168.56.102"
   - name: "worker2"
-    ip: "192.158.2.102"
+    ip: "192.168.56.103"
   - name: "worker3"
-    ip: "192.158.2.103"
+    ip: "192.168.56.104"
 
 timezone: "Asia/Seoul"
 
@@ -29,12 +29,14 @@ common_packages:
 hadoop_user: "hadoop"
 hadoop_group: "hadoop"
 
+hadoop_conf_dir: "/etc/hadoop/conf"
+java_home: "/usr/lib/jvm/java-11-openjdk-amd64"
+
+# HDFS
 hdfs_namenode_host: "master"
 hdfs_default_fs: "hdfs://master:9000"
-
 hdfs_replication: 2
 
-# HDFS NameNode metadata directories
 hdfs_namenode_name_dirs:
   - "/data/hadoop/hdfs/namenode"
   - "/data2/hadoop/hdfs/namenode"
@@ -43,11 +45,7 @@ hdfs_namenode_edits_dirs:
   - "/data/hadoop/hdfs/namenode"
   - "/data2/hadoop/hdfs/namenode"
 
-# HDFS DataNode directory
 hdfs_datanode_dir: "/data/hadoop/hdfs/datanode"
-
-hadoop_conf_dir: "/etc/hadoop/conf"
-java_home: "/usr/lib/jvm/java-11-openjdk-amd64"
 
 # YARN
 yarn_resourcemanager_host: "master"
@@ -58,11 +56,13 @@ yarn_rm_resource_tracker_address: "master:8031"
 yarn_rm_admin_address: "master:8033"
 yarn_rm_webapp_address: "master:8088"
 
-# YARN UI2
 yarn_ui2_enable: true
 
-yarn_nodemanager_local_dirs: "/data/hadoop/yarn/local"
-yarn_nodemanager_log_dirs: "/data/hadoop/yarn/logs"
+yarn_nodemanager_local_dirs:
+  - "/data/hadoop/yarn/local"
+
+yarn_nodemanager_log_dirs:
+  - "/data/hadoop/yarn/logs"
 
 yarn_nodemanager_resource_memory_mb: 2048
 yarn_nodemanager_resource_cpu_vcores: 2
@@ -71,15 +71,45 @@ yarn_scheduler_maximum_allocation_mb: 2048
 
 mapreduce_framework_name: "yarn"
 
+# YARN Capacity Scheduler queues
+yarn_capacity_scheduler_queues:
+  - name: default
+    capacity: 40
+    maximum_capacity: 100
+    user_limit_factor: 1
+    maximum_am_resource_percent: 0.2
+
+  - name: batch
+    capacity: 40
+    maximum_capacity: 100
+    user_limit_factor: 2
+    maximum_am_resource_percent: 0.3
+
+  - name: adhoc
+    capacity: 20
+    maximum_capacity: 50
+    user_limit_factor: 1
+    maximum_am_resource_percent: 0.1
+
+# YARN log aggregation
+yarn_log_aggregation_enabled: true
+yarn_log_aggregation_remote_app_log_dir: "/tmp/logs"
+yarn_log_aggregation_remote_app_log_dir_suffix: "logs"
+yarn_log_aggregation_retain_seconds: 604800
+yarn_log_aggregation_retain_check_interval_seconds: 3600
+yarn_nodemanager_log_retain_seconds: 10800
+
+# YARN NodeManager disk health checker
+yarn_nodemanager_disk_health_checker_enabled: true
+yarn_nodemanager_disk_max_utilization_percent: 90.0
+yarn_nodemanager_disk_min_free_mb: 1024
+yarn_nodemanager_disk_min_healthy_disks: 0.25
+
 # Spark
 spark_conf_dir: "/etc/spark/conf"
 spark_history_dir: "hdfs:///spark-history"
 spark_event_log_dir: "hdfs:///spark-history"
-
-spark_driver_memory: "512m"
-spark_executor_memory: "512m"
-spark_executor_cores: 1
-spark_executor_instances: 2
+spark_eventlog_dir: "{{ spark_event_log_dir }}"
 
 spark_packages:
   - spark-core
@@ -90,6 +120,36 @@ spark_history_packages:
 spark_python_packages:
   - spark-python
 
+# Spark submit default resource profile
+spark_default_yarn_queue: "batch"
+spark_driver_memory: "512m"
+spark_driver_cores: 1
+spark_executor_memory: "768m"
+spark_executor_cores: 1
+spark_executor_instances: 2
+spark_yarn_am_memory: "512m"
+
+# Spark submit profile presets
+spark_submit_profiles:
+  - name: adhoc
+    queue: adhoc
+    driver_memory: "512m"
+    executor_memory: "512m"
+    executor_cores: 1
+    executor_instances: 1
+
+  - name: batch
+    queue: batch
+    driver_memory: "512m"
+    executor_memory: "768m"
+    executor_cores: 1
+    executor_instances: 2
+
+# Spark History Server event log cleaner
+spark_history_cleaner_enabled: true
+spark_history_cleaner_interval: "1d"
+spark_history_cleaner_max_age: "7d"
+
 # Monitoring
 monitoring_host: "worker3"
 
@@ -99,7 +159,6 @@ node_exporter_port: 9100
 
 prometheus_config_dir: "/etc/prometheus"
 prometheus_data_dir: "/var/lib/prometheus"
-
 prometheus_scrape_interval: "15s"
 
 # JMX Exporter
@@ -120,6 +179,12 @@ alertmanager_config_dir: "/etc/prometheus"
 alertmanager_config_file: "/etc/prometheus/alertmanager.yml"
 
 prometheus_rule_dir: "/etc/prometheus/rules"
+
+# Alertmanager Slack receiver
+# Keep false in example. Enable only in inventory/group_vars/all.yml.
+alertmanager_slack_enabled: false
+alertmanager_slack_channel: "#bigtop-alerts"
+alertmanager_slack_webhook_file: "/etc/prometheus/alertmanager-secrets/slack_webhook_url"
 
 # Grafana Provisioning
 grafana_datasource_name: "Prometheus"
@@ -161,28 +226,3 @@ yarn_memory_warning_percent: 80
 yarn_memory_critical_percent: 90
 yarn_vcore_warning_percent: 80
 yarn_vcore_critical_percent: 90
-
-# Alertmanager Slack receiver
-alertmanager_slack_enabled: false
-alertmanager_slack_channel: "#bigtop-alerts"
-alertmanager_slack_webhook_file: "/etc/prometheus/"
-
-# YARN Capacity Scheduler queues
-yarn_capacity_scheduler_queues:
-  - name: default
-    capacity: 40
-    maximum_capacity: 100
-    user_limit_factor: 1
-    maximum_am_resource_percent: 0.2
-
-  - name: batch
-    capacity: 40
-    maximum_capacity: 100
-    user_limit_factor: 2
-    maximum_am_resource_percent: 0.3
-
-  - name: adhoc
-    capacity: 20
-    maximum_capacity: 50
-    user_limit_factor: 1
-    maximum_am_resource_percent: 0.1

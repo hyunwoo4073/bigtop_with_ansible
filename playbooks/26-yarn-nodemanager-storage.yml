@@ -1,0 +1,34 @@
+---
+- name: Prepare YARN NodeManager storage directories
+  hosts: workers
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Create YARN NodeManager local directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: yarn
+        group: hadoop
+        mode: "0755"
+      loop: "{{ yarn_nodemanager_local_dirs | default(['/data/hadoop/yarn/local']) }}"
+
+    - name: Create YARN NodeManager log directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: yarn
+        group: hadoop
+        mode: "0755"
+      loop: "{{ yarn_nodemanager_log_dirs | default(['/data/hadoop/yarn/logs']) }}"
+
+    - name: Show YARN NodeManager storage directories
+      ansible.builtin.shell: |
+        ls -ld {{ (yarn_nodemanager_local_dirs | default(['/data/hadoop/yarn/local']) + yarn_nodemanager_log_dirs | default(['/data/hadoop/yarn/logs'])) | join(' ') }}
+      changed_when: false
+
+    - name: Show YARN NodeManager storage disk usage
+      ansible.builtin.shell: |
+        df -h {{ (yarn_nodemanager_local_dirs | default(['/data/hadoop/yarn/local']) + yarn_nodemanager_log_dirs | default(['/data/hadoop/yarn/logs'])) | join(' ') }}
+      changed_when: false

@@ -89,12 +89,10 @@
 
     - name: Run SparkPi on YARN
       ansible.builtin.shell: |
-        sudo -u hadoop spark-submit \
-          --master yarn \
-          --deploy-mode client \
-          --class org.apache.spark.examples.SparkPi \
-          {{ spark_examples_jar.stdout }} \
-          10
+        sudo -u hadoop spark-submit-profile batch \
+        --class org.apache.spark.examples.SparkPi \
+        {{ spark_examples_jar.stdout }} \
+        10
       register: spark_pi_result
       changed_when: true
       failed_when:

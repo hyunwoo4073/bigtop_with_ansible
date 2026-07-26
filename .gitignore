@@ -19,6 +19,11 @@ id_rsa.pub
 vault_password*
 .vault_pass
 *.vault
+secrets/
+*.secret
+*_secret
+*webhook*
+slack_webhook_url
 
 # Logs
 *.log

@@ -104,6 +104,49 @@
       ansible.builtin.shell: curl -fsS http://127.0.0.1:9100/metrics | grep hdfs_namenode_backup_success
       changed_when: false
 
+    - name: Check YARN log aggregation configuration
+      ansible.builtin.shell: |
+        grep -A2 'yarn.log-aggregation-enable' /etc/hadoop/conf/yarn-site.xml \
+        | grep -q '<value>true</value>'
+      changed_when: false
+
+    - name: Check YARN log aggregation HDFS directory
+      ansible.builtin.shell: |
+        sudo -u hdfs hdfs dfs -test -d {{ yarn_log_aggregation_remote_app_log_dir | default('/tmp/logs') }}
+      changed_when: false
+
+    - name: Show YARN log aggregation HDFS directory
+      ansible.builtin.shell: |
+        sudo -u hdfs hdfs dfs -ls -d {{ yarn_log_aggregation_remote_app_log_dir | default('/tmp/logs') }}
+      changed_when: false
+
+    - name: Check Spark event log directory
+      ansible.builtin.shell: |
+        sudo -u hdfs hdfs dfs -test -d {{ spark_eventlog_dir | default('hdfs:///spark-history') }}
+      changed_when: false
+
+    - name: Check Spark history cleaner configuration
+      ansible.builtin.shell: |
+        grep -q 'spark.history.fs.cleaner.enabled true' /etc/spark/conf/spark-defaults.conf
+      changed_when: false
+
+    - name: Show Spark event log directory summary
+      ansible.builtin.shell: |
+        sudo -u hdfs hdfs dfs -du -h -s {{ spark_eventlog_dir | default('hdfs:///spark-history') }}
+      changed_when: false
+
+    - name: Check Spark submit profile wrapper
+      ansible.builtin.command: test -x /usr/local/bin/spark-submit-profile
+      changed_when: false
+
+    - name: Check Spark default resource configuration
+      ansible.builtin.shell: |
+        grep -q 'spark.yarn.queue' /etc/spark/conf/spark-defaults.conf
+        grep -q 'spark.executor.memory' /etc/spark/conf/spark-defaults.conf
+        grep -q 'spark.executor.cores' /etc/spark/conf/spark-defaults.conf
+        grep -q 'spark.executor.instances' /etc/spark/conf/spark-defaults.conf
+      changed_when: false
+
 
 - name: Check DataNode and NodeManager services on workers
   hosts: workers
@@ -134,6 +177,40 @@
 
     - name: Check NodeManager JMX metrics
       ansible.builtin.shell: curl -fsS http://127.0.0.1:19104/metrics | head
+      changed_when: false
+
+    - name: Check YARN NodeManager local directories
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: yarn_nm_local_dirs
+      loop: "{{ yarn_nodemanager_local_dirs | default(['/data/hadoop/yarn/local']) }}"
+
+    - name: Fail when YARN NodeManager local directory is missing
+      ansible.builtin.fail:
+        msg: "Missing YARN NodeManager local directory: {{ item.item }}"
+      when: not item.stat.exists
+      loop: "{{ yarn_nm_local_dirs.results }}"
+
+    - name: Check YARN NodeManager log directories
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: yarn_nm_log_dirs
+      loop: "{{ yarn_nodemanager_log_dirs | default(['/data/hadoop/yarn/logs']) }}"
+
+    - name: Fail when YARN NodeManager log directory is missing
+      ansible.builtin.fail:
+        msg: "Missing YARN NodeManager log directory: {{ item.item }}"
+      when: not item.stat.exists
+      loop: "{{ yarn_nm_log_dirs.results }}"
+
+    - name: Check YARN NodeManager storage permissions
+      ansible.builtin.shell: |
+        stat -c '%U:%G %a %n' {{ (yarn_nodemanager_local_dirs | default(['/data/hadoop/yarn/local']) + yarn_nodemanager_log_dirs | default(['/data/hadoop/yarn/logs'])) | join(' ') }}
+      changed_when: false
+
+    - name: Check YARN NodeManager storage disk usage
+      ansible.builtin.shell: |
+        df -h {{ (yarn_nodemanager_local_dirs | default(['/data/hadoop/yarn/local']) + yarn_nodemanager_log_dirs | default(['/data/hadoop/yarn/logs'])) | join(' ') }}
       changed_when: false
 
 

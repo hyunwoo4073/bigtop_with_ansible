@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROFILE="${1:-}"
+
+if [[ -z "${PROFILE}" ]]; then
+  echo "Usage: spark-submit-profile <profile> [spark-submit args...]"
+  echo
+  echo "Available profiles:"
+{% for profile in spark_submit_profiles | default([]) %}
+  echo "  - {{ profile.name }}"
+{% endfor %}
+  exit 1
+fi
+
+shift
+
+case "${PROFILE}" in
+{% for profile in spark_submit_profiles | default([]) %}
+  "{{ profile.name }}")
+    exec spark-submit \
+      --master yarn \
+      --deploy-mode client \
+      --queue "{{ profile.queue }}" \
+      --driver-memory "{{ profile.driver_memory }}" \
+      --executor-memory "{{ profile.executor_memory }}" \
+      --executor-cores "{{ profile.executor_cores }}" \
+      --num-executors "{{ profile.executor_instances }}" \
+      "$@"
+    ;;
+{% endfor %}
+  *)
+    echo "Unknown profile: ${PROFILE}"
+    echo
+    echo "Available profiles:"
+{% for profile in spark_submit_profiles | default([]) %}
+    echo "  - {{ profile.name }}"
+{% endfor %}
+    exit 1
+    ;;
+esac

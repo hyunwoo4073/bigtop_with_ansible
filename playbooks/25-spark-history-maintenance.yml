@@ -1,0 +1,49 @@
+---
+- name: Check Spark History Server event log storage
+  hosts: master
+  gather_facts: false
+  become: true
+
+  vars:
+    spark_history_eventlog_dir: "{{ spark_eventlog_dir | default('hdfs:///spark-history') }}"
+
+  tasks:
+    - name: Check Spark History Server service
+      ansible.builtin.command: systemctl is-active spark-history-server
+      changed_when: false
+
+    - name: Show Spark history cleaner configuration
+      ansible.builtin.shell: |
+        grep -E 'spark.history.fs.cleaner|spark.eventLog' /etc/spark/conf/spark-defaults.conf || true
+      changed_when: false
+
+    - name: Check Spark event log directory exists
+      ansible.builtin.shell: |
+        sudo -u hdfs hdfs dfs -test -d {{ spark_history_eventlog_dir }}
+      changed_when: false
+
+    - name: Show Spark event log directory summary
+      ansible.builtin.shell: |
+        sudo -u hdfs hdfs dfs -du -h -s {{ spark_history_eventlog_dir }}
+      changed_when: false
+
+    - name: Show recent Spark event logs
+      ansible.builtin.shell: |
+        sudo -u hdfs hdfs dfs -ls -t {{ spark_history_eventlog_dir }} | head -20
+      changed_when: false
+      failed_when: false
+
+    - name: Count Spark event log files
+      ansible.builtin.shell: |
+        sudo -u hdfs hdfs dfs -count {{ spark_history_eventlog_dir }}
+      register: spark_history_count
+      changed_when: false
+
+    - name: Show Spark event log count
+      ansible.builtin.debug:
+        var: spark_history_count.stdout_lines
+
+    - name: Check Spark History Server API
+      ansible.builtin.shell: |
+        curl -fsS http://127.0.0.1:18080/api/v1/applications | head
+      changed_when: false

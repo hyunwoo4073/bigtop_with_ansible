@@ -4,7 +4,7 @@ Apache Bigtop과 Ansible을 사용해 Hadoop 기반 미니 데이터 플랫폼�
 
 개인 VM 환경에서 Ambari 같은 통합 관리 도구 없이, Ansible playbook과 role 구조를 통해 서버 공통 설정, Java 설치, Bigtop repository 등록, Hadoop/HDFS/YARN/Spark 설치, 설정 파일 배포, 서비스 기동, 모니터링, 대시보드, 알림, 백업 자동화까지 구성하는 것을 목표로 합니다.
 
-현재는 HDFS, YARN, Spark on YARN, Prometheus/Grafana 기반 모니터링, JMX Exporter 기반 JVM 메트릭 수집, Alertmanager 기반 알림, Grafana datasource/dashboard provisioning, NameNode metadata 보호 및 백업 자동화, HDFS/YARN 상태 기반 alert, NameNode backup 상태 감시, HDFS/YARN/Spark History Server Grafana dashboard, Alertmanager Slack receiver 선택 구성, cluster health check/recovery/smoke test playbook, YARN Capacity Scheduler queue 정책, QueueMetrics 수집/alert/dashboard, YARN/Spark application diagnostics playbook 구성을 완료한 상태입니다.
+현재는 HDFS, YARN, Spark on YARN, Prometheus/Grafana 기반 모니터링, JMX Exporter 기반 JVM 메트릭 수집, Alertmanager 기반 알림, Grafana datasource/dashboard provisioning, NameNode metadata 보호 및 백업 자동화, HDFS/YARN 상태 기반 alert, NameNode backup 상태 감시, HDFS/YARN/Spark History Server Grafana dashboard, Alertmanager Slack receiver 선택 구성, cluster health check/recovery/smoke test playbook, YARN Capacity Scheduler queue 정책, QueueMetrics 수집/alert/dashboard, YARN/Spark application diagnostics playbook, YARN log aggregation, Spark History Server event log retention, Spark submit resource profile, YARN NodeManager local/log directory 관리 및 disk health checker 구성을 완료한 상태입니다.
 
 ## 구성
 
@@ -92,7 +92,10 @@ bigtop-cluster-ansible/
 │   ├── 20-cluster-health-check.yml
 │   ├── 21-cluster-recover.yml
 │   ├── 22-cluster-smoke-test.yml
-│   └── 23-yarn-app-diagnostics.yml
+│   ├── 23-yarn-app-diagnostics.yml
+│   ├── 24-yarn-log-aggregation.yml
+│   ├── 25-spark-history-maintenance.yml
+│   └── 26-yarn-nodemanager-storage.yml
 └── roles/
     ├── common/
     ├── java/
@@ -205,10 +208,12 @@ ansible-inventory --graph
 ## 주요 변수 예시
 
 `inventory/group_vars/all.yml.example`에는 다음 항목을 포함합니다.
+실제 IP, Slack channel, webhook, SSH key 등 환경 의존 값은 `inventory/group_vars/all.yml`에만 둡니다.
 
 ```yaml
 # HDFS
 hdfs_namenode_host: "master"
+hdfs_default_fs: "hdfs://master:9000"
 hdfs_replication: 2
 
 hdfs_namenode_name_dirs:
@@ -220,6 +225,93 @@ hdfs_namenode_edits_dirs:
   - "/data2/hadoop/hdfs/namenode"
 
 hdfs_datanode_dir: "/data/hadoop/hdfs/datanode"
+
+# YARN
+yarn_resourcemanager_host: "master"
+yarn_ui2_enable: true
+
+# YARN NodeManager storage
+# loop와 join 필터에서 사용하므로 문자열이 아니라 list 형태로 유지합니다.
+yarn_nodemanager_local_dirs:
+  - "/data/hadoop/yarn/local"
+
+yarn_nodemanager_log_dirs:
+  - "/data/hadoop/yarn/logs"
+
+yarn_nodemanager_resource_memory_mb: 2048
+yarn_nodemanager_resource_cpu_vcores: 2
+yarn_scheduler_minimum_allocation_mb: 256
+yarn_scheduler_maximum_allocation_mb: 2048
+
+# YARN Capacity Scheduler queues
+yarn_capacity_scheduler_queues:
+  - name: default
+    capacity: 40
+    maximum_capacity: 100
+    user_limit_factor: 1
+    maximum_am_resource_percent: 0.2
+
+  - name: batch
+    capacity: 40
+    maximum_capacity: 100
+    user_limit_factor: 2
+    maximum_am_resource_percent: 0.3
+
+  - name: adhoc
+    capacity: 20
+    maximum_capacity: 50
+    user_limit_factor: 1
+    maximum_am_resource_percent: 0.1
+
+# YARN log aggregation
+yarn_log_aggregation_enabled: true
+yarn_log_aggregation_remote_app_log_dir: "/tmp/logs"
+yarn_log_aggregation_remote_app_log_dir_suffix: "logs"
+yarn_log_aggregation_retain_seconds: 604800
+yarn_log_aggregation_retain_check_interval_seconds: 3600
+yarn_nodemanager_log_retain_seconds: 10800
+
+# YARN NodeManager disk health checker
+yarn_nodemanager_disk_health_checker_enabled: true
+yarn_nodemanager_disk_max_utilization_percent: 90.0
+yarn_nodemanager_disk_min_free_mb: 1024
+yarn_nodemanager_disk_min_healthy_disks: 0.25
+
+# Spark
+spark_conf_dir: "/etc/spark/conf"
+spark_history_dir: "hdfs:///spark-history"
+spark_event_log_dir: "hdfs:///spark-history"
+spark_eventlog_dir: "{{ spark_event_log_dir }}"
+
+# Spark History Server event log cleaner
+spark_history_cleaner_enabled: true
+spark_history_cleaner_interval: "1d"
+spark_history_cleaner_max_age: "7d"
+
+# Spark submit default resource profile
+spark_default_yarn_queue: "batch"
+spark_driver_memory: "512m"
+spark_driver_cores: 1
+spark_executor_memory: "512m"
+spark_executor_cores: 1
+spark_executor_instances: 2
+spark_yarn_am_memory: "512m"
+
+# Spark submit profile presets
+spark_submit_profiles:
+  - name: adhoc
+    queue: adhoc
+    driver_memory: "512m"
+    executor_memory: "512m"
+    executor_cores: 1
+    executor_instances: 1
+
+  - name: batch
+    queue: batch
+    driver_memory: "512m"
+    executor_memory: "768m"
+    executor_cores: 1
+    executor_instances: 2
 
 # NameNode metadata backup
 hdfs_namenode_backup_dir: "/backup/hdfs/namenode"
@@ -253,27 +345,8 @@ yarn_memory_critical_percent: 90
 yarn_vcore_warning_percent: 80
 yarn_vcore_critical_percent: 90
 
-# YARN Capacity Scheduler queues
-yarn_capacity_scheduler_queues:
-  - name: default
-    capacity: 40
-    maximum_capacity: 100
-    user_limit_factor: 1
-    maximum_am_resource_percent: 0.2
-
-  - name: batch
-    capacity: 40
-    maximum_capacity: 100
-    user_limit_factor: 2
-    maximum_am_resource_percent: 0.3
-
-  - name: adhoc
-    capacity: 20
-    maximum_capacity: 50
-    user_limit_factor: 1
-    maximum_am_resource_percent: 0.1
-
 # Alertmanager Slack receiver
+# example에서는 false로 유지하고, 실제 all.yml에서만 true로 변경합니다.
 alertmanager_slack_enabled: false
 alertmanager_slack_channel: "#bigtop-alerts"
 alertmanager_slack_webhook_file: "/etc/prometheus/alertmanager-secrets/slack_webhook_url"
@@ -306,6 +379,9 @@ ansible-playbook playbooks/19-namenode-remote-backup.yml
 ansible-playbook playbooks/20-cluster-health-check.yml
 ansible-playbook playbooks/21-cluster-recover.yml
 ansible-playbook playbooks/22-cluster-smoke-test.yml
+ansible-playbook playbooks/24-yarn-log-aggregation.yml
+ansible-playbook playbooks/25-spark-history-maintenance.yml
+ansible-playbook playbooks/26-yarn-nodemanager-storage.yml
 ```
 
 서비스 중지는 다음 playbook으로 수행합니다.
@@ -439,6 +515,109 @@ spark-submit --master yarn --queue batch ...
 spark-submit --master yarn --queue adhoc ...
 ```
 
+
+## YARN Log Aggregation
+
+YARN/Spark application 로그를 완료 후에도 조회할 수 있도록 YARN log aggregation을 활성화합니다.
+로그는 NodeManager 로컬 디렉터리에만 남기지 않고 HDFS의 remote app log directory로 모읍니다.
+
+```text
+Remote app log dir: /tmp/logs
+Remote app log suffix: logs
+Aggregated log retention: 7 days
+NodeManager local log retention: 3 hours
+```
+
+관련 설정은 `yarn-site.xml`에 반영합니다.
+
+```xml
+<property>
+  <name>yarn.log-aggregation-enable</name>
+  <value>true</value>
+</property>
+
+<property>
+  <name>yarn.nodemanager.remote-app-log-dir</name>
+  <value>/tmp/logs</value>
+</property>
+
+<property>
+  <name>yarn.nodemanager.remote-app-log-dir-suffix</name>
+  <value>logs</value>
+</property>
+
+<property>
+  <name>yarn.log-aggregation.retain-seconds</name>
+  <value>604800</value>
+</property>
+```
+
+HDFS log aggregation directory는 별도 playbook으로 준비합니다.
+
+```bash
+ansible-playbook playbooks/24-yarn-log-aggregation.yml
+```
+
+Spark/YARN application 완료 후 다음 명령으로 aggregated log를 확인할 수 있습니다.
+
+```bash
+ansible master -b -m shell -a "sudo -u hadoop yarn logs -applicationId application_XXXXXXXXXXXX_XXXX | head -100"
+```
+
+YARN UI2에서 로그 버튼을 바로 사용하려면 Application Timeline Service 또는 JobHistory Server 상태의 영향을 받을 수 있습니다.
+다만 Spark on YARN 운영 기준에서는 UI2 편의 기능보다 `YARN Log Aggregation + Spark History Server + yarn logs -applicationId + diagnostics playbook` 조합을 우선합니다.
+
+## YARN NodeManager Storage
+
+Spark on YARN 작업 실행 시 NodeManager는 local directory에 Spark library, configuration, container launch script 등을 localization하고, log directory에 container log를 기록합니다.
+따라서 NodeManager local/log directory를 명시적으로 관리합니다.
+
+```text
+Local dirs: /data/hadoop/yarn/local
+Log dirs  : /data/hadoop/yarn/logs
+```
+
+관련 설정은 `yarn-site.xml`에 반영합니다.
+
+```xml
+<property>
+  <name>yarn.nodemanager.local-dirs</name>
+  <value>/data/hadoop/yarn/local</value>
+</property>
+
+<property>
+  <name>yarn.nodemanager.log-dirs</name>
+  <value>/data/hadoop/yarn/logs</value>
+</property>
+```
+
+NodeManager disk health checker도 함께 활성화합니다.
+
+```xml
+<property>
+  <name>yarn.nodemanager.disk-health-checker.enable</name>
+  <value>true</value>
+</property>
+
+<property>
+  <name>yarn.nodemanager.disk-health-checker.max-disk-utilization-per-disk-percentage</name>
+  <value>90.0</value>
+</property>
+
+<property>
+  <name>yarn.nodemanager.disk-health-checker.min-free-space-per-disk-mb</name>
+  <value>1024</value>
+</property>
+```
+
+디렉터리 생성 및 확인:
+
+```bash
+ansible-playbook playbooks/26-yarn-nodemanager-storage.yml
+ansible workers -b -m shell -a "ls -ld /data/hadoop/yarn/local /data/hadoop/yarn/logs"
+ansible workers -b -m shell -a "df -h /data/hadoop/yarn/local /data/hadoop/yarn/logs"
+```
+
 ## Spark 설정 기준
 
 ```text
@@ -488,6 +667,81 @@ ansible master -b -m shell -a "sudo -u hadoop spark-submit --master yarn --deplo
 ```
 
 정상 실행 시 YARN UI와 Spark History Server에서 Spark application을 확인할 수 있습니다.
+
+## Spark History Server Event Log Retention
+
+Spark History Server는 `hdfs:///spark-history` 경로의 Spark event log를 읽어 완료된 Spark application 정보를 제공합니다.
+Spark application이 지속적으로 실행되면 event log가 HDFS에 계속 누적될 수 있으므로, History Server cleaner를 활성화하여 오래된 event log를 자동 정리합니다.
+
+```properties
+spark.eventLog.enabled true
+spark.eventLog.dir hdfs:///spark-history
+spark.history.fs.cleaner.enabled true
+spark.history.fs.cleaner.interval 1d
+spark.history.fs.cleaner.maxAge 7d
+```
+
+Spark event log 저장소 점검용 playbook을 제공합니다.
+
+```bash
+ansible-playbook playbooks/25-spark-history-maintenance.yml
+```
+
+점검 항목:
+
+```text
+- Spark History Server service 상태
+- spark.eventLog 설정
+- spark.history.fs.cleaner 설정
+- hdfs:///spark-history 디렉터리 존재 여부
+- Spark event log 용량
+- 최근 Spark event log 목록
+- Spark History Server API 응답
+```
+
+## Spark Submit Resource Profile
+
+Spark 작업이 YARN queue와 cluster resource를 과도하게 점유하지 않도록 기본 Spark submit resource profile을 구성합니다.
+기본 설정은 `spark-defaults.conf`에 반영합니다.
+
+```properties
+spark.yarn.queue batch
+spark.driver.memory 512m
+spark.driver.cores 1
+spark.executor.memory 512m
+spark.executor.cores 1
+spark.executor.instances 2
+spark.yarn.am.memory 512m
+```
+
+또한 profile 기반 Spark submit wrapper를 제공합니다.
+
+```bash
+spark-submit-profile <profile> [spark-submit args...]
+```
+
+현재 profile:
+
+```text
+adhoc - adhoc queue, small resource
+batch - batch queue, default batch resource
+```
+
+예시:
+
+```bash
+spark-submit-profile adhoc \
+  --class org.apache.spark.examples.SparkPi \
+  /path/to/spark-examples.jar \
+  10
+
+spark-submit-profile batch \
+  --class org.apache.spark.examples.SparkPi \
+  /path/to/spark-examples.jar \
+  10
+```
+
+이 wrapper를 사용하면 Spark job 제출 시 queue와 resource 옵션을 표준화할 수 있습니다.
 
 ## Monitoring 설정 기준
 
@@ -1302,6 +1556,11 @@ ansible-playbook playbooks/20-cluster-health-check.yml
 - HDFS live DataNode count
 - YARN active NodeManager count
 - NameNode backup metric
+- YARN log aggregation 설정 및 HDFS directory
+- Spark event log directory 및 History cleaner 설정
+- Spark submit profile wrapper 및 default resource 설정
+- YARN NodeManager local/log directory 존재 여부
+- YARN NodeManager local/log directory 권한 및 disk usage
 - Prometheus/Grafana/Alertmanager service and health endpoint
 - Prometheus config and alert rule syntax
 - Alertmanager config syntax
@@ -2079,28 +2338,156 @@ Prometheus에서 확인:
 ansible ops -m shell -a "curl -s 'http://127.0.0.1:9090/api/v1/query?query=yarn_queue_appsrunning' | python3 -m json.tool | head -80"
 ```
 
+
+### YARN UI2 로그 확인과 Timeline Service
+
+YARN UI2에서 application log를 바로 열 때 다음 메시지가 보일 수 있습니다.
+
+```text
+Logs are unavailable because Application Timeline Service seems unhealthy and could not connect to the JobHistory server.
+```
+
+YARN UI2의 로그 화면은 Timeline Service 또는 JobHistory Server 상태에 영향을 받을 수 있습니다.
+다만 Spark on YARN 운영에서는 UI2 로그 버튼보다 다음 흐름을 우선합니다.
+
+```text
+Spark History Server
+YARN Log Aggregation
+yarn logs -applicationId
+YARN/Spark application diagnostics playbook
+```
+
+따라서 Timeline Service는 편의 기능 개선 항목으로 보류하고, application 로그 수집과 진단 자동화를 우선합니다.
+
+### YARN NodeManager local/log directory 변수 타입 오류
+
+`playbooks/20-cluster-health-check.yml` 실행 중 다음 오류가 발생할 수 있습니다.
+
+```text
+Invalid data passed to 'loop', it requires a list, got this instead: /data/hadoop/yarn/local
+```
+
+이는 `yarn_nodemanager_local_dirs`, `yarn_nodemanager_log_dirs`가 문자열로 정의되어 있는데, playbook에서는 `loop`로 list를 기대하기 때문에 발생합니다.
+
+잘못된 예시:
+
+```yaml
+yarn_nodemanager_local_dirs: "/data/hadoop/yarn/local"
+yarn_nodemanager_log_dirs: "/data/hadoop/yarn/logs"
+```
+
+정상 예시:
+
+```yaml
+yarn_nodemanager_local_dirs:
+  - "/data/hadoop/yarn/local"
+
+yarn_nodemanager_log_dirs:
+  - "/data/hadoop/yarn/logs"
+```
+
+`yarn-site.xml.j2`에서 `join(',')` 필터를 사용하므로 이 값은 반드시 list 형태로 유지합니다.
+
+### Ansible group_vars 중복 key warning
+
+`inventory/group_vars/all.yml`에 같은 key가 두 번 정의되면 다음 warning이 발생합니다.
+
+```text
+found a duplicate dict key
+Using last defined value only
+```
+
+이 경우 Ansible은 마지막에 정의된 값만 사용합니다.
+Spark resource profile이나 YARN NodeManager storage 설정을 추가한 뒤에는 중복 key가 남아 있지 않은지 확인합니다.
+
+```bash
+python3 - <<'PY'
+from pathlib import Path
+from collections import Counter
+
+for file in [
+    Path("inventory/group_vars/all.yml"),
+    Path("inventory/group_vars/all.yml.example"),
+]:
+    if not file.exists():
+        continue
+
+    keys = []
+    for line_no, line in enumerate(file.read_text().splitlines(), 1):
+        if line.startswith("#") or not line.strip():
+            continue
+        if line.startswith(" ") or line.startswith("-"):
+            continue
+        if ":" in line:
+            key = line.split(":", 1)[0].strip()
+            keys.append((key, line_no))
+
+    counts = Counter(k for k, _ in keys)
+
+    print(f"\n{file}")
+    found = False
+    for key, count in counts.items():
+        if count > 1:
+            found = True
+            lines = [str(line_no) for k, line_no in keys if k == key]
+            print(f"  duplicate: {key} -> lines {', '.join(lines)}")
+    if not found:
+        print("  no duplicate top-level keys")
+PY
+```
+
+중복이 있으면 실제로 사용할 값 하나만 남기고 나머지는 삭제합니다.
+
 ## Git에 포함하지 않는 파일
 
 실제 IP, 사용자명, SSH key, 로그 파일은 Git에 올리지 않습니다.
 
 ```text
+# Ansible runtime
+*.retry
+.retry
+
+# Inventory with real host/IP info
 inventory/hosts.ini
 inventory/group_vars/all.yml
 inventory/host_vars/
-*.retry
-*.log
+
+# Secrets / keys
 *.pem
 *.key
+*.crt
+*.p12
+*.jks
 id_rsa
 id_rsa.pub
-.env
+*.ppk
 vault_password*
 .vault_pass
+*.vault
 secrets/
 *.secret
 *_secret
 *webhook*
 slack_webhook_url
+
+# Logs
+*.log
+logs/
+tmp/
+
+# Python / editor
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Runtime diagnostics
 artifacts/
 ```
 
@@ -2204,22 +2591,44 @@ inventory/group_vars/all.yml.example
 88. YARN/Spark application diagnostics playbook 추가
 89. YARN application status/log/scheduler/queue metric 진단 archive 수집
 90. diagnostics artifact 저장 경로 및 Git 제외 기준 정리
+91. YARN log aggregation 활성화
+92. HDFS remote app log directory 구성
+93. yarn logs -applicationId 기반 completed application log 조회 검증
+94. YARN UI2 Timeline Service 의존성 확인 및 운영 우선순위 정리
+95. Spark History Server event log cleaner 활성화
+96. Spark event log retention 정책 구성
+97. Spark History maintenance playbook 추가
+98. hdfs:///spark-history 용량 및 event log 개수 점검 자동화
+99. Spark submit default resource profile 구성
+100. Spark submit profile wrapper 추가
+101. adhoc/batch Spark submit profile 분리
+102. Spark submit profile health check 추가
+103. YARN NodeManager local/log directory 명시 관리
+104. YARN NodeManager storage directory 생성 playbook 추가
+105. NodeManager disk health checker 설정 추가
+106. health check에 YARN log aggregation 및 Spark cleaner 점검 추가
+107. health check에 NodeManager storage 점검 추가
+108. group_vars 중복 key 정리
+109. NodeManager local/log directory 변수를 list 형태로 표준화
+110. .gitignore secret/runtime artifact 제외 규칙 보강
 ```
 
 ## 향후 계획
 
 ```text
-1. Alertmanager Email receiver 추가 검토
-2. Slack alert message template 고도화
-3. YARN queue별 dashboard panel 고도화 및 capacity 기준선 표시
-4. Spark application event log 기반 지표 확장 검토
-5. YARN/Spark diagnostics 결과 요약 자동화 고도화
-6. 서비스별 runbook 문서화
-7. NameNode metadata 복구 runbook 별도 문서화
-8. HA 구성 설계 문서화
-9. Spark History Server 관리 playbook role화
-10. Cluster health/recovery/smoke test playbook role화 또는 tag 분리
-11. Ansible role 리팩토링
-12. group/host 이름 중복 warning 제거
-13. GitHub 포트폴리오용 아키텍처 다이어그램 추가
+1. NodeManager local/log directory disk usage Prometheus alert 추가
+2. Spark application failure diagnostics 결과 요약 자동화 고도화
+3. Spark executor/driver resource tuning profile 세분화
+4. YARN queue별 dashboard panel 고도화 및 capacity 기준선 표시
+5. Spark application event log 기반 지표 확장 검토
+6. Alertmanager Email receiver 추가 검토
+7. Slack alert message template 고도화
+8. 서비스별 runbook 문서화
+9. NameNode metadata 복구 runbook 별도 문서화
+10. HA 구성 설계 문서화
+11. Spark History Server 관리 playbook role화
+12. Cluster health/recovery/smoke test playbook role화 또는 tag 분리
+13. Ansible role 리팩토링
+14. group/host 이름 중복 warning 제거
+15. GitHub 포트폴리오용 아키텍처 다이어그램 추가
 ```

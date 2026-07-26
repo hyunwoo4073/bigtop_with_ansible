@@ -73,5 +73,68 @@
   <property>
     <name>yarn.webapp.ui2.enable</name>
     <value>{{ (yarn_ui2_enable | default(true) | bool) | ternary('true', 'false') }}</value>
-</property>
+  </property>
+
+    <!-- YARN Log Aggregation -->
+  <property>
+    <name>yarn.log-aggregation-enable</name>
+    <value>{{ yarn_log_aggregation_enabled | default(true) | lower }}</value>
+  </property>
+
+  <property>
+    <name>yarn.nodemanager.remote-app-log-dir</name>
+    <value>{{ yarn_log_aggregation_remote_app_log_dir | default('/tmp/logs') }}</value>
+  </property>
+
+  <property>
+    <name>yarn.nodemanager.remote-app-log-dir-suffix</name>
+    <value>{{ yarn_log_aggregation_remote_app_log_dir_suffix | default('logs') }}</value>
+  </property>
+
+  <property>
+    <name>yarn.log-aggregation.retain-seconds</name>
+    <value>{{ yarn_log_aggregation_retain_seconds | default(604800) }}</value>
+  </property>
+
+  <property>
+    <name>yarn.log-aggregation.retain-check-interval-seconds</name>
+    <value>{{ yarn_log_aggregation_retain_check_interval_seconds | default(3600) }}</value>
+  </property>
+
+  <property>
+    <name>yarn.nodemanager.log.retain-seconds</name>
+    <value>{{ yarn_nodemanager_log_retain_seconds | default(10800) }}</value>
+  </property>
+
+    <!-- YARN NodeManager local and log directories -->
+  <property>
+    <name>yarn.nodemanager.local-dirs</name>
+    <value>{{ yarn_nodemanager_local_dirs | default(['/data/hadoop/yarn/local']) | join(',') }}</value>
+  </property>
+
+  <property>
+    <name>yarn.nodemanager.log-dirs</name>
+    <value>{{ yarn_nodemanager_log_dirs | default(['/data/hadoop/yarn/logs']) | join(',') }}</value>
+  </property>
+
+  <!-- YARN NodeManager disk health checker -->
+  <property>
+    <name>yarn.nodemanager.disk-health-checker.enable</name>
+    <value>{{ yarn_nodemanager_disk_health_checker_enabled | default(true) | lower }}</value>
+  </property>
+
+  <property>
+    <name>yarn.nodemanager.disk-health-checker.max-disk-utilization-per-disk-percentage</name>
+    <value>{{ yarn_nodemanager_disk_max_utilization_percent | default(90.0) }}</value>
+  </property>
+
+  <property>
+    <name>yarn.nodemanager.disk-health-checker.min-free-space-per-disk-mb</name>
+    <value>{{ yarn_nodemanager_disk_min_free_mb | default(1024) }}</value>
+  </property>
+
+  <property>
+    <name>yarn.nodemanager.disk-health-checker.min-healthy-disks</name>
+    <value>{{ yarn_nodemanager_disk_min_healthy_disks | default(0.25) }}</value>
+  </property>
 </configuration>

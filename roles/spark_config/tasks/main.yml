@@ -43,3 +43,12 @@
   become_user: hdfs
   run_once: true
   when: "'master' in group_names"
+
+- name: Deploy Spark submit profile wrapper
+  ansible.builtin.template:
+    src: spark-submit-profile.sh.j2
+    dest: /usr/local/bin/spark-submit-profile
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
