@@ -1,0 +1,6 @@
+[Unit]
+Description=Export YARN NodeManager storage metrics for Node Exporter textfile collector
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/export-yarn-nodemanager-storage-metrics.sh

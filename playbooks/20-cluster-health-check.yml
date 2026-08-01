@@ -213,6 +213,24 @@
         df -h {{ (yarn_nodemanager_local_dirs | default(['/data/hadoop/yarn/local']) + yarn_nodemanager_log_dirs | default(['/data/hadoop/yarn/logs'])) | join(' ') }}
       changed_when: false
 
+    - name: Check YARN NodeManager storage metric timer
+      ansible.builtin.command: systemctl is-active yarn-nodemanager-storage-metrics.timer
+      changed_when: false
+
+    - name: Check YARN NodeManager storage metric file
+      ansible.builtin.stat:
+        path: "{{ node_exporter_textfile_dir | default('/var/lib/prometheus/node-exporter') }}/yarn_nodemanager_storage.prom"
+      register: yarn_nm_storage_metric_file
+
+    - name: Fail when YARN NodeManager storage metric file is missing
+      ansible.builtin.fail:
+        msg: "Missing YARN NodeManager storage metric file"
+      when: not yarn_nm_storage_metric_file.stat.exists
+
+    - name: Check YARN NodeManager storage metrics from Node Exporter
+      ansible.builtin.shell: |
+        curl -fsS http://127.0.0.1:9100/metrics | grep yarn_nodemanager_storage_used_percent
+      changed_when: false
 
 - name: Check monitoring stack on ops node
   hosts: ops
@@ -289,6 +307,7 @@
         - yarn-resource-overview.json
         - spark-history-overview.json
         - yarn-queue-overview.json
+        - yarn-nodemanager-storage-overview.json
 
     - name: Fail when Grafana dashboard file is missing
       ansible.builtin.fail:

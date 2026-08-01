@@ -1,0 +1,63 @@
+---
+- name: Configure YARN NodeManager storage metrics
+  hosts: workers
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Ensure Node Exporter textfile collector directory exists
+      ansible.builtin.file:
+        path: "{{ node_exporter_textfile_dir | default('/var/lib/prometheus/node-exporter') }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Deploy YARN NodeManager storage metric script
+      ansible.builtin.template:
+        src: ../roles/node_exporter/templates/yarn-nodemanager-storage-metrics.sh.j2
+        dest: /usr/local/sbin/export-yarn-nodemanager-storage-metrics.sh
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Deploy YARN NodeManager storage metric service
+      ansible.builtin.template:
+        src: ../roles/node_exporter/templates/yarn-nodemanager-storage-metrics.service.j2
+        dest: /etc/systemd/system/yarn-nodemanager-storage-metrics.service
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Deploy YARN NodeManager storage metric timer
+      ansible.builtin.template:
+        src: ../roles/node_exporter/templates/yarn-nodemanager-storage-metrics.timer.j2
+        dest: /etc/systemd/system/yarn-nodemanager-storage-metrics.timer
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Run YARN NodeManager storage metric service once
+      ansible.builtin.systemd:
+        name: yarn-nodemanager-storage-metrics.service
+        state: started
+
+    - name: Enable YARN NodeManager storage metric timer
+      ansible.builtin.systemd:
+        name: yarn-nodemanager-storage-metrics.timer
+        state: started
+        enabled: true
+
+    - name: Show YARN NodeManager storage metric file
+      ansible.builtin.shell: |
+        cat {{ node_exporter_textfile_dir | default('/var/lib/prometheus/node-exporter') }}/yarn_nodemanager_storage.prom
+      changed_when: false
+
+    - name: Check YARN NodeManager storage metrics from Node Exporter
+      ansible.builtin.shell: |
+        curl -fsS http://127.0.0.1:9100/metrics | grep yarn_nodemanager_storage
+      changed_when: false

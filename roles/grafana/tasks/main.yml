@@ -153,6 +153,16 @@
   become: true
   notify: Restart grafana
 
+- name: Deploy YARN NodeManager Storage Overview dashboard
+  ansible.builtin.template:
+    src: dashboard_json/yarn-nodemanager-storage-overview.json.j2
+    dest: "{{ grafana_dashboard_dir }}/yarn-nodemanager-storage-overview.json"
+    owner: root
+    group: grafana
+    mode: "0644"
+  become: true
+  notify: Restart grafana
+
 - name: Start and enable Grafana
   ansible.builtin.service:
     name: grafana-server
