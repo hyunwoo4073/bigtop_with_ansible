@@ -4,7 +4,7 @@ Apache Bigtop과 Ansible을 사용해 Hadoop 기반 미니 데이터 플랫폼�
 
 개인 VM 환경에서 Ambari 같은 통합 관리 도구 없이, Ansible playbook과 role 구조를 통해 서버 공통 설정, Java 설치, Bigtop repository 등록, Hadoop/HDFS/YARN/Spark 설치, 설정 파일 배포, 서비스 기동, 모니터링, 대시보드, 알림, 백업 자동화까지 구성하는 것을 목표로 합니다.
 
-현재는 HDFS, YARN, Spark on YARN, Prometheus/Grafana 기반 모니터링, JMX Exporter 기반 JVM 메트릭 수집, Alertmanager 기반 알림, Grafana datasource/dashboard provisioning, NameNode metadata 보호 및 백업 자동화, HDFS/YARN 상태 기반 alert, NameNode backup 상태 감시, HDFS/YARN/Spark History Server Grafana dashboard, Alertmanager Slack receiver 선택 구성, cluster health check/recovery/smoke test playbook, YARN Capacity Scheduler queue 정책, QueueMetrics 수집/alert/dashboard, YARN/Spark application diagnostics playbook, YARN log aggregation, Spark History Server event log retention, Spark submit resource profile, YARN NodeManager local/log directory 관리 및 disk health checker 구성을 완료한 상태입니다.
+현재는 HDFS, YARN, Spark on YARN, Prometheus/Grafana 기반 모니터링, JMX Exporter 기반 JVM 메트릭 수집, Alertmanager 기반 알림, Grafana datasource/dashboard provisioning, NameNode metadata 보호 및 백업 자동화, HDFS/YARN 상태 기반 alert, NameNode backup 상태 감시, HDFS/YARN/Spark History Server Grafana dashboard, Alertmanager Slack receiver 선택 구성, cluster health check/recovery/smoke test playbook, YARN Capacity Scheduler queue 정책, QueueMetrics 수집/alert/dashboard, YARN/Spark application diagnostics playbook, YARN log aggregation, Spark History Server event log retention, Spark submit resource profile, YARN NodeManager local/log directory 관리 및 disk health checker, NodeManager storage metric/alert/dashboard, 운영 runbook 분리, Makefile 기반 운영 명령 표준화, venv 기반 정적 검증 구성을 완료한 상태입니다.
 
 ## 구성
 
@@ -49,19 +49,38 @@ Apache Bigtop  - Hadoop/Spark 패키지 repository
 Hadoop HDFS    - 분산 파일 시스템
 YARN           - 리소스 관리 및 작업 실행
 Spark on YARN  - Spark 작업 실행 환경
-systemd        - Hadoop/YARN/Spark/backup timer 서비스 관리
+systemd        - Hadoop/YARN/Spark/backup/metric timer 서비스 관리
 Prometheus     - 메트릭 수집 및 alert rule 평가
 Grafana        - 메트릭 시각화 및 dashboard provisioning
 Alertmanager   - Prometheus alert 수신 및 알림 관리
 Node Exporter  - OS 메트릭 및 textfile collector 메트릭 수집
 JMX Exporter   - Hadoop/YARN/Spark JVM 메트릭 수집
 rsync/ssh      - NameNode metadata backup 원격 동기화
+Makefile       - 반복 운영 명령 표준화
+yamllint       - YAML 정적 검증
+ansible-lint   - Ansible playbook/role 정적 검증
 ```
 
 ## 디렉터리 구조
 
 ```text
 bigtop-cluster-ansible/
+├── ansible.cfg
+├── Makefile
+├── README.md
+├── requirements-dev.txt
+├── .yamllint
+├── .ansible-lint
+├── collections/
+│   └── requirements.yml
+├── docs/
+│   └── runbooks/
+│       ├── README.md
+│       ├── cluster-reboot-recovery.md
+│       ├── monitoring-alert-response.md
+│       ├── nodemanager-storage-pressure.md
+│       ├── spark-history-and-logs.md
+│       └── yarn-spark-application-failure.md
 ├── inventory/
 │   ├── hosts.ini.example
 │   └── group_vars/
@@ -95,33 +114,41 @@ bigtop-cluster-ansible/
 │   ├── 23-yarn-app-diagnostics.yml
 │   ├── 24-yarn-log-aggregation.yml
 │   ├── 25-spark-history-maintenance.yml
-│   └── 26-yarn-nodemanager-storage.yml
-└── roles/
-    ├── common/
-    ├── java/
-    ├── bigtop_repo/
-    ├── hadoop/
-    ├── hdfs_config/
-    ├── hdfs_service/
-    ├── yarn/
-    ├── yarn_config/
-    ├── spark/
-    ├── spark_config/
-    ├── node_exporter/
-    ├── prometheus/
-    ├── grafana/
-    │   └── templates/
-    │       ├── dashboards/
-    │       ├── datasources/
-    │       └── dashboard_json/
-    │           ├── bigtop-platform-overview.json.j2
-    │           ├── hdfs-health-overview.json.j2
-    │           ├── namenode-backup-overview.json.j2
-    │           ├── yarn-resource-overview.json.j2
-    │           └── spark-history-overview.json.j2
-    ├── jmx_exporter/
-    ├── alertmanager/
-    └── namenode_backup/
+│   ├── 26-yarn-nodemanager-storage.yml
+│   └── 27-yarn-nodemanager-storage-metrics.yml
+├── roles/
+│   ├── alertmanager/
+│   ├── bigtop_repo/
+│   ├── common/
+│   ├── grafana/
+│   │   └── templates/
+│   │       ├── dashboards/
+│   │       ├── datasources/
+│   │       └── dashboard_json/
+│   │           ├── bigtop-platform-overview.json.j2
+│   │           ├── hdfs-health-overview.json.j2
+│   │           ├── namenode-backup-overview.json.j2
+│   │           ├── spark-history-overview.json.j2
+│   │           ├── yarn-nodemanager-storage-overview.json.j2
+│   │           ├── yarn-queue-overview.json.j2
+│   │           └── yarn-resource-overview.json.j2
+│   ├── hadoop/
+│   ├── hdfs_config/
+│   ├── java/
+│   ├── jmx_exporter/
+│   ├── namenode_backup/
+│   ├── node_exporter/
+│   │   └── templates/
+│   │       ├── yarn-nodemanager-storage-metrics.service.j2
+│   │       ├── yarn-nodemanager-storage-metrics.sh.j2
+│   │       └── yarn-nodemanager-storage-metrics.timer.j2
+│   ├── prometheus/
+│   ├── spark/
+│   ├── spark_config/
+│   ├── yarn/
+│   └── yarn_config/
+└── scripts/
+    └── check-static-validation.sh
 ```
 
 ## 사전 준비
@@ -277,6 +304,13 @@ yarn_nodemanager_disk_max_utilization_percent: 90.0
 yarn_nodemanager_disk_min_free_mb: 1024
 yarn_nodemanager_disk_min_healthy_disks: 0.25
 
+# YARN NodeManager storage metrics
+yarn_nodemanager_storage_metrics_enabled: true
+yarn_nodemanager_storage_metrics_interval: "5min"
+yarn_nodemanager_storage_used_warning_percent: 80
+yarn_nodemanager_storage_used_critical_percent: 90
+yarn_nodemanager_storage_available_warning_bytes: 1073741824
+
 # Spark
 spark_conf_dir: "/etc/spark/conf"
 spark_history_dir: "hdfs:///spark-history"
@@ -382,6 +416,7 @@ ansible-playbook playbooks/22-cluster-smoke-test.yml
 ansible-playbook playbooks/24-yarn-log-aggregation.yml
 ansible-playbook playbooks/25-spark-history-maintenance.yml
 ansible-playbook playbooks/26-yarn-nodemanager-storage.yml
+ansible-playbook playbooks/27-yarn-nodemanager-storage-metrics.yml
 ```
 
 서비스 중지는 다음 playbook으로 수행합니다.
@@ -390,6 +425,120 @@ ansible-playbook playbooks/26-yarn-nodemanager-storage.yml
 ansible-playbook playbooks/12-spark-history-stop.yml
 ansible-playbook playbooks/09-yarn-stop.yml
 ansible-playbook playbooks/06-hdfs-stop.yml
+```
+
+## Makefile Operation Commands
+
+반복적으로 사용하는 Ansible 운영 명령은 Makefile target으로 제공합니다.
+
+```bash
+make help
+```
+
+기본 점검:
+
+```bash
+make inventory
+make ping
+make syntax
+make health
+```
+
+VM 재기동 후 복구 및 검증:
+
+```bash
+make post-reboot
+```
+
+`make post-reboot`는 다음 순서로 실행합니다.
+
+```text
+1. ansible all -m ping
+2. playbooks/21-cluster-recover.yml
+3. playbooks/20-cluster-health-check.yml
+4. playbooks/22-cluster-smoke-test.yml
+```
+
+YARN/Spark application 진단:
+
+```bash
+make diagnostics APP_ID=application_XXXXXXXXXXXX_XXXX
+```
+
+YARN/Spark 운영 작업:
+
+```bash
+make yarn-log-aggregation
+make spark-history-maintenance
+make nm-storage
+make nm-storage-metrics
+```
+
+Monitoring stack 재적용:
+
+```bash
+make monitoring
+```
+
+전체 구성 보조 명령:
+
+```bash
+make apply-core
+make apply-observability
+make apply-ops
+```
+
+## Static Validation
+
+로컬 개발 검증 도구는 Python virtual environment에 설치합니다.
+
+```bash
+make venv
+make collections
+```
+
+정적 검증:
+
+```bash
+make lint
+make validate
+```
+
+`make lint`는 다음 항목을 실행합니다.
+
+```text
+1. yamllint
+2. ansible-lint
+```
+
+`make validate`는 다음 항목을 검사합니다.
+
+```text
+1. 필수 명령어 설치 여부
+2. Git에 민감 파일 또는 runtime artifact가 추적 중인지 여부
+3. group_vars example 중복 key 여부
+4. Ansible inventory graph 생성 가능 여부
+5. yamllint 검사
+6. ansible-lint 검사
+7. 전체 playbook syntax-check
+```
+
+검증 도구는 다음 파일로 관리합니다.
+
+```text
+requirements-dev.txt
+collections/requirements.yml
+.yamllint
+.ansible-lint
+scripts/check-static-validation.sh
+```
+
+커밋 전 기본 루틴:
+
+```bash
+make lint
+make validate
+git status --short
 ```
 
 ## HDFS 설정 기준
@@ -616,6 +765,61 @@ NodeManager disk health checker도 함께 활성화합니다.
 ansible-playbook playbooks/26-yarn-nodemanager-storage.yml
 ansible workers -b -m shell -a "ls -ld /data/hadoop/yarn/local /data/hadoop/yarn/logs"
 ansible workers -b -m shell -a "df -h /data/hadoop/yarn/local /data/hadoop/yarn/logs"
+```
+
+## YARN NodeManager Storage Metrics
+
+NodeManager local/log directory의 디스크 사용량을 Node Exporter textfile collector를 통해 Prometheus metric으로 노출합니다.
+
+수집 대상:
+
+```text
+/data/hadoop/yarn/local
+/data/hadoop/yarn/logs
+```
+
+metric exporter는 systemd service/timer로 관리합니다.
+
+```text
+Script : /usr/local/sbin/export-yarn-nodemanager-storage-metrics.sh
+Service: yarn-nodemanager-storage-metrics.service
+Timer  : yarn-nodemanager-storage-metrics.timer
+Metric : /var/lib/prometheus/node-exporter/yarn_nodemanager_storage.prom
+```
+
+대표 metric:
+
+```promql
+yarn_nodemanager_storage_path_exists
+yarn_nodemanager_storage_total_bytes
+yarn_nodemanager_storage_used_bytes
+yarn_nodemanager_storage_available_bytes
+yarn_nodemanager_storage_used_percent
+yarn_nodemanager_storage_last_success_timestamp_seconds
+```
+
+적용:
+
+```bash
+ansible-playbook playbooks/27-yarn-nodemanager-storage-metrics.yml
+```
+
+확인:
+
+```bash
+ansible workers -b -m command -a "systemctl is-active yarn-nodemanager-storage-metrics.timer"
+ansible workers -b -m shell -a "cat /var/lib/prometheus/node-exporter/yarn_nodemanager_storage.prom"
+ansible workers -m shell -a "curl -s http://127.0.0.1:9100/metrics | grep yarn_nodemanager_storage"
+```
+
+Prometheus alert rule은 다음 상황을 감지합니다.
+
+```text
+YARNNodeManagerStorageMetricsMissing
+YARNNodeManagerStoragePathMissing
+YARNNodeManagerStorageUsageHigh
+YARNNodeManagerStorageUsageCritical
+YARNNodeManagerStorageAvailableLow
 ```
 
 ## Spark 설정 기준
@@ -845,6 +1049,10 @@ Dashboards
 Dashboards
 → Bigtop Cluster
 → YARN Queue Overview
+
+Dashboards
+→ Bigtop Cluster
+→ YARN NodeManager Storage Overview
 ```
 
 ### Bigtop Platform Overview
@@ -895,6 +1103,7 @@ namenode-backup-overview.json
 yarn-resource-overview.json
 spark-history-overview.json
 yarn-queue-overview.json
+yarn-nodemanager-storage-overview.json
 ```
 
 ### NameNode Backup Overview
@@ -1026,6 +1235,38 @@ ansible ops -b -m shell -a "ls -lh /var/lib/grafana/dashboards | grep yarn"
 ansible ops -m shell -a "curl -s 'http://127.0.0.1:9090/api/v1/query?query=yarn_queue_appsrunning'"
 ```
 
+### YARN NodeManager Storage Overview
+
+YARN NodeManager Storage Overview dashboard는 NodeManager local/log directory의 디스크 사용량을 노드별, 경로별로 시각화합니다.
+
+dashboard 주요 패널:
+
+```text
+Storage Paths Exists
+Max Storage Usage %
+Min Available Space
+Last Metric Collection
+NodeManager Storage Used %
+NodeManager Storage Available Bytes
+NodeManager Storage Table
+```
+
+대표 Prometheus metric:
+
+```promql
+yarn_nodemanager_storage_path_exists{job="node-exporter"}
+yarn_nodemanager_storage_used_percent{job="node-exporter"}
+yarn_nodemanager_storage_available_bytes{job="node-exporter"}
+yarn_nodemanager_storage_last_success_timestamp_seconds{job="node-exporter"}
+```
+
+확인:
+
+```bash
+ansible ops -b -m shell -a "ls -lh /var/lib/grafana/dashboards | grep yarn-nodemanager-storage"
+ansible ops -m shell -a "curl -s 'http://127.0.0.1:9090/api/v1/query?query=yarn_nodemanager_storage_used_percent'"
+```
+
 Grafana dashboard provisioning task는 다음 흐름으로 구성합니다.
 
 ```text
@@ -1037,7 +1278,8 @@ Grafana dashboard provisioning task는 다음 흐름으로 구성합니다.
 6. yarn-resource-overview.json 배포
 7. spark-history-overview.json 배포
 8. yarn-queue-overview.json 배포
-9. grafana-server 재시작
+9. yarn-nodemanager-storage-overview.json 배포
+10. grafana-server 재시작
 ```
 
 ## JMX Exporter 설정 기준
@@ -1369,6 +1611,11 @@ YARNQueuePendingApplications
 YARNQueuePendingMemory
 YARNQueueMemoryUsageHigh
 YARNQueueFailedApplications
+YARNNodeManagerStorageMetricsMissing
+YARNNodeManagerStoragePathMissing
+YARNNodeManagerStorageUsageHigh
+YARNNodeManagerStorageUsageCritical
+YARNNodeManagerStorageAvailableLow
 SparkHistoryServerJMXDown
 NameNodeMetadataBackupMetricsMissing
 NameNodeMetadataBackupFailed
@@ -1561,6 +1808,7 @@ ansible-playbook playbooks/20-cluster-health-check.yml
 - Spark submit profile wrapper 및 default resource 설정
 - YARN NodeManager local/log directory 존재 여부
 - YARN NodeManager local/log directory 권한 및 disk usage
+- YARN NodeManager storage metric timer 및 textfile metric
 - Prometheus/Grafana/Alertmanager service and health endpoint
 - Prometheus config and alert rule syntax
 - Alertmanager config syntax
@@ -1712,6 +1960,53 @@ find /tmp/yarn-diagnostic-check -type f
 
 ```gitignore
 artifacts/
+```
+
+## Operations Runbooks
+
+상세 장애 대응 절차는 `docs/runbooks/` 아래에 분리해서 관리합니다.
+
+```text
+docs/runbooks/README.md
+docs/runbooks/cluster-reboot-recovery.md
+docs/runbooks/yarn-spark-application-failure.md
+docs/runbooks/nodemanager-storage-pressure.md
+docs/runbooks/spark-history-and-logs.md
+docs/runbooks/monitoring-alert-response.md
+```
+
+대표 runbook:
+
+```text
+Cluster Reboot Recovery
+- VM 재기동 이후 cluster recovery, health check, smoke test 수행 절차
+
+YARN and Spark Application Failure
+- Spark on YARN application 실패 시 application id 기준 진단 절차
+
+NodeManager Storage Pressure
+- NodeManager local/log directory 디스크 사용률 증가 및 storage alert 대응 절차
+
+Spark History and YARN Logs
+- Spark History Server, YARN log aggregation, event log retention 점검 절차
+
+Monitoring Alert Response
+- Prometheus, Grafana, Alertmanager alert 발생 시 기본 대응 절차
+```
+
+기본 복구 루틴:
+
+```bash
+make post-reboot
+```
+
+직접 실행하는 경우:
+
+```bash
+ansible all -m ping
+ansible-playbook playbooks/21-cluster-recover.yml
+ansible-playbook playbooks/20-cluster-health-check.yml
+ansible-playbook playbooks/22-cluster-smoke-test.yml
 ```
 
 ## 주요 트러블슈팅
@@ -2438,6 +2733,81 @@ PY
 
 중복이 있으면 실제로 사용할 값 하나만 남기고 나머지는 삭제합니다.
 
+### yamllint가 .venv 내부까지 검사하는 문제
+
+`yamllint .`처럼 repository 전체를 검사하면 `.venv/lib/python.../site-packages` 내부 파일까지 검사 대상이 되어 대량의 lint 오류가 발생할 수 있습니다.
+
+해결 방법은 `.yamllint`에서 `.venv/`를 제외하고, Makefile에서도 검사 대상을 프로젝트 파일로 제한하는 것입니다.
+
+```yaml
+ignore: |
+  .venv/
+  venv/
+  artifacts/
+  inventory/group_vars/all.yml
+  inventory/hosts.ini
+```
+
+Makefile의 lint target은 다음처럼 주요 경로만 검사합니다.
+
+```bash
+yamllint .yamllint .ansible-lint inventory/group_vars/all.yml.example playbooks roles docs
+```
+
+### EOF newline 오류
+
+다음 오류는 파일 마지막 줄에 newline 문자가 없다는 의미입니다.
+
+```text
+no new line character at the end of file
+```
+
+내용 오류는 아니지만, text file convention과 lint rule을 맞추기 위해 마지막에 newline을 추가합니다.
+
+```bash
+python3 - <<'PY'
+from pathlib import Path
+
+targets = [
+    Path(".yamllint"),
+    Path(".ansible-lint"),
+    Path("requirements-dev.txt"),
+    Path("Makefile"),
+    Path("README.md"),
+    Path("inventory/group_vars/all.yml.example"),
+]
+
+for base in [Path("playbooks"), Path("roles"), Path("scripts"), Path("docs"), Path("collections")]:
+    if base.exists():
+        for path in base.rglob("*"):
+            if path.is_file() and path.suffix in {".yml", ".yaml", ".j2", ".sh", ".md", ".txt"}:
+                targets.append(path)
+
+for file in sorted(set(targets)):
+    if not file.exists():
+        continue
+    data = file.read_bytes()
+    if data and b"\0" not in data and not data.endswith(b"\n"):
+        file.write_bytes(data + b"\n")
+        print(f"fixed newline: {file}")
+PY
+```
+
+### ansible-lint command/shell rule
+
+본 프로젝트의 health check, smoke test, diagnostics playbook은 실제 운영 명령의 출력과 exit code를 검증하는 목적이므로 `systemctl`, `curl`, `hdfs`, `yarn`, `grep`을 직접 호출하는 task가 많습니다.
+
+따라서 현재 단계에서는 다음 rule을 skip하고, 실제 운영 동작과 syntax-check를 우선합니다.
+
+```yaml
+skip_list:
+  - yaml[line-length]
+  - command-instead-of-module
+  - command-instead-of-shell
+```
+
+장기적으로는 일부 health endpoint 확인을 `ansible.builtin.uri`, 서비스 상태 확인을 `ansible.builtin.systemd` 기반으로 점진적으로 치환할 수 있습니다.
+
 ## Git에 포함하지 않는 파일
 
 실제 IP, 사용자명, SSH key, 로그 파일은 Git에 올리지 않습니다.
@@ -2611,24 +2981,55 @@ inventory/group_vars/all.yml.example
 108. group_vars 중복 key 정리
 109. NodeManager local/log directory 변수를 list 형태로 표준화
 110. .gitignore secret/runtime artifact 제외 규칙 보강
+111. YARN NodeManager storage metric exporter script 추가
+112. NodeManager storage metric systemd service/timer 구성
+113. Node Exporter textfile collector 기반 yarn_nodemanager_storage_* metric 수집
+114. NodeManager storage path missing alert 구성
+115. NodeManager storage usage warning/critical alert 구성
+116. NodeManager storage available space alert 구성
+117. health check에 NodeManager storage metric timer 및 metric file 점검 추가
+118. YARN NodeManager Storage Overview Grafana dashboard 추가
+119. NodeManager storage used percent/available bytes/table panel 구성
+120. 운영 runbook 문서 docs/runbooks로 분리
+121. cluster reboot recovery runbook 추가
+122. YARN/Spark application failure runbook 추가
+123. NodeManager storage pressure runbook 추가
+124. Spark History and YARN logs runbook 추가
+125. monitoring alert response runbook 추가
+126. Makefile 기반 운영 명령 표준화
+127. make health/recover/smoke/post-reboot/diagnostics target 추가
+128. make nm-storage/nm-storage-metrics/monitoring target 추가
+129. Python venv 기반 dev tool 설치 흐름 구성
+130. requirements-dev.txt 기반 ansible-lint/yamllint 관리
+131. collections/requirements.yml 기반 Ansible Galaxy collection 관리
+132. yamllint 설정 추가 및 .venv 검사 제외
+133. ansible-lint 설정 추가 및 운영형 command/shell rule skip
+134. scripts/check-static-validation.sh 정적 검증 스크립트 추가
+135. 민감 파일 및 runtime artifact Git 추적 여부 검증 추가
+136. group_vars example 중복 key 검증 추가
+137. 전체 playbook syntax-check 자동화
+138. EOF newline lint 오류 정리
+139. Makefile lint/validate target 구성
+140. 커밋 전 검증 루틴 정리
 ```
 
 ## 향후 계획
 
 ```text
-1. NodeManager local/log directory disk usage Prometheus alert 추가
-2. Spark application failure diagnostics 결과 요약 자동화 고도화
-3. Spark executor/driver resource tuning profile 세분화
-4. YARN queue별 dashboard panel 고도화 및 capacity 기준선 표시
-5. Spark application event log 기반 지표 확장 검토
-6. Alertmanager Email receiver 추가 검토
-7. Slack alert message template 고도화
-8. 서비스별 runbook 문서화
-9. NameNode metadata 복구 runbook 별도 문서화
-10. HA 구성 설계 문서화
-11. Spark History Server 관리 playbook role화
-12. Cluster health/recovery/smoke test playbook role화 또는 tag 분리
-13. Ansible role 리팩토링
-14. group/host 이름 중복 warning 제거
-15. GitHub 포트폴리오용 아키텍처 다이어그램 추가
+1. GitHub Actions 기반 CI validation workflow 추가
+2. ansible-lint strict profile을 별도 target으로 분리
+3. health check의 일부 curl/systemctl task를 uri/systemd 모듈 기반으로 점진적 치환
+4. Spark application failure diagnostics 결과 요약 자동화 고도화
+5. Spark executor/driver resource tuning profile 세분화
+6. YARN queue별 dashboard panel 고도화 및 capacity 기준선 표시
+7. Spark application event log 기반 지표 확장 검토
+8. Alertmanager Email receiver 추가 검토
+9. Slack alert message template 고도화
+10. NameNode metadata 복구 runbook 별도 문서화
+11. HA 구성 설계 문서화
+12. Spark History Server 관리 playbook role화
+13. Cluster health/recovery/smoke test playbook role화 또는 tag 분리
+14. Ansible role 리팩토링
+15. group/host 이름 중복 warning 제거
+16. GitHub 포트폴리오용 아키텍처 다이어그램 추가
 ```
