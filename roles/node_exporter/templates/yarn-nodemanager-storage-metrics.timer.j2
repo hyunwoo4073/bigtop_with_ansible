@@ -1,0 +1,11 @@
+[Unit]
+Description=Run YARN NodeManager storage metrics exporter periodically
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec={{ yarn_nodemanager_storage_metrics_interval | default('5min') }}
+AccuracySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

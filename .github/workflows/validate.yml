@@ -1,0 +1,37 @@
+---
+name: Validate Bigtop Cluster Ansible
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+      - "feat/**"
+      - "chore/**"
+      - "docs/**"
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate:
+    name: Lint and syntax check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Prepare inventory files
+        run: |
+          cp inventory/hosts.ini.example inventory/hosts.ini
+          cp inventory/group_vars/all.yml.example inventory/group_vars/all.yml
+
+      - name: Run CI validation
+        run: |
+          make ci

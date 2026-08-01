@@ -226,3 +226,10 @@ yarn_memory_warning_percent: 80
 yarn_memory_critical_percent: 90
 yarn_vcore_warning_percent: 80
 yarn_vcore_critical_percent: 90
+
+# YARN NodeManager storage metrics
+yarn_nodemanager_storage_metrics_enabled: true
+yarn_nodemanager_storage_metrics_interval: "5min"
+yarn_nodemanager_storage_used_warning_percent: 80
+yarn_nodemanager_storage_used_critical_percent: 90
+yarn_nodemanager_storage_available_warning_bytes: 1073741824

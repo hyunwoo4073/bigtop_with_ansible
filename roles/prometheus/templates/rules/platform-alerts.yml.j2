@@ -172,6 +172,56 @@ groups:
           summary: "YARN queue has failed applications"
           description: "Queue {{ '{{' }} $labels.queue {{ '}}' }} has failed applications in the last 10 minutes."
 
+      - alert: YARNNodeManagerStorageMetricsMissing
+        expr: |
+          absent(yarn_nodemanager_storage_last_success_timestamp_seconds{job="node-exporter"})
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "YARN NodeManager storage metrics are missing"
+          description: "YARN NodeManager storage metrics are not available from Node Exporter textfile collector."
+
+      - alert: YARNNodeManagerStoragePathMissing
+        expr: |
+          yarn_nodemanager_storage_path_exists{job="node-exporter"} == 0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "YARN NodeManager storage path is missing"
+          description: "YARN NodeManager {{ '{{' }} $labels.type {{ '}}' }} path {{ '{{' }} $labels.path {{ '}}' }} is missing on {{ '{{' }} $labels.instance {{ '}}' }}."
+
+      - alert: YARNNodeManagerStorageUsageHigh
+        expr: |
+          yarn_nodemanager_storage_used_percent{job="node-exporter"} > {{ yarn_nodemanager_storage_used_warning_percent | default(80) }}
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "YARN NodeManager storage usage is high"
+          description: "YARN NodeManager {{ '{{' }} $labels.type {{ '}}' }} path {{ '{{' }} $labels.path {{ '}}' }} on {{ '{{' }} $labels.instance {{ '}}' }} is over warning threshold. Current={{ '{{' }} $value {{ '}}' }}%."
+
+      - alert: YARNNodeManagerStorageUsageCritical
+        expr: |
+          yarn_nodemanager_storage_used_percent{job="node-exporter"} > {{ yarn_nodemanager_storage_used_critical_percent | default(90) }}
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "YARN NodeManager storage usage is critical"
+          description: "YARN NodeManager {{ '{{' }} $labels.type {{ '}}' }} path {{ '{{' }} $labels.path {{ '}}' }} on {{ '{{' }} $labels.instance {{ '}}' }} is over critical threshold. Current={{ '{{' }} $value {{ '}}' }}%."
+
+      - alert: YARNNodeManagerStorageAvailableLow
+        expr: |
+          yarn_nodemanager_storage_available_bytes{job="node-exporter"} < {{ yarn_nodemanager_storage_available_warning_bytes | default(1073741824) }}
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "YARN NodeManager storage available space is low"
+          description: "YARN NodeManager {{ '{{' }} $labels.type {{ '}}' }} path {{ '{{' }} $labels.path {{ '}}' }} on {{ '{{' }} $labels.instance {{ '}}' }} has low available space. Current={{ '{{' }} $value {{ '}}' }} bytes."
+
       - alert: SparkHistoryServerJMXDown
         expr: up{job="spark-history-jmx"} == 0
         for: 1m

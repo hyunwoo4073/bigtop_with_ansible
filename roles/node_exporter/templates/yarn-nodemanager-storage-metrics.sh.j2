@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+TEXTFILE_DIR="{{ node_exporter_textfile_dir | default('/var/lib/prometheus/node-exporter') }}"
+OUTPUT_FILE="${TEXTFILE_DIR}/yarn_nodemanager_storage.prom"
+TMP_FILE="${OUTPUT_FILE}.$$"
+
+mkdir -p "${TEXTFILE_DIR}"
+
+write_metric_header() {
+  cat <<'EOF'
+# HELP yarn_nodemanager_storage_path_exists Whether the YARN NodeManager storage path exists. 1 means exists.
+# TYPE yarn_nodemanager_storage_path_exists gauge
+# HELP yarn_nodemanager_storage_total_bytes Total filesystem bytes for YARN NodeManager storage path.
+# TYPE yarn_nodemanager_storage_total_bytes gauge
+# HELP yarn_nodemanager_storage_used_bytes Used filesystem bytes for YARN NodeManager storage path.
+# TYPE yarn_nodemanager_storage_used_bytes gauge
+# HELP yarn_nodemanager_storage_available_bytes Available filesystem bytes for YARN NodeManager storage path.
+# TYPE yarn_nodemanager_storage_available_bytes gauge
+# HELP yarn_nodemanager_storage_used_percent Used filesystem percent for YARN NodeManager storage path.
+# TYPE yarn_nodemanager_storage_used_percent gauge
+# HELP yarn_nodemanager_storage_last_success_timestamp_seconds Last successful YARN NodeManager storage metric collection timestamp.
+# TYPE yarn_nodemanager_storage_last_success_timestamp_seconds gauge
+EOF
+}
+
+emit_path_metric() {
+  local path="$1"
+  local kind="$2"
+
+  if [[ ! -d "${path}" ]]; then
+    echo "yarn_nodemanager_storage_path_exists{type=\"${kind}\",path=\"${path}\"} 0"
+    return 0
+  fi
+
+  local total_bytes
+  local used_bytes
+  local available_bytes
+  local used_percent
+
+  total_bytes="$(df -PB1 "${path}" | awk 'NR==2 {print $2}')"
+  used_bytes="$(df -PB1 "${path}" | awk 'NR==2 {print $3}')"
+  available_bytes="$(df -PB1 "${path}" | awk 'NR==2 {print $4}')"
+
+  used_percent="$(awk -v used="${used_bytes}" -v total="${total_bytes}" 'BEGIN {
+    if (total > 0) {
+      printf "%.2f", (used / total) * 100
+    } else {
+      printf "0"
+    }
+  }')"
+
+  echo "yarn_nodemanager_storage_path_exists{type=\"${kind}\",path=\"${path}\"} 1"
+  echo "yarn_nodemanager_storage_total_bytes{type=\"${kind}\",path=\"${path}\"} ${total_bytes}"
+  echo "yarn_nodemanager_storage_used_bytes{type=\"${kind}\",path=\"${path}\"} ${used_bytes}"
+  echo "yarn_nodemanager_storage_available_bytes{type=\"${kind}\",path=\"${path}\"} ${available_bytes}"
+  echo "yarn_nodemanager_storage_used_percent{type=\"${kind}\",path=\"${path}\"} ${used_percent}"
+}
+
+{
+  write_metric_header
+
+{% for path in yarn_nodemanager_local_dirs | default(['/data/hadoop/yarn/local']) %}
+  emit_path_metric "{{ path }}" "local"
+{% endfor %}
+
+{% for path in yarn_nodemanager_log_dirs | default(['/data/hadoop/yarn/logs']) %}
+  emit_path_metric "{{ path }}" "log"
+{% endfor %}
+
+  echo "yarn_nodemanager_storage_last_success_timestamp_seconds $(date +%s)"
+} > "${TMP_FILE}"
+
+chown root:root "${TMP_FILE}"
+chmod 0644 "${TMP_FILE}"
+mv "${TMP_FILE}" "${OUTPUT_FILE}"

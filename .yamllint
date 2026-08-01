@@ -1,0 +1,33 @@
+---
+extends: default
+
+rules:
+  line-length:
+    max: 200
+    level: warning
+
+  truthy:
+    allowed-values: ["true", "false"]
+    check-keys: false
+
+  comments:
+    min-spaces-from-content: 1
+
+  comments-indentation: false
+
+  braces:
+    max-spaces-inside: 1
+
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true
+
+  document-start:
+    present: true
+
+ignore: |
+  .venv/
+  venv/
+  artifacts/
+  inventory/group_vars/all.yml
+  inventory/hosts.ini

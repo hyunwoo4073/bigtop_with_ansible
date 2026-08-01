@@ -1,0 +1,15 @@
+---
+profile: basic
+
+exclude_paths:
+  - .cache/
+  - .venv/
+  - venv/
+  - artifacts/
+  - inventory/group_vars/all.yml
+  - inventory/hosts.ini
+
+skip_list:
+  - yaml[line-length]
+  - command-instead-of-module
+  - command-instead-of-shell
