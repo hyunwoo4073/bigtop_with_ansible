@@ -1,0 +1,375 @@
+import os
+import shlex
+import subprocess
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import PlainTextResponse
+from fastapi.staticfiles import StaticFiles
+
+
+PROJECT_DIR = os.environ.get("PROJECT_DIR", "{{ web_console_project_dir }}")
+OPSCTL = os.environ.get("OPSCTL", "{{ web_console_opsctl }}")
+FRONTEND_DIST_DIR = os.environ.get("FRONTEND_DIST_DIR", "{{ web_console_frontend_dist_dir }}")
+
+REQUEST_TIMEOUT = {{ web_console_request_timeout_seconds }}
+STATUS_TIMEOUT = {{ web_console_status_timeout_seconds }}
+JOURNAL_LINES = {{ web_console_journal_lines }}
+
+app = FastAPI(title="Bigtop Web Console API")
+
+
+COMPONENTS = [
+    {"group": "HDFS", "component": "NameNode", "host": "master", "service": "hadoop-hdfs-namenode"},
+    {"group": "HDFS", "component": "DataNode", "host": "worker1", "service": "hadoop-hdfs-datanode"},
+    {"group": "HDFS", "component": "DataNode", "host": "worker2", "service": "hadoop-hdfs-datanode"},
+    {"group": "YARN", "component": "ResourceManager", "host": "master", "service": "hadoop-yarn-resourcemanager"},
+    {"group": "YARN", "component": "NodeManager", "host": "worker1", "service": "hadoop-yarn-nodemanager"},
+    {"group": "YARN", "component": "NodeManager", "host": "worker2", "service": "hadoop-yarn-nodemanager"},
+    {"group": "Spark", "component": "History Server", "host": "master", "service": "spark-history-server"},
+    {"group": "Monitoring", "component": "Prometheus", "host": "worker3", "service": "prometheus"},
+    {"group": "Monitoring", "component": "Grafana", "host": "worker3", "service": "grafana-server"},
+    {"group": "Monitoring", "component": "Alertmanager", "host": "worker3", "service": "prometheus-alertmanager"},
+    {"group": "Ops", "component": "Web Console", "host": "worker3", "service": "bigtop-web-console"},
+    {"group": "Ops", "component": "Nginx", "host": "worker3", "service": "nginx"},
+    {"group": "Ops", "component": "OliveTin", "host": "worker3", "service": "OliveTin"},
+]
+
+
+def run_cmd(cmd: str, timeout: int = REQUEST_TIMEOUT) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        cmd,
+        shell=True,
+        cwd=PROJECT_DIR,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=timeout,
+    )
+
+
+def ansible_shell(host: str, command: str, become: bool = True, timeout: int = REQUEST_TIMEOUT) -> subprocess.CompletedProcess:
+    quoted_command = shlex.quote(command)
+    become_flag = "-b " if become else ""
+    cmd = f"ansible {shlex.quote(host)} {become_flag}-m shell -a {quoted_command}"
+    return run_cmd(cmd, timeout=timeout)
+
+
+def component_id(component: Dict[str, str]) -> str:
+    return f"{component['host']}::{component['service']}"
+
+
+def find_component(component_id_value: str) -> Dict[str, str]:
+    for component in COMPONENTS:
+        if component_id(component) == component_id_value:
+            return component
+    raise HTTPException(status_code=404, detail="Unknown component")
+
+
+def parse_systemd_output(output: str) -> Dict[str, str]:
+    active = "unknown"
+    sub = "unknown"
+    pid = "-"
+    load = "unknown"
+
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+
+        if line in {"active", "inactive", "failed", "activating", "deactivating"}:
+            active = line
+        elif line.startswith("ActiveState="):
+            active = line.split("=", 1)[1]
+        elif line.startswith("SubState="):
+            sub = line.split("=", 1)[1]
+        elif line.startswith("MainPID="):
+            pid = line.split("=", 1)[1]
+        elif line.startswith("LoadState="):
+            load = line.split("=", 1)[1]
+
+    status = "UP" if active == "active" else "DOWN"
+
+    return {
+        "status": status,
+        "active": active,
+        "sub": sub,
+        "pid": pid if pid and pid != "0" else "-",
+        "load": load,
+    }
+
+
+def systemd_status(host: str, service: str) -> Dict[str, str]:
+    command = (
+        f"systemctl is-active {shlex.quote(service)}; "
+        f"systemctl show {shlex.quote(service)} "
+        "--property=ActiveState --property=SubState --property=MainPID --property=LoadState --no-page"
+    )
+
+    try:
+        result = ansible_shell(host, command, become=True, timeout=STATUS_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return {
+            "status": "UNKNOWN",
+            "active": "timeout",
+            "sub": "timeout",
+            "pid": "-",
+            "load": "unknown",
+        }
+
+    output = (result.stdout or "") + "\n" + (result.stderr or "")
+    return parse_systemd_output(output)
+
+
+def build_status() -> Dict:
+    checked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    components = []
+    groups: Dict[str, List[Dict]] = {}
+    nodes: Dict[str, List[Dict]] = {}
+
+    for item in COMPONENTS:
+        state = systemd_status(item["host"], item["service"])
+
+        row = {
+            **item,
+            "id": component_id(item),
+            "status": state["status"],
+            "active": state["active"],
+            "sub": state["sub"],
+            "pid": state["pid"],
+            "load": state["load"],
+            "checked_at": checked_at,
+        }
+
+        components.append(row)
+        groups.setdefault(item["group"], []).append(row)
+        nodes.setdefault(item["host"], []).append(row)
+
+    summary = []
+    for group, rows in groups.items():
+        total = len(rows)
+        up = sum(1 for row in rows if row["status"] == "UP")
+        down = total - up
+
+        if down == 0:
+            status = "HEALTHY"
+        elif up == 0:
+            status = "DOWN"
+        else:
+            status = "DEGRADED"
+
+        summary.append({"group": group, "status": status, "up": up, "down": down, "total": total})
+
+    node_summary = []
+    for host, rows in nodes.items():
+        total = len(rows)
+        up = sum(1 for row in rows if row["status"] == "UP")
+        down = total - up
+
+        if down == 0:
+            status = "HEALTHY"
+        elif up == 0:
+            status = "DOWN"
+        else:
+            status = "DEGRADED"
+
+        node_summary.append({"host": host, "status": status, "up": up, "down": down, "total": total, "components": rows})
+
+    issues = [
+        {
+            "severity": "CRITICAL",
+            "message": f"{row['group']} {row['component']} on {row['host']} is {row['status']}",
+            "component_id": row["id"],
+            "group": row["group"],
+            "component": row["component"],
+            "service": row["service"],
+            "host": row["host"],
+        }
+        for row in components
+        if row["status"] != "UP"
+    ]
+
+    cluster_status = "HEALTHY"
+    if any(item["status"] == "DOWN" for item in summary):
+        cluster_status = "DOWN"
+    elif any(item["status"] == "DEGRADED" for item in summary):
+        cluster_status = "DEGRADED"
+
+    total_components = len(components)
+    up_components = sum(1 for item in components if item["status"] == "UP")
+
+    return {
+        "checked_at": checked_at,
+        "cluster_status": cluster_status,
+        "summary": summary,
+        "nodes": node_summary,
+        "components": components,
+        "issues": issues,
+        "metrics": {
+            "total_components": total_components,
+            "up_components": up_components,
+            "down_components": total_components - up_components,
+            "issue_count": len(issues),
+        },
+    }
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok", "service": "bigtop-web-console"}
+
+
+@app.get("/api/status")
+def api_status():
+    return build_status()
+
+
+@app.get("/api/component/{component_id_value:path}/logs", response_class=PlainTextResponse)
+def api_component_logs(component_id_value: str):
+    component = find_component(component_id_value)
+    service = component["service"]
+    host = component["host"]
+
+    command = f"journalctl -u {shlex.quote(service)} -n {JOURNAL_LINES} --no-pager"
+    result = ansible_shell(host, command, become=True, timeout=REQUEST_TIMEOUT)
+
+    output = result.stdout or ""
+    if result.stderr:
+        output += "\n[stderr]\n" + result.stderr
+
+    return output or "(no logs)"
+
+
+@app.post("/api/component/{component_id_value:path}/restart")
+def api_component_restart(component_id_value: str):
+    component = find_component(component_id_value)
+    service = component["service"]
+    host = component["host"]
+
+    command = f"systemctl restart {shlex.quote(service)} && systemctl is-active {shlex.quote(service)}"
+    result = ansible_shell(host, command, become=True, timeout=REQUEST_TIMEOUT)
+
+    return {
+        "component": component,
+        "returncode": result.returncode,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+        "ok": result.returncode == 0,
+    }
+
+
+@app.post("/api/action/incident-summary")
+def api_incident_summary():
+    cmd = f"{shlex.quote(OPSCTL)} incident-summary"
+    result = run_cmd(cmd, timeout=REQUEST_TIMEOUT)
+
+    return {
+        "returncode": result.returncode,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+        "ok": result.returncode == 0,
+    }
+
+
+frontend_path = Path(FRONTEND_DIST_DIR)
+
+if frontend_path.exists():
+    
+# START_STOP_ACTION_ENDPOINTS_V1
+# Additional service lifecycle endpoints.
+# Restart existed first as the safest MVP action.
+# Start/Stop are added separately for operational completeness.
+import re as _svc_re
+import subprocess as _svc_subprocess
+
+_ALLOWED_SERVICE_ACTIONS = {
+    "start": "started",
+    "stop": "stopped",
+}
+
+_STOP_PROTECTED_SERVICES = {
+    "bigtop-web-console",
+    "nginx",
+}
+
+
+def _component_runtime_id(component):
+    return component.get("id") or f"{component.get('host')}::{component.get('service')}"
+
+
+def _find_component_for_lifecycle(component_id_value):
+    for component in COMPONENTS:
+        if _component_runtime_id(component) == component_id_value:
+            return component
+
+    raise HTTPException(status_code=404, detail=f"unknown component: {component_id_value}")
+
+
+def _validate_lifecycle_target(host, service):
+    if not _svc_re.match(r"^[A-Za-z0-9_.-]+$", host):
+        raise HTTPException(status_code=400, detail=f"invalid host: {host}")
+
+    if not _svc_re.match(r"^[A-Za-z0-9_.@-]+$", service):
+        raise HTTPException(status_code=400, detail=f"invalid service: {service}")
+
+
+def _run_lifecycle_action(component_id_value, action_name):
+    if action_name not in _ALLOWED_SERVICE_ACTIONS:
+        raise HTTPException(status_code=400, detail=f"unsupported action: {action_name}")
+
+    component = _find_component_for_lifecycle(component_id_value)
+
+    host = component["host"]
+    service = component["service"]
+    desired_state = _ALLOWED_SERVICE_ACTIONS[action_name]
+
+    _validate_lifecycle_target(host, service)
+
+    if action_name == "stop" and service in _STOP_PROTECTED_SERVICES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"stop is blocked for protected service: {service}",
+        )
+
+    cmd = [
+        "ansible",
+        host,
+        "-b",
+        "-m",
+        "ansible.builtin.systemd",
+        "-a",
+        f"name={service} state={desired_state}",
+    ]
+
+    result = _svc_subprocess.run(
+        cmd,
+        cwd="{{ web_console_project_root | default(playbook_dir ~ '/..') }}",
+        text=True,
+        capture_output=True,
+        timeout=120,
+    )
+
+    return {
+        "ok": result.returncode == 0,
+        "action": action_name,
+        "host": host,
+        "service": service,
+        "returncode": result.returncode,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+    }
+
+
+@app.post("/api/component/{component_id_value:path}/start")
+async def start_component(component_id_value: str):
+    return _run_lifecycle_action(component_id_value, "start")
+
+
+@app.post("/api/component/{component_id_value:path}/stop")
+async def stop_component(component_id_value: str):
+    return _run_lifecycle_action(component_id_value, "stop")
+
+
+
+app.mount("/", StaticFiles(directory=str(frontend_path), html=True), name="frontend")

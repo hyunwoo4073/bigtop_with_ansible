@@ -327,3 +327,31 @@
       when:
         - alertmanager_slack_enabled | default(false) | bool
         - not slack_webhook_file.stat.exists
+
+    - name: Check Ops Console OliveTin service
+      ansible.builtin.command: systemctl is-active OliveTin
+      register: olivetin_service_status
+      changed_when: false
+      failed_when: olivetin_service_status.stdout != "active"
+      become: true
+
+    - name: Check Ops Console Nginx service
+      ansible.builtin.command: systemctl is-active nginx
+      register: nginx_service_status
+      changed_when: false
+      failed_when: nginx_service_status.stdout != "active"
+      become: true
+
+    - name: Check Ops Console internal endpoint
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ ops_console_internal_port | default(13370) }}"
+        method: GET
+        status_code: 200
+      changed_when: false
+
+    - name: Check Ops Console public endpoint requires auth
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ ops_console_public_port | default(1337) }}"
+        method: GET
+        status_code: 401
+      changed_when: false

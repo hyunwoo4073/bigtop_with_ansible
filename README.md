@@ -2,9 +2,9 @@
 
 Apache Bigtop과 Ansible을 사용해 Hadoop 기반 미니 데이터 플랫폼을 자동화 방식으로 구성하는 프로젝트입니다.
 
-개인 VM 환경에서 Ambari 같은 통합 관리 도구 없이, Ansible playbook과 role 구조를 통해 서버 공통 설정, Java 설치, Bigtop repository 등록, Hadoop/HDFS/YARN/Spark 설치, 설정 파일 배포, 서비스 기동, 모니터링, 대시보드, 알림, 백업 자동화까지 구성하는 것을 목표로 합니다.
+개인 VM 환경에서 Ambari 같은 통합 관리 도구 없이, Ansible playbook과 role 구조를 통해 서버 공통 설정, Java 설치, Bigtop repository 등록, Hadoop/HDFS/YARN/Spark 설치, 설정 파일 배포, 서비스 기동, 모니터링, 대시보드, 알림, 백업 자동화, 운영 점검, Web Console까지 구성하는 것을 목표로 합니다.
 
-현재는 HDFS, YARN, Spark on YARN, Prometheus/Grafana 기반 모니터링, JMX Exporter 기반 JVM 메트릭 수집, Alertmanager 기반 알림, Grafana datasource/dashboard provisioning, NameNode metadata 보호 및 백업 자동화, HDFS/YARN 상태 기반 alert, NameNode backup 상태 감시, HDFS/YARN/Spark History Server Grafana dashboard, Alertmanager Slack receiver 선택 구성, cluster health check/recovery/smoke test playbook, YARN Capacity Scheduler queue 정책, QueueMetrics 수집/alert/dashboard, YARN/Spark application diagnostics playbook, YARN log aggregation, Spark History Server event log retention, Spark submit resource profile, YARN NodeManager local/log directory 관리 및 disk health checker, NodeManager storage metric/alert/dashboard, 운영 runbook 분리, Makefile 기반 운영 명령 표준화, venv 기반 정적 검증 구성을 완료한 상태입니다.
+현재는 HDFS, YARN, Spark on YARN, Prometheus/Grafana 기반 모니터링, JMX Exporter 기반 JVM 메트릭 수집, Alertmanager 기반 알림, Grafana datasource/dashboard provisioning, NameNode metadata 보호 및 백업 자동화, HDFS/YARN 상태 기반 alert, NameNode backup 상태 감시, HDFS/YARN/Spark History Server Grafana dashboard, Alertmanager Slack receiver 선택 구성, cluster health check/recovery/smoke test playbook, YARN Capacity Scheduler queue 정책, QueueMetrics 수집/alert/dashboard, YARN/Spark application diagnostics playbook, YARN log aggregation, Spark History Server event log retention, Spark submit resource profile, YARN NodeManager local/log directory 관리 및 disk health checker, NodeManager storage metric/alert/dashboard, 운영 runbook 분리, Makefile 기반 운영 명령 표준화, venv 기반 정적 검증 구성, FastAPI + React 기반 Bigtop Web Console 구성을 완료한 상태입니다.
 
 ## 구성
 
@@ -14,7 +14,7 @@ Apache Bigtop과 Ansible을 사용해 Hadoop 기반 미니 데이터 플랫폼�
 master   - HDFS NameNode / YARN ResourceManager / Spark History Server
 worker1  - HDFS DataNode / YARN NodeManager
 worker2  - HDFS DataNode / YARN NodeManager
-worker3  - Ansible Control Node / Ops Node / Prometheus / Grafana / Alertmanager
+worker3  - Ansible Control Node / Ops Node / Prometheus / Grafana / Alertmanager / Bigtop Web Console
 ```
 
 HA 구성은 적용하지 않았습니다.
@@ -56,6 +56,9 @@ Alertmanager   - Prometheus alert 수신 및 알림 관리
 Node Exporter  - OS 메트릭 및 textfile collector 메트릭 수집
 JMX Exporter   - Hadoop/YARN/Spark JVM 메트릭 수집
 rsync/ssh      - NameNode metadata backup 원격 동기화
+FastAPI        - Bigtop Web Console backend API
+React/Vite     - Bigtop Web Console frontend UI
+Nginx          - Web Console reverse proxy 및 Basic Auth
 Makefile       - 반복 운영 명령 표준화
 yamllint       - YAML 정적 검증
 ansible-lint   - Ansible playbook/role 정적 검증
@@ -145,6 +148,12 @@ bigtop-cluster-ansible/
 │   ├── prometheus/
 │   ├── spark/
 │   ├── spark_config/
+│   ├── web_console/
+│   │   ├── defaults/
+│   │   ├── files/frontend/
+│   │   ├── handlers/
+│   │   ├── tasks/
+│   │   └── templates/
 │   ├── yarn/
 │   └── yarn_config/
 └── scripts/
@@ -384,6 +393,17 @@ yarn_vcore_critical_percent: 90
 alertmanager_slack_enabled: false
 alertmanager_slack_channel: "#bigtop-alerts"
 alertmanager_slack_webhook_file: "/etc/prometheus/alertmanager-secrets/slack_webhook_url"
+
+# Bigtop Web Console
+web_console_enabled: true
+web_console_host: "127.0.0.1"
+web_console_port: 18090
+web_console_public_port: 1337
+web_console_user: "bigtop-web-console"
+web_console_group: "bigtop-web-console"
+web_console_app_dir: "/opt/bigtop-web-console"
+web_console_venv_dir: "/opt/bigtop-web-console/.venv"
+web_console_project_root: "{{ playbook_dir }}/.."
 ```
 
 ## 실행 순서
@@ -417,6 +437,7 @@ ansible-playbook playbooks/24-yarn-log-aggregation.yml
 ansible-playbook playbooks/25-spark-history-maintenance.yml
 ansible-playbook playbooks/26-yarn-nodemanager-storage.yml
 ansible-playbook playbooks/27-yarn-nodemanager-storage-metrics.yml
+ansible-playbook playbooks/30-web-console.yml
 ```
 
 서비스 중지는 다음 playbook으로 수행합니다.
@@ -472,6 +493,14 @@ make yarn-log-aggregation
 make spark-history-maintenance
 make nm-storage
 make nm-storage-metrics
+```
+
+Bigtop Web Console 운영 작업:
+
+```bash
+make web-console
+make web-console-check
+make web-console-logs
 ```
 
 Monitoring stack 재적용:
@@ -530,7 +559,8 @@ requirements-dev.txt
 collections/requirements.yml
 .yamllint
 .ansible-lint
-scripts/check-static-validation.sh
+scripts/check_static_ops_validation.sh
+scripts/fix-newline.py
 ```
 
 커밋 전 기본 루틴:
@@ -802,6 +832,7 @@ yarn_nodemanager_storage_last_success_timestamp_seconds
 
 ```bash
 ansible-playbook playbooks/27-yarn-nodemanager-storage-metrics.yml
+ansible-playbook playbooks/30-web-console.yml
 ```
 
 확인:
@@ -2808,6 +2839,252 @@ skip_list:
 
 장기적으로는 일부 health endpoint 확인을 `ansible.builtin.uri`, 서비스 상태 확인을 `ansible.builtin.systemd` 기반으로 점진적으로 치환할 수 있습니다.
 
+## Bigtop Web Console
+
+Bigtop Web Console은 Ambari 없는 개인 VM 환경에서 주요 Hadoop/Spark/Monitoring/Ops 서비스를 한 화면에서 확인하고 조치하기 위한 경량 통합 운영 UI입니다.
+
+본 프로젝트의 Web Console은 기존 Prometheus/Grafana를 대체하지 않습니다.
+Grafana는 metric 분석과 dashboard 시각화를 담당하고, Web Console은 운영자가 자주 확인하는 서비스 상태와 간단한 lifecycle action을 한 화면에서 처리하는 보조 콘솔입니다.
+
+### Web Console 구조
+
+```text
+Browser
+  ↓
+Nginx Basic Auth :1337
+  ↓
+Bigtop Web Console :18090
+  ↓
+FastAPI backend
+  ├── /api/health
+  ├── /api/status
+  ├── /api/component/{component_id}/logs
+  ├── /api/component/{component_id}/start
+  ├── /api/component/{component_id}/stop
+  ├── /api/component/{component_id}/restart
+  └── /api/action/incident-summary
+```
+
+### Web Console 구성 요소
+
+```text
+Frontend: React + Vite
+Backend : FastAPI + Uvicorn
+Proxy   : Nginx
+Auth    : Nginx Basic Auth
+Service : systemd
+Host    : worker3
+Public  : http://worker3:1337
+Internal: http://127.0.0.1:18090
+```
+
+### Web Console 화면
+
+```text
+Home
+- 클러스터 상태 요약
+- 총 서비스 수 / 정상 서비스 수 / 장애 서비스 수
+- 주요 quick link
+- 최근 incident 목록
+
+Services
+- HDFS/YARN/Spark/Monitoring/Ops 서비스 목록
+- group/status/search filter
+- Logs / Start / Stop / Restart action
+- 같은 service row 재클릭 시 Service Details 닫기
+
+Grid
+- 노드별 서비스 상태 카드형 Grid
+- 서비스 tile 클릭 시 detail open
+- 같은 tile 재클릭 시 detail close
+- detail open 시 status legend overflow 방지
+
+Incidents
+- DOWN/UNKNOWN 서비스 기반 incident 목록
+- Details / Logs / Restart 연결
+
+Admin
+- Web Console 자체 상태 확인
+- Last Check / Cluster Status 확인
+- Auto Refresh Interval UI 설정
+- Incident Summary 실행
+
+Service Details
+- Overview
+- Logs
+- Actions
+- Details
+- Hide 버튼
+```
+
+### Web Console 관리 대상 서비스
+
+```text
+HDFS
+- hadoop-hdfs-namenode
+- hadoop-hdfs-datanode
+
+YARN
+- hadoop-yarn-resourcemanager
+- hadoop-yarn-nodemanager
+
+Spark
+- spark-history-server
+
+Monitoring
+- prometheus
+- grafana-server
+- prometheus-alertmanager
+
+Ops
+- bigtop-web-console
+- nginx
+- OliveTin
+```
+
+### Web Console lifecycle action
+
+Web Console에서는 서비스별로 다음 action을 제공합니다.
+
+```text
+Logs    - systemd journal 조회
+Start   - systemd service start
+Stop    - systemd service stop
+Restart - systemd service restart
+```
+
+단, Web Console 접근 자체가 끊기는 것을 막기 위해 다음 서비스의 stop action은 backend에서 차단합니다.
+
+```text
+Stop 차단 서비스:
+- bigtop-web-console
+- nginx
+```
+
+차단 이유:
+
+```text
+bigtop-web-console stop -> Web Console backend 자체가 중지됨
+nginx stop              -> public 1337 접근이 중지됨
+```
+
+### Web Console 배포
+
+```bash
+make web-console
+make web-console-check
+```
+
+직접 playbook을 실행할 수도 있습니다.
+
+```bash
+ansible-playbook playbooks/30-web-console.yml
+```
+
+### Web Console 상태 확인
+
+```bash
+ansible ops -b -m command -a "systemctl is-active bigtop-web-console"
+ansible ops -b -m command -a "systemctl is-active nginx"
+ansible ops -b -m shell -a "ss -lntp | grep -E '1337|18090|uvicorn|nginx' || true"
+ansible ops -m shell -a "curl -s -i http://127.0.0.1:18090/api/health | head"
+ansible ops -m shell -a "curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:1337"
+```
+
+정상 기준:
+
+```text
+bigtop-web-console active
+nginx active
+127.0.0.1:18090 LISTEN
+0.0.0.0:1337 LISTEN
+/api/health 200
+public 1337 401
+```
+
+### Web Console 로그 확인
+
+```bash
+make web-console-logs
+```
+
+또는 직접 확인합니다.
+
+```bash
+ansible ops -b -m shell -a "systemctl status bigtop-web-console --no-pager -l"
+ansible ops -b -m shell -a "journalctl -u bigtop-web-console -n 200 --no-pager"
+```
+
+### Web Console troubleshooting
+
+#### 18090 port timeout
+
+증상:
+
+```text
+Wait for 127.0.0.1:18090 timeout
+systemctl is-active bigtop-web-console -> activating
+```
+
+확인:
+
+```bash
+ansible ops -b -m shell -a "systemctl status bigtop-web-console --no-pager -l"
+ansible ops -b -m shell -a "journalctl -u bigtop-web-console -n 200 --no-pager"
+ansible ops -b -m shell -a "python3 -m py_compile /opt/bigtop-web-console/app.py"
+```
+
+대표 원인:
+
+```text
+app.py.j2 template 삽입 위치 오류
+if frontend_path.exists(): 아래에 app.mount body가 없어서 IndentationError 발생
+```
+
+정상 구조:
+
+```python
+frontend_path = Path(FRONTEND_DIST_DIR)
+
+if frontend_path.exists():
+    app.mount("/", StaticFiles(directory=str(frontend_path), html=True), name="frontend")
+else:
+    @app.get("/", response_class=PlainTextResponse)
+    def frontend_missing():
+        return f"Frontend build directory not found: {FRONTEND_DIST_DIR}"
+```
+
+#### React build 중복 선언
+
+증상:
+
+```text
+ERROR: The symbol "detailCapableViews" has already been declared
+```
+
+확인:
+
+```bash
+grep -n "detailCapableViews" roles/web_console/files/frontend/src/main.jsx
+grep -n "showDetailPanel" roles/web_console/files/frontend/src/main.jsx
+```
+
+정상 기준:
+
+```text
+detailCapableViews 1개
+showDetailPanel 1개
+```
+
+#### Nginx 설정 오류
+
+확인:
+
+```bash
+ansible ops -b -m shell -a "nginx -t"
+ansible ops -b -m command -a "systemctl is-active nginx"
+```
+
 ## Git에 포함하지 않는 파일
 
 실제 IP, 사용자명, SSH key, 로그 파일은 Git에 올리지 않습니다.
@@ -3004,13 +3281,28 @@ inventory/group_vars/all.yml.example
 131. collections/requirements.yml 기반 Ansible Galaxy collection 관리
 132. yamllint 설정 추가 및 .venv 검사 제외
 133. ansible-lint 설정 추가 및 운영형 command/shell rule skip
-134. scripts/check-static-validation.sh 정적 검증 스크립트 추가
+134. scripts/check_static_ops_validation.sh 정적 검증 스크립트 추가
 135. 민감 파일 및 runtime artifact Git 추적 여부 검증 추가
 136. group_vars example 중복 key 검증 추가
 137. 전체 playbook syntax-check 자동화
 138. EOF newline lint 오류 정리
 139. Makefile lint/validate target 구성
 140. 커밋 전 검증 루틴 정리
+66. 운영 콘솔 방향을 OliveTin 단독 버튼 UI에서 FastAPI + React 기반 Web Console로 전환
+67. roles/web_console role 구성
+68. playbooks/30-web-console.yml 구성
+69. Nginx Basic Auth 기반 Web Console public endpoint 구성
+70. FastAPI backend 기반 /api/health, /api/status, logs, lifecycle action API 구성
+71. React/Vite frontend 기반 Home / Services / Grid / Incidents / Admin 화면 구성
+72. Airflow UI와 유사한 left navigation + workspace layout 적용
+73. Service Details 패널 hide 및 같은 component 재클릭 시 닫기 동작 구성
+74. Grid 화면을 노드별 service tile 카드 구조로 개선
+75. Grid status legend overflow 문제 수정
+76. Admin 화면에서 Auto Refresh Interval UI 설정 기능 추가
+77. Service lifecycle action을 Start / Stop / Restart로 분리
+78. bigtop-web-console/nginx stop 차단 정책 추가
+79. Web Console systemd/uvicorn 기동 오류 troubleshooting 정리
+80. app.py.j2 template 삽입 위치 오류로 발생한 IndentationError 원인 및 정상 구조 정리
 ```
 
 ## 향후 계획
@@ -3032,4 +3324,19 @@ inventory/group_vars/all.yml.example
 14. Ansible role 리팩토링
 15. group/host 이름 중복 warning 제거
 16. GitHub 포트폴리오용 아키텍처 다이어그램 추가
+```
+
+## 다음 개선 후보
+
+```text
+1. Web Console action audit log 저장
+2. Web Console action history 화면 추가
+3. Start/Stop/Restart 권한 분리
+4. stop 가능 서비스 allowlist/denylist 변수화
+5. Web Console component 목록 YAML 변수화
+6. Prometheus API 연동으로 Web Console metric panel 추가
+7. Grafana dashboard link를 Web Console quick link로 연결
+8. HDFS/YARN/Spark 상태별 runbook link 연결
+9. YARN/Spark application diagnostics 결과를 Web Console에서 조회
+10. Web Console backend/frontend 테스트 추가
 ```

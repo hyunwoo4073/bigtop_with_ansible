@@ -1,0 +1,40 @@
+---
+web_console_enabled: true
+
+web_console_app_dir: "/opt/bigtop-web-console"
+web_console_venv_dir: "/opt/bigtop-web-console/.venv"
+web_console_app_file: "/opt/bigtop-web-console/app.py"
+
+web_console_frontend_src_dir: "/opt/bigtop-web-console/frontend-src"
+web_console_frontend_dist_dir: "/opt/bigtop-web-console/frontend-src/dist"
+
+web_console_service_name: "bigtop-web-console"
+web_console_service_file: "/etc/systemd/system/bigtop-web-console.service"
+
+web_console_host: "127.0.0.1"
+web_console_port: 18090
+
+web_console_public_port: 1337
+web_console_public_listen_address: "0.0.0.0"
+web_console_public_url: "http://worker3:1337"
+
+web_console_nginx_site_file: "/etc/nginx/sites-available/bigtop-web-console"
+web_console_nginx_site_link: "/etc/nginx/sites-enabled/bigtop-web-console"
+
+web_console_disable_olivetin_public_site: true
+web_console_olivetin_nginx_site_link: "/etc/nginx/sites-enabled/bigtop-ops-console"
+
+web_console_basic_auth_file: "/etc/nginx/.htpasswd-bigtop-ops-console"
+
+web_console_run_user: "bae"
+web_console_project_dir: "/home/bae/bigtop-cluster-ansible"
+web_console_opsctl: "/usr/local/bin/bigtop-opsctl"
+
+web_console_request_timeout_seconds: 60
+web_console_status_timeout_seconds: 8
+web_console_journal_lines: 160
+
+
+# Repository root used by the Web Console backend when running Ansible commands.
+# playbook_dir is usually <repo>/playbooks, so ../ points to the repository root.
+web_console_project_root: "{{ playbook_dir }}/.."

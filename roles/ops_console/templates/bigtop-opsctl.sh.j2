@@ -1,0 +1,560 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECT_DIR="{{ ops_console_project_dir }}"
+RUN_USER="{{ ops_console_run_user }}"
+AUDIT_LOG="{{ ops_console_audit_log }}"
+
+ACTION="${1:-}"
+ARG1="${2:-}"
+
+write_audit_log() {
+  local status="$1"
+
+  mkdir -p "$(dirname "${AUDIT_LOG}")"
+
+  printf '%s action=%s arg1=%s status=%s shell_user=%s run_user=%s host=%s\n' \
+    "$(date '+%Y-%m-%dT%H:%M:%S%z')" \
+    "${ACTION}" \
+    "${ARG1}" \
+    "${status}" \
+    "$(id -un)" \
+    "${RUN_USER}" \
+    "$(hostname)" \
+    >> "${AUDIT_LOG}" || true
+}
+
+run_as_ops_user() {
+  local cmd="$1"
+
+  if [[ "$(id -un)" == "${RUN_USER}" ]]; then
+    bash -lc "cd '${PROJECT_DIR}' && ${cmd}"
+  else
+    sudo -u "${RUN_USER}" bash -lc "cd '${PROJECT_DIR}' && ${cmd}"
+  fi
+}
+
+print_header() {
+  echo "============================================================"
+  echo "Bigtop Ops Console"
+  echo "Action : ${ACTION}"
+  echo "Arg1   : ${ARG1:-N/A}"
+  echo "Time   : $(date '+%Y-%m-%d %H:%M:%S')"
+  echo "Host   : $(hostname)"
+  echo "User   : $(id -un)"
+  echo "Project: ${PROJECT_DIR}"
+  echo "============================================================"
+  echo
+}
+
+require_arg1() {
+  if [[ -z "${ARG1}" ]]; then
+    echo "ERROR: missing required argument"
+    exit 2
+  fi
+}
+
+validate_yarn_application_id() {
+  require_arg1
+
+  if [[ ! "${ARG1}" =~ ^application_[0-9]+_[0-9]+$ ]]; then
+    echo "ERROR: invalid YARN application id: ${ARG1}"
+    echo "Expected format: application_1234567890123_0001"
+    exit 2
+  fi
+}
+
+cluster_status() {
+  print_header
+
+  echo "[Ansible inventory]"
+  run_as_ops_user "ansible-inventory --graph"
+
+  echo
+  echo "[Ping]"
+  run_as_ops_user "ansible all -m ping"
+}
+
+hdfs_status() {
+  print_header
+
+  echo "[NameNode service]"
+  run_as_ops_user "ansible master -b -m command -a 'systemctl is-active hadoop-hdfs-namenode'"
+
+  echo
+  echo "[DataNode service]"
+  run_as_ops_user "ansible workers -b -m command -a 'systemctl is-active hadoop-hdfs-datanode'"
+
+  echo
+  echo "[HDFS report]"
+  run_as_ops_user "ansible master -b -m shell -a 'sudo -u hdfs hdfs dfsadmin -report | grep -E \"Live datanodes|Dead datanodes|Configured Capacity|DFS Used|DFS Remaining\"'"
+}
+
+yarn_status() {
+  print_header
+
+  echo "[ResourceManager service]"
+  run_as_ops_user "ansible master -b -m command -a 'systemctl is-active hadoop-yarn-resourcemanager'"
+
+  echo
+  echo "[NodeManager service]"
+  run_as_ops_user "ansible workers -b -m command -a 'systemctl is-active hadoop-yarn-nodemanager'"
+
+  echo
+  echo "[YARN nodes]"
+  run_as_ops_user "ansible master -b -m shell -a 'sudo -u yarn yarn node -list'"
+}
+
+spark_status() {
+  print_header
+
+  echo "[Spark History Server service]"
+  run_as_ops_user "ansible master -b -m command -a 'systemctl is-active spark-history-server'"
+
+  echo
+  echo "[Spark History Server port]"
+  run_as_ops_user "ansible master -m shell -a 'ss -lntp | grep -E \"18080|19105\" || true'"
+
+  echo
+  echo "[Spark version]"
+  run_as_ops_user "ansible master -m shell -a 'spark-submit --version 2>&1 | head -20'"
+}
+
+monitoring_status() {
+  print_header
+
+  echo "[Node Exporter]"
+  run_as_ops_user "ansible all -b -m command -a 'systemctl is-active prometheus-node-exporter'"
+
+  echo
+  echo "[Prometheus]"
+  run_as_ops_user "ansible ops -b -m command -a 'systemctl is-active prometheus'"
+
+  echo
+  echo "[Grafana]"
+  run_as_ops_user "ansible ops -b -m command -a 'systemctl is-active grafana-server'"
+
+  echo
+  echo "[Alertmanager]"
+  run_as_ops_user "ansible ops -b -m command -a 'systemctl is-active prometheus-alertmanager'"
+
+  echo
+  echo "[HTTP health]"
+  run_as_ops_user "ansible ops -m shell -a 'curl -s http://127.0.0.1:9090/-/healthy && echo'"
+  run_as_ops_user "ansible ops -m shell -a 'curl -s http://127.0.0.1:9093/-/healthy && echo'"
+}
+
+cluster_health() {
+  print_header
+  run_as_ops_user "make health"
+}
+
+cluster_recover() {
+  print_header
+  run_as_ops_user "make recover"
+}
+
+cluster_smoke() {
+  print_header
+  run_as_ops_user "make smoke"
+}
+
+make_validate() {
+  print_header
+  run_as_ops_user "make validate"
+}
+
+restart_spark_history() {
+  print_header
+  run_as_ops_user "ansible master -b -m service -a 'name=spark-history-server state=restarted enabled=true'"
+  spark_status
+}
+
+restart_monitoring() {
+  print_header
+  run_as_ops_user "make monitoring"
+  monitoring_status
+}
+
+start_hdfs() {
+  print_header
+  run_as_ops_user "ansible-playbook playbooks/06-hdfs-start.yml"
+  hdfs_status
+}
+
+stop_hdfs() {
+  print_header
+  run_as_ops_user "ansible-playbook playbooks/06-hdfs-stop.yml"
+}
+
+restart_hdfs() {
+  print_header
+  stop_hdfs
+  start_hdfs
+}
+
+start_yarn() {
+  print_header
+  run_as_ops_user "ansible-playbook playbooks/09-yarn-start.yml"
+  yarn_status
+}
+
+stop_yarn() {
+  print_header
+  run_as_ops_user "ansible-playbook playbooks/09-yarn-stop.yml"
+}
+
+restart_yarn() {
+  print_header
+  stop_yarn
+  start_yarn
+}
+
+show_links() {
+  print_header
+
+  cat <<'LINKS'
+Component UI Links
+
+Grafana:
+  {{ ops_console_grafana_url }}
+
+Prometheus:
+  {{ ops_console_prometheus_url }}
+
+Alertmanager:
+  {{ ops_console_alertmanager_url }}
+
+HDFS NameNode UI:
+  {{ ops_console_hdfs_namenode_url }}
+
+YARN ResourceManager UI:
+  {{ ops_console_yarn_rm_url }}
+
+YARN UI2:
+  {{ ops_console_yarn_ui2_url }}
+
+Spark History Server:
+  {{ ops_console_spark_history_url }}
+LINKS
+}
+
+yarn_app_diagnostics() {
+  validate_yarn_application_id
+  print_header
+
+  local app_id="${ARG1}"
+
+  echo "[YARN application status]"
+  run_as_ops_user "ansible master -b -m shell -a 'sudo -u yarn yarn application -status ${app_id}'"
+
+  echo
+  echo "[YARN application attempts]"
+  run_as_ops_user "ansible master -b -m shell -a 'sudo -u yarn yarn applicationattempt -list ${app_id} || true'"
+
+  echo
+  echo "[YARN aggregated logs - tail 300 lines]"
+  run_as_ops_user "ansible master -b -m shell -a 'sudo -u yarn yarn logs -applicationId ${app_id} 2>/dev/null | tail -300 || true'"
+
+  echo
+  echo "[Existing diagnostics artifact directory]"
+  run_as_ops_user "find artifacts/yarn-app-diagnostics -maxdepth 2 -type f 2>/dev/null | tail -20 || true"
+}
+
+journal_service() {
+  require_arg1
+  print_header
+
+  case "${ARG1}" in
+    hdfs-namenode)
+      run_as_ops_user "ansible master -b -m shell -a 'journalctl -u hadoop-hdfs-namenode -n 200 --no-pager'"
+      ;;
+    hdfs-datanode)
+      run_as_ops_user "ansible workers -b -m shell -a 'journalctl -u hadoop-hdfs-datanode -n 200 --no-pager'"
+      ;;
+    yarn-resourcemanager)
+      run_as_ops_user "ansible master -b -m shell -a 'journalctl -u hadoop-yarn-resourcemanager -n 200 --no-pager'"
+      ;;
+    yarn-nodemanager)
+      run_as_ops_user "ansible workers -b -m shell -a 'journalctl -u hadoop-yarn-nodemanager -n 200 --no-pager'"
+      ;;
+    spark-history)
+      run_as_ops_user "ansible master -b -m shell -a 'journalctl -u spark-history-server -n 200 --no-pager'"
+      ;;
+    prometheus)
+      run_as_ops_user "ansible ops -b -m shell -a 'journalctl -u prometheus -n 200 --no-pager'"
+      ;;
+    grafana)
+      run_as_ops_user "ansible ops -b -m shell -a 'journalctl -u grafana-server -n 200 --no-pager'"
+      ;;
+    alertmanager)
+      run_as_ops_user "ansible ops -b -m shell -a 'journalctl -u prometheus-alertmanager -n 200 --no-pager'"
+      ;;
+    olivetin)
+      run_as_ops_user "ansible ops -b -m shell -a 'journalctl -u OliveTin -n 200 --no-pager'"
+      ;;
+    nginx)
+      run_as_ops_user "ansible ops -b -m shell -a 'journalctl -u nginx -n 200 --no-pager'"
+      ;;
+    node-exporter)
+      run_as_ops_user "ansible all -b -m shell -a 'journalctl -u prometheus-node-exporter -n 120 --no-pager'"
+      ;;
+    *)
+      echo "ERROR: unsupported service key: ${ARG1}"
+      echo "Allowed: hdfs-namenode, hdfs-datanode, yarn-resourcemanager, yarn-nodemanager, spark-history, prometheus, grafana, alertmanager, olivetin, nginx, node-exporter"
+      exit 2
+      ;;
+  esac
+}
+
+failed_units() {
+  print_header
+
+  echo "[Failed systemd units on all nodes]"
+  run_as_ops_user "ansible all -b -m shell -a 'systemctl --failed --no-pager || true'"
+}
+
+nm_storage_status() {
+  print_header
+
+  echo "[NodeManager storage textfile metrics]"
+  run_as_ops_user "ansible workers -b -m shell -a 'cat /var/lib/prometheus/node-exporter/yarn_nodemanager_storage.prom 2>/dev/null || echo missing_metric_file'"
+
+  echo
+  echo "[NodeManager local/log directory disk usage from configured paths]"
+  run_as_ops_user "ansible workers -b -m shell -a 'for d in /data/yarn/local /data/yarn/logs /var/log/hadoop-yarn; do if [ -e \"\$d\" ]; then df -h \"\$d\"; fi; done'"
+}
+
+ops_console_status() {
+  print_header
+
+  echo "[Services]"
+  run_as_ops_user "ansible ops -b -m command -a 'systemctl is-active OliveTin'"
+  run_as_ops_user "ansible ops -b -m command -a 'systemctl is-active nginx'"
+
+  echo
+  echo "[Listening ports]"
+  run_as_ops_user "ansible ops -b -m shell -a 'ss -lntp | grep -E \"1337|13370|OliveTin|nginx\" || true'"
+
+  echo
+  echo "[HTTP checks]"
+  run_as_ops_user "ansible ops -m shell -a 'curl -s -o /dev/null -w \"internal_13370=%{http_code}\n\" http://127.0.0.1:13370'"
+  run_as_ops_user "ansible ops -m shell -a 'curl -s -o /dev/null -w \"public_1337_without_auth=%{http_code}\n\" http://127.0.0.1:1337 || true'"
+
+  echo
+  echo "[Recent audit log]"
+  run_as_ops_user "ansible ops -b -m shell -a 'tail -30 {{ ops_console_audit_log }} 2>/dev/null || true'"
+}
+
+incident_summary() {
+  print_header
+
+  echo "============================================================"
+  echo "[1] Failed systemd units on all nodes"
+  echo "============================================================"
+  run_as_ops_user "ansible all -b -m shell -a 'systemctl --failed --no-pager || true'"
+
+  echo
+  echo "============================================================"
+  echo "[2] Core service active status"
+  echo "============================================================"
+
+  echo
+  echo "[HDFS NameNode]"
+  run_as_ops_user "ansible master -b -m command -a 'systemctl is-active hadoop-hdfs-namenode'"
+
+  echo
+  echo "[HDFS DataNode]"
+  run_as_ops_user "ansible workers -b -m command -a 'systemctl is-active hadoop-hdfs-datanode'"
+
+  echo
+  echo "[YARN ResourceManager]"
+  run_as_ops_user "ansible master -b -m command -a 'systemctl is-active hadoop-yarn-resourcemanager'"
+
+  echo
+  echo "[YARN NodeManager]"
+  run_as_ops_user "ansible workers -b -m command -a 'systemctl is-active hadoop-yarn-nodemanager'"
+
+  echo
+  echo "[Spark History Server]"
+  run_as_ops_user "ansible master -b -m command -a 'systemctl is-active spark-history-server'"
+
+  echo
+  echo "[Monitoring services]"
+  run_as_ops_user "ansible ops -b -m shell -a 'systemctl is-active prometheus grafana-server prometheus-alertmanager nginx OliveTin || true'"
+
+  echo
+  echo "============================================================"
+  echo "[3] HDFS quick health"
+  echo "============================================================"
+
+  echo
+  echo "[Safe mode]"
+  run_as_ops_user "ansible master -b -m shell -a 'sudo -u hdfs hdfs dfsadmin -safemode get || true'"
+
+  echo
+  echo "[HDFS datanode summary]"
+  run_as_ops_user "ansible master -b -m shell -a 'sudo -u hdfs hdfs dfsadmin -report 2>/dev/null | grep -E \"Live datanodes|Dead datanodes|Configured Capacity|DFS Used|DFS Remaining|Under replicated|Missing blocks|Corrupt blocks\" || true'"
+
+  echo
+  echo "============================================================"
+  echo "[4] YARN quick health"
+  echo "============================================================"
+
+  echo
+  echo "[YARN nodes]"
+  run_as_ops_user "ansible master -b -m shell -a 'sudo -u yarn yarn node -list 2>/dev/null || true'"
+
+  echo
+  echo "[YARN applications summary]"
+  run_as_ops_user "ansible master -b -m shell -a 'sudo -u yarn yarn application -list -appStates RUNNING,ACCEPTED,SUBMITTED,FAILED,KILLED,FINISHED 2>/dev/null | head -80 || true'"
+
+  echo
+  echo "============================================================"
+  echo "[5] NodeManager storage metrics"
+  echo "============================================================"
+  run_as_ops_user "ansible workers -b -m shell -a 'if [ -f /var/lib/prometheus/node-exporter/yarn_nodemanager_storage.prom ]; then grep -E \"yarn_nodemanager_storage_path_exists|yarn_nodemanager_storage_used_percent|yarn_nodemanager_storage_available_bytes|yarn_nodemanager_storage_last_success\" /var/lib/prometheus/node-exporter/yarn_nodemanager_storage.prom; else echo missing_metric_file; fi'"
+
+  echo
+  echo "============================================================"
+  echo "[6] Recent critical journal messages"
+  echo "============================================================"
+
+  echo
+  echo "[master: HDFS/YARN/Spark recent warnings/errors]"
+  run_as_ops_user "ansible master -b -m shell -a 'journalctl -u hadoop-hdfs-namenode -u hadoop-yarn-resourcemanager -u spark-history-server -n 300 --no-pager 2>/dev/null | grep -Ei \"error|failed|fatal|exception|warn|outofmemory|killed|timeout\" | tail -80 || true'"
+
+  echo
+  echo "[workers: HDFS/YARN recent warnings/errors]"
+  run_as_ops_user "ansible workers -b -m shell -a 'journalctl -u hadoop-hdfs-datanode -u hadoop-yarn-nodemanager -n 300 --no-pager 2>/dev/null | grep -Ei \"error|failed|fatal|exception|warn|outofmemory|killed|timeout|disk\" | tail -80 || true'"
+
+  echo
+  echo "[ops: monitoring/console recent warnings/errors]"
+  run_as_ops_user "ansible ops -b -m shell -a 'journalctl -u prometheus -u grafana-server -u prometheus-alertmanager -u nginx -u OliveTin -n 300 --no-pager 2>/dev/null | grep -Ei \"error|failed|fatal|exception|warn|timeout\" | tail -80 || true'"
+
+  echo
+  echo "============================================================"
+  echo "[7] Prometheus alert snapshot"
+  echo "============================================================"
+  run_as_ops_user "ansible ops -m shell -a 'curl -s http://127.0.0.1:9090/api/v1/alerts 2>/dev/null | python3 -m json.tool 2>/dev/null | grep -E \"alertname|state|severity|instance|job\" | head -120 || true'"
+
+  echo
+  echo "============================================================"
+  echo "[8] Ops Console self check"
+  echo "============================================================"
+  run_as_ops_user "ansible ops -b -m shell -a 'systemctl is-active OliveTin nginx && ss -lntp | grep -E \"1337|13370|OliveTin|nginx\" || true'"
+
+  echo
+  echo "============================================================"
+  echo "[DONE] Incident summary completed"
+  echo "============================================================"
+}
+
+write_audit_log "started"
+
+trap 'rc=$?; if [[ ${rc} -eq 0 ]]; then write_audit_log "success"; else write_audit_log "failed:${rc}"; fi' EXIT
+
+case "${ACTION}" in
+  cluster-status)
+    cluster_status
+    ;;
+  hdfs-status)
+    hdfs_status
+    ;;
+  yarn-status)
+    yarn_status
+    ;;
+  spark-status)
+    spark_status
+    ;;
+  monitoring-status)
+    monitoring_status
+    ;;
+  cluster-health)
+    cluster_health
+    ;;
+  cluster-recover)
+    cluster_recover
+    ;;
+  cluster-smoke)
+    cluster_smoke
+    ;;
+  make-validate)
+    make_validate
+    ;;
+  restart-spark-history)
+    restart_spark_history
+    ;;
+  restart-monitoring)
+    restart_monitoring
+    ;;
+  start-hdfs)
+    start_hdfs
+    ;;
+  stop-hdfs)
+    stop_hdfs
+    ;;
+  restart-hdfs)
+    restart_hdfs
+    ;;
+  start-yarn)
+    start_yarn
+    ;;
+  stop-yarn)
+    stop_yarn
+    ;;
+  restart-yarn)
+    restart_yarn
+    ;;
+  links)
+    show_links
+    ;;
+  yarn-app-diagnostics)
+    yarn_app_diagnostics
+    ;;
+  journal-service)
+    journal_service
+    ;;
+  failed-units)
+    failed_units
+    ;;
+  nm-storage-status)
+    nm_storage_status
+    ;;
+  ops-console-status)
+    ops_console_status
+    ;;
+  incident-summary)
+    incident_summary
+    ;;
+  *)
+    echo "Unknown action: ${ACTION}"
+    echo
+    echo "Available actions:"
+    echo "  cluster-status"
+    echo "  hdfs-status"
+    echo "  yarn-status"
+    echo "  spark-status"
+    echo "  monitoring-status"
+    echo "  cluster-health"
+    echo "  cluster-recover"
+    echo "  cluster-smoke"
+    echo "  make-validate"
+    echo "  restart-spark-history"
+    echo "  restart-monitoring"
+    echo "  start-hdfs"
+    echo "  stop-hdfs"
+    echo "  restart-hdfs"
+    echo "  start-yarn"
+    echo "  stop-yarn"
+    echo "  restart-yarn"
+    echo "  links"
+    echo "  yarn-app-diagnostics <application_id>"
+    echo "  journal-service <service_key>"
+    echo "  failed-units"
+    echo "  nm-storage-status"
+    echo "  ops-console-status"
+    echo "  incident-summary"
+    exit 1
+    ;;
+esac

@@ -1,0 +1,38 @@
+{{ ops_console_audit_log }} {
+    su root {{ ops_console_run_user }}
+    {{ ops_console_logrotate_frequency }}
+    rotate {{ ops_console_logrotate_rotate }}
+    maxsize {{ ops_console_logrotate_maxsize }}
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    create 0664 root {{ ops_console_run_user }}
+}
+
+/var/log/OliveTin/results/*.yaml {
+    su root root
+    {{ ops_console_logrotate_frequency }}
+    rotate {{ ops_console_logrotate_rotate }}
+    maxsize {{ ops_console_logrotate_maxsize }}
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    create 0644 root root
+}
+
+/var/log/OliveTin/output/*.log {
+    su root root
+    {{ ops_console_logrotate_frequency }}
+    rotate {{ ops_console_logrotate_rotate }}
+    maxsize {{ ops_console_logrotate_maxsize }}
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    create 0644 root root
+}

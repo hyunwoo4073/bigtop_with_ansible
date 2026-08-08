@@ -1,0 +1,193 @@
+---
+- name: Ensure required packages for Bigtop Web Console
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-venv
+      - python3-pip
+      - nodejs
+      - npm
+      - nginx
+      - curl
+      - sudo
+    state: present
+    update_cache: true
+  become: true
+  when: web_console_enabled | bool
+
+- name: Ensure Bigtop Web Console app directory exists
+  ansible.builtin.file:
+    path: "{{ web_console_app_dir }}"
+    state: directory
+    owner: "{{ web_console_run_user }}"
+    group: "{{ web_console_run_user }}"
+    mode: "0755"
+  become: true
+  when: web_console_enabled | bool
+
+- name: Ensure Bigtop Web Console frontend source directory exists
+  ansible.builtin.file:
+    path: "{{ web_console_frontend_src_dir }}"
+    state: directory
+    owner: "{{ web_console_run_user }}"
+    group: "{{ web_console_run_user }}"
+    mode: "0755"
+  become: true
+  when: web_console_enabled | bool
+
+- name: Create Bigtop Web Console Python virtualenv
+  ansible.builtin.command:
+    cmd: "python3 -m venv {{ web_console_venv_dir }}"
+    creates: "{{ web_console_venv_dir }}/bin/python"
+  become: true
+  become_user: "{{ web_console_run_user }}"
+  when: web_console_enabled | bool
+
+- name: Install Bigtop Web Console Python packages
+  ansible.builtin.pip:
+    name:
+      - fastapi
+      - uvicorn
+    virtualenv: "{{ web_console_venv_dir }}"
+    state: present
+  become: true
+  become_user: "{{ web_console_run_user }}"
+  when: web_console_enabled | bool
+
+- name: Deploy React frontend source
+  ansible.builtin.copy:
+    src: frontend/
+    dest: "{{ web_console_frontend_src_dir }}/"
+    owner: "{{ web_console_run_user }}"
+    group: "{{ web_console_run_user }}"
+    mode: preserve
+  become: true
+  when: web_console_enabled | bool
+
+- name: Install React frontend dependencies
+  ansible.builtin.command:
+    cmd: npm install
+    chdir: "{{ web_console_frontend_src_dir }}"
+  register: web_console_npm_install
+  changed_when: "'added' in web_console_npm_install.stdout or 'changed' in web_console_npm_install.stdout or 'removed' in web_console_npm_install.stdout"
+  become: true
+  become_user: "{{ web_console_run_user }}"
+  when: web_console_enabled | bool
+
+- name: Build React frontend
+  ansible.builtin.command:
+    cmd: npm run build
+    chdir: "{{ web_console_frontend_src_dir }}"
+  register: web_console_npm_build
+  changed_when: web_console_npm_build.rc == 0
+  become: true
+  become_user: "{{ web_console_run_user }}"
+  when: web_console_enabled | bool
+
+- name: Deploy Bigtop Web Console app
+  ansible.builtin.template:
+    src: app.py.j2
+    dest: "{{ web_console_app_file }}"
+    owner: "{{ web_console_run_user }}"
+    group: "{{ web_console_run_user }}"
+    mode: "0644"
+  become: true
+  when: web_console_enabled | bool
+  notify: Restart Bigtop Web Console
+
+- name: Deploy Bigtop Web Console systemd service
+  ansible.builtin.template:
+    src: bigtop-web-console.service.j2
+    dest: "{{ web_console_service_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when: web_console_enabled | bool
+  notify:
+    - Reload systemd
+    - Restart Bigtop Web Console
+
+- name: Apply pending Web Console handlers before endpoint checks
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure Bigtop Web Console service is enabled and started
+  ansible.builtin.systemd:
+    name: "{{ web_console_service_name }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+  become: true
+  when: web_console_enabled | bool
+
+- name: Wait for Bigtop Web Console internal port
+  ansible.builtin.wait_for:
+    host: "{{ web_console_host }}"
+    port: "{{ web_console_port }}"
+    timeout: 60
+  when: web_console_enabled | bool
+
+- name: Check Bigtop Web Console health endpoint
+  ansible.builtin.uri:
+    url: "http://{{ web_console_host }}:{{ web_console_port }}/api/health"
+    method: GET
+    status_code: 200
+  changed_when: false
+  when: web_console_enabled | bool
+
+- name: Disable old OliveTin public Nginx site
+  ansible.builtin.file:
+    path: "{{ web_console_olivetin_nginx_site_link }}"
+    state: absent
+  become: true
+  when:
+    - web_console_enabled | bool
+    - web_console_disable_olivetin_public_site | bool
+
+- name: Deploy Bigtop Web Console Nginx site
+  ansible.builtin.template:
+    src: nginx-bigtop-web-console.conf.j2
+    dest: "{{ web_console_nginx_site_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when: web_console_enabled | bool
+
+- name: Enable Bigtop Web Console Nginx site
+  ansible.builtin.file:
+    src: "{{ web_console_nginx_site_file }}"
+    dest: "{{ web_console_nginx_site_link }}"
+    state: link
+    force: true
+  become: true
+  when: web_console_enabled | bool
+
+- name: Test Nginx config for Bigtop Web Console
+  ansible.builtin.command: nginx -t
+  changed_when: false
+  become: true
+  when: web_console_enabled | bool
+
+- name: Restart Nginx for Bigtop Web Console
+  ansible.builtin.systemd:
+    name: nginx
+    state: restarted
+    enabled: true
+  become: true
+  when: web_console_enabled | bool
+
+- name: Wait for Bigtop Web Console public port
+  ansible.builtin.wait_for:
+    host: "127.0.0.1"
+    port: "{{ web_console_public_port }}"
+    timeout: 60
+  when: web_console_enabled | bool
+
+- name: Check Bigtop Web Console public endpoint requires authentication
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ web_console_public_port }}"
+    method: GET
+    status_code: 401
+  changed_when: false
+  when: web_console_enabled | bool
