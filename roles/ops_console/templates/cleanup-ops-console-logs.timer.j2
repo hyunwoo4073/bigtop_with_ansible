@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Bigtop Ops Console log cleanup periodically
+
+[Timer]
+OnCalendar={{ ops_console_cleanup_timer_calendar }}
+Persistent=true
+Unit=cleanup-ops-console-logs.service
+
+[Install]
+WantedBy=timers.target

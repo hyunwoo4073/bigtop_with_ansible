@@ -1,0 +1,268 @@
+---
+pageTitle: "Bigtop Ops Console"
+ListenAddressSingleHTTPFrontend: "{{ ops_console_internal_listen_address }}"
+logLevel: "INFO"
+showFooter: false
+showNewVersions: false
+defaultOnClick: "execution-dialog"
+
+saveLogs:
+  resultsDirectory: "{{ ops_console_olivetin_results_dir }}"
+  outputDirectory: "{{ ops_console_olivetin_output_dir }}"
+
+additionalNavigationLinks:
+  - title: "Ops Console"
+    url: "{{ ops_console_public_url }}"
+
+  - title: "Grafana"
+    url: "{{ ops_console_grafana_url }}"
+
+  - title: "Prometheus"
+    url: "{{ ops_console_prometheus_url }}"
+
+  - title: "Alertmanager"
+    url: "{{ ops_console_alertmanager_url }}"
+
+  - title: "HDFS NameNode"
+    url: "{{ ops_console_hdfs_namenode_url }}"
+
+  - title: "YARN RM"
+    url: "{{ ops_console_yarn_rm_url }}"
+
+  - title: "YARN UI2"
+    url: "{{ ops_console_yarn_ui2_url }}"
+
+  - title: "Spark History"
+    url: "{{ ops_console_spark_history_url }}"
+
+actions:
+  - title: "Cluster Status"
+    icon: "info"
+    shell: "{{ ops_console_ctl_script }} cluster-status"
+    timeout: 60
+
+  - title: "HDFS Status"
+    icon: "storage"
+    shell: "{{ ops_console_ctl_script }} hdfs-status"
+    timeout: 60
+
+  - title: "YARN Status"
+    icon: "server"
+    shell: "{{ ops_console_ctl_script }} yarn-status"
+    timeout: 60
+
+  - title: "Spark Status"
+    icon: "bolt"
+    shell: "{{ ops_console_ctl_script }} spark-status"
+    timeout: 60
+
+  - title: "Monitoring Status"
+    icon: "chart"
+    shell: "{{ ops_console_ctl_script }} monitoring-status"
+    timeout: 60
+
+  - title: "Ops Console Status"
+    icon: "info"
+    shell: "{{ ops_console_ctl_script }} ops-console-status"
+    timeout: 60
+
+  - title: "Incident Summary"
+    icon: "search"
+    shell: "{{ ops_console_ctl_script }} incident-summary"
+    timeout: 300
+
+  - title: "Cluster Health Check"
+    icon: "health"
+    shell: "{{ ops_console_ctl_script }} cluster-health"
+    timeout: 300
+
+  - title: "Cluster Smoke Test"
+    icon: "test"
+    shell: "{{ ops_console_ctl_script }} cluster-smoke"
+    timeout: 600
+
+  - title: "Make Validate"
+    icon: "check"
+    shell: "{{ ops_console_ctl_script }} make-validate"
+    timeout: 600
+
+  - title: "YARN Application Diagnostics"
+    icon: "search"
+    shell: "{{ ops_console_ctl_script }} yarn-app-diagnostics {% raw %}{{ app_id }}{% endraw %}"
+    timeout: 600
+    arguments:
+      - name: app_id
+        title: "YARN Application ID"
+        description: "예: application_1234567890123_0001"
+        type: ascii_identifier
+        rejectNull: true
+
+  - title: "Service Journal"
+    icon: "log"
+    shell: "{{ ops_console_ctl_script }} journal-service {% raw %}{{ service_key }}{% endraw %}"
+    timeout: 180
+    arguments:
+      - name: service_key
+        title: "Service"
+        rejectNull: true
+        choices:
+          - title: "HDFS NameNode"
+            value: "hdfs-namenode"
+          - title: "HDFS DataNode"
+            value: "hdfs-datanode"
+          - title: "YARN ResourceManager"
+            value: "yarn-resourcemanager"
+          - title: "YARN NodeManager"
+            value: "yarn-nodemanager"
+          - title: "Spark History Server"
+            value: "spark-history"
+          - title: "Prometheus"
+            value: "prometheus"
+          - title: "Grafana"
+            value: "grafana"
+          - title: "Alertmanager"
+            value: "alertmanager"
+          - title: "OliveTin"
+            value: "olivetin"
+          - title: "Nginx"
+            value: "nginx"
+          - title: "Node Exporter"
+            value: "node-exporter"
+
+  - title: "Failed systemd Units"
+    icon: "warning"
+    shell: "{{ ops_console_ctl_script }} failed-units"
+    timeout: 120
+
+  - title: "NodeManager Storage Status"
+    icon: "storage"
+    shell: "{{ ops_console_ctl_script }} nm-storage-status"
+    timeout: 120
+
+  - title: "Cluster Recover"
+    icon: "restart"
+    shell: "{{ ops_console_ctl_script }} cluster-recover"
+    timeout: 600
+    arguments:
+      - type: confirmation
+        title: "복구 작업을 실행합니다. stopped/failed service가 start될 수 있습니다."
+
+  - title: "Restart Spark History Server"
+    icon: "restart"
+    shell: "{{ ops_console_ctl_script }} restart-spark-history"
+    timeout: 180
+    arguments:
+      - type: confirmation
+        title: "Spark History Server를 재시작합니다."
+
+  - title: "Restart Monitoring Stack"
+    icon: "restart"
+    shell: "{{ ops_console_ctl_script }} restart-monitoring"
+    timeout: 600
+    arguments:
+      - type: confirmation
+        title: "Prometheus, Grafana, Alertmanager 설정을 재적용합니다."
+
+  - title: "Start HDFS"
+    icon: "play"
+    shell: "{{ ops_console_ctl_script }} start-hdfs"
+    timeout: 300
+    arguments:
+      - type: confirmation
+        title: "HDFS 서비스를 시작합니다."
+
+  - title: "Start YARN"
+    icon: "play"
+    shell: "{{ ops_console_ctl_script }} start-yarn"
+    timeout: 300
+    arguments:
+      - type: confirmation
+        title: "YARN 서비스를 시작합니다."
+
+  - title: "Danger: Stop HDFS"
+    icon: "warning"
+    shell: "{{ ops_console_ctl_script }} stop-hdfs"
+    timeout: 300
+    arguments:
+      - type: confirmation
+        title: "주의: HDFS 서비스를 중지합니다."
+
+  - title: "Danger: Restart HDFS"
+    icon: "warning"
+    shell: "{{ ops_console_ctl_script }} restart-hdfs"
+    timeout: 600
+    arguments:
+      - type: confirmation
+        title: "주의: HDFS 서비스를 재시작합니다."
+
+  - title: "Danger: Stop YARN"
+    icon: "warning"
+    shell: "{{ ops_console_ctl_script }} stop-yarn"
+    timeout: 300
+    arguments:
+      - type: confirmation
+        title: "주의: YARN 서비스를 중지합니다."
+
+  - title: "Danger: Restart YARN"
+    icon: "warning"
+    shell: "{{ ops_console_ctl_script }} restart-yarn"
+    timeout: 600
+    arguments:
+      - type: confirmation
+        title: "주의: YARN 서비스를 재시작합니다."
+
+  - title: "Component UI Links"
+    icon: "link"
+    shell: "{{ ops_console_ctl_script }} links"
+    timeout: 10
+
+dashboards:
+  - title: "Bigtop Ops Console"
+    contents:
+      - title: "Safe Status"
+        type: fieldset
+        contents:
+          - title: "Cluster Status"
+          - title: "HDFS Status"
+          - title: "YARN Status"
+          - title: "Spark Status"
+          - title: "Monitoring Status"
+          - title: "Ops Console Status"
+
+      - title: "Validation"
+        type: fieldset
+        contents:
+          - title: "Cluster Health Check"
+          - title: "Cluster Smoke Test"
+          - title: "Make Validate"
+
+      - title: "Incident Diagnostics"
+        type: fieldset
+        contents:
+          - title: "Incident Summary"
+          - title: "YARN Application Diagnostics"
+          - title: "Service Journal"
+          - title: "Failed systemd Units"
+          - title: "NodeManager Storage Status"
+
+      - title: "Recovery"
+        type: fieldset
+        contents:
+          - title: "Cluster Recover"
+          - title: "Restart Spark History Server"
+          - title: "Restart Monitoring Stack"
+          - title: "Start HDFS"
+          - title: "Start YARN"
+
+      - title: "Danger Zone"
+        type: fieldset
+        contents:
+          - title: "Danger: Stop HDFS"
+          - title: "Danger: Restart HDFS"
+          - title: "Danger: Stop YARN"
+          - title: "Danger: Restart YARN"
+
+      - title: "Links"
+        type: fieldset
+        contents:
+          - title: "Component UI Links"

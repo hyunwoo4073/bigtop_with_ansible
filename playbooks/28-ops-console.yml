@@ -1,0 +1,6 @@
+---
+- name: Install and configure Bigtop Ops Console
+  hosts: ops
+  gather_facts: true
+  roles:
+    - ops_console

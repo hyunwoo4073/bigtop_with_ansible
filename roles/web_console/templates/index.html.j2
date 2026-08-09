@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>Bigtop Web Console</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">B</div>
+        <div>
+          <div class="brand-title">Bigtop Console</div>
+          <div class="brand-subtitle">Unified Ops UI</div>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <a href="#overview" class="nav-item active">
+          <span class="nav-dot"></span>
+          Overview
+        </a>
+        <a href="#issues" class="nav-item">
+          <span class="nav-dot"></span>
+          Issues
+        </a>
+        <a href="#components" class="nav-item">
+          <span class="nav-dot"></span>
+          Components
+        </a>
+        <a href="#output" class="nav-item">
+          <span class="nav-dot"></span>
+          Action Output
+        </a>
+      </nav>
+
+      <div class="side-panel">
+        <div class="side-label">Cluster</div>
+        <div id="side-cluster-status" class="side-status loading">LOADING</div>
+        <div id="side-last-check" class="side-meta">Last check: -</div>
+      </div>
+
+      <div class="side-panel">
+        <div class="side-label">Quick Actions</div>
+        <button class="side-button" onclick="loadStatus()">Refresh Status</button>
+        <button class="side-button secondary" onclick="runIncidentSummary()">Incident Summary</button>
+      </div>
+    </aside>
+
+    <div class="main-shell">
+      <header class="topbar">
+        <div>
+          <div class="breadcrumb">Cluster Operations / Bigtop</div>
+          <h1>Operations Dashboard</h1>
+          <p>서비스 상태 확인, 이상 감지, 로그 조회, 재기동을 한 화면에서 수행합니다.</p>
+        </div>
+
+        <div class="top-actions">
+          <div class="refresh-info">
+            <span id="refresh-state-dot" class="pulse-dot"></span>
+            <span id="refresh-state">Auto refresh 10s</span>
+          </div>
+          <button class="btn ghost" onclick="loadStatus()">Refresh</button>
+          <button class="btn primary" onclick="runIncidentSummary()">Incident Summary</button>
+        </div>
+      </header>
+
+      <main>
+        <section id="overview" class="hero-grid">
+          <div id="cluster-card" class="hero-card loading">
+            <div class="hero-label">Cluster Health</div>
+            <div id="cluster-status-text" class="hero-status">LOADING</div>
+            <div id="cluster-detail" class="hero-detail">상태 정보를 불러오는 중입니다.</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-label">Components</div>
+            <div id="metric-components" class="metric-value">-</div>
+            <div class="metric-caption">registered services</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-label">Healthy</div>
+            <div id="metric-up" class="metric-value good">-</div>
+            <div class="metric-caption">active services</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-label">Issues</div>
+            <div id="metric-issues" class="metric-value bad">-</div>
+            <div class="metric-caption">detected problems</div>
+          </div>
+        </section>
+
+        <section class="section-card">
+          <div class="section-header">
+            <div>
+              <h2>Service Groups</h2>
+              <p>HDFS, YARN, Spark, Monitoring, Ops 단위 상태 요약</p>
+            </div>
+          </div>
+          <div id="summary" class="summary-grid">
+            <div class="summary-card skeleton-card"></div>
+            <div class="summary-card skeleton-card"></div>
+            <div class="summary-card skeleton-card"></div>
+          </div>
+        </section>
+
+        <section id="issues" class="section-card">
+          <div class="section-header">
+            <div>
+              <h2>Detected Issues</h2>
+              <p>비정상 서비스가 감지되면 여기에서 바로 로그 확인 또는 재기동합니다.</p>
+            </div>
+          </div>
+          <div id="issues-list" class="issues-list">
+            <div class="empty-state">Status check has not completed yet.</div>
+          </div>
+        </section>
+
+        <section id="components" class="section-card">
+          <div class="section-header split">
+            <div>
+              <h2>Component Status</h2>
+              <p>서비스별 systemd 상태, PID, 마지막 점검 시각</p>
+            </div>
+
+            <div class="filter-tabs">
+              <button id="filter-all" class="filter-tab active" onclick="setFilter('ALL')">All</button>
+              <button id="filter-down" class="filter-tab" onclick="setFilter('DOWN')">Down</button>
+              <button id="filter-up" class="filter-tab" onclick="setFilter('UP')">Up</button>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Group</th>
+                  <th>Component</th>
+                  <th>Host</th>
+                  <th>Service</th>
+                  <th>Status</th>
+                  <th>Sub State</th>
+                  <th>PID</th>
+                  <th>Last Check</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="components-table">
+                <tr>
+                  <td colspan="9" class="table-empty">Loading component status...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="output" class="section-card terminal-section">
+          <div class="section-header split">
+            <div>
+              <h2>Action Output</h2>
+              <p>Logs, Restart, Incident Summary 실행 결과</p>
+            </div>
+            <button class="btn ghost small" onclick="clearOutput()">Clear</button>
+          </div>
+          <pre id="action-output">No action executed yet.</pre>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script>
+    let currentStatus = null;
+    let currentFilter = 'ALL';
+    let refreshInProgress = false;
+
+    function showToast(message, type = 'info') {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.className = 'toast ' + type;
+      setTimeout(() => {
+        toast.className = 'toast hidden';
+      }, 3500);
+    }
+
+    function setOutput(text) {
+      document.getElementById('action-output').textContent = text;
+      document.getElementById('output').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function clearOutput() {
+      document.getElementById('action-output').textContent = 'No action executed yet.';
+    }
+
+    function setFilter(filter) {
+      currentFilter = filter;
+
+      for (const id of ['filter-all', 'filter-down', 'filter-up']) {
+        document.getElementById(id).classList.remove('active');
+      }
+
+      if (filter === 'ALL') document.getElementById('filter-all').classList.add('active');
+      if (filter === 'DOWN') document.getElementById('filter-down').classList.add('active');
+      if (filter === 'UP') document.getElementById('filter-up').classList.add('active');
+
+      if (currentStatus) {
+        renderComponents(currentStatus.components || []);
+      }
+    }
+
+    function statusClass(status) {
+      if (status === 'UP' || status === 'HEALTHY') return 'ok';
+      if (status === 'DEGRADED' || status === 'LOADING') return 'warn';
+      return 'bad';
+    }
+
+    function statusLabelClass(status) {
+      if (status === 'UP' || status === 'HEALTHY') return 'label-ok';
+      if (status === 'DEGRADED' || status === 'LOADING') return 'label-warn';
+      return 'label-bad';
+    }
+
+    function groupIcon(group) {
+      const icons = {
+        HDFS: 'H',
+        YARN: 'Y',
+        Spark: 'S',
+        Monitoring: 'M',
+        Ops: 'O'
+      };
+      return icons[group] || 'C';
+    }
+
+    async function loadStatus() {
+      if (refreshInProgress) return;
+
+      refreshInProgress = true;
+      document.getElementById('refresh-state').textContent = 'Refreshing...';
+
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 30000);
+
+        const response = await fetch('/api/status', {
+          signal: controller.signal,
+          cache: 'no-store'
+        });
+
+        clearTimeout(timer);
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error('HTTP ' + response.status + '\\n' + text);
+        }
+
+        const data = await response.json();
+        currentStatus = data;
+
+        renderAll(data);
+        showToast('Status refreshed', 'success');
+      } catch (error) {
+        renderStatusError(error);
+        showToast('Status refresh failed', 'error');
+      } finally {
+        refreshInProgress = false;
+        document.getElementById('refresh-state').textContent = 'Auto refresh 10s';
+      }
+    }
+
+    function renderAll(data) {
+      renderCluster(data);
+      renderMetrics(data);
+      renderSummary(data.summary || []);
+      renderIssues(data.issues || []);
+      renderComponents(data.components || []);
+    }
+
+    function renderCluster(data) {
+      const clusterCard = document.getElementById('cluster-card');
+      const statusText = document.getElementById('cluster-status-text');
+      const detail = document.getElementById('cluster-detail');
+      const sideStatus = document.getElementById('side-cluster-status');
+      const sideLastCheck = document.getElementById('side-last-check');
+
+      clusterCard.className = 'hero-card ' + statusClass(data.cluster_status);
+      statusText.textContent = data.cluster_status;
+      detail.textContent = 'Last check: ' + data.checked_at;
+
+      sideStatus.className = 'side-status ' + statusClass(data.cluster_status);
+      sideStatus.textContent = data.cluster_status;
+      sideLastCheck.textContent = 'Last check: ' + data.checked_at;
+    }
+
+    function renderMetrics(data) {
+      const components = data.components || [];
+      const issues = data.issues || [];
+      const up = components.filter((item) => item.status === 'UP').length;
+
+      document.getElementById('metric-components').textContent = components.length;
+      document.getElementById('metric-up').textContent = up;
+      document.getElementById('metric-issues').textContent = issues.length;
+    }
+
+    function renderSummary(summary) {
+      const el = document.getElementById('summary');
+      el.innerHTML = '';
+
+      if (summary.length === 0) {
+        el.innerHTML = '<div class="empty-state">No service group summary returned.</div>';
+        return;
+      }
+
+      for (const item of summary) {
+        const card = document.createElement('div');
+        card.className = 'summary-card ' + statusClass(item.status);
+
+        const percent = item.total > 0 ? Math.round((item.up / item.total) * 100) : 0;
+
+        card.innerHTML = `
+          <div class="summary-top">
+            <div class="summary-icon">${groupIcon(item.group)}</div>
+            <div>
+              <h3>${item.group}</h3>
+              <div class="summary-sub">${item.up}/${item.total} services up</div>
+            </div>
+          </div>
+          <div class="summary-status ${statusLabelClass(item.status)}">${item.status}</div>
+          <div class="progress">
+            <div class="progress-fill ${statusClass(item.status)}" style="width: ${percent}%"></div>
+          </div>
+          <div class="summary-footer">
+            <span>UP ${item.up}</span>
+            <span>DOWN ${item.down}</span>
+          </div>
+        `;
+
+        el.appendChild(card);
+      }
+    }
+
+    function renderIssues(issues) {
+      const el = document.getElementById('issues-list');
+      el.innerHTML = '';
+
+      if (issues.length === 0) {
+        el.innerHTML = `
+          <div class="empty-state good-state">
+            <div class="empty-title">No detected issues</div>
+            <div class="empty-sub">현재 등록된 컴포넌트는 모두 정상 상태입니다.</div>
+          </div>
+        `;
+        return;
+      }
+
+      for (const issue of issues) {
+        const item = document.createElement('div');
+        item.className = 'issue-card';
+
+        item.innerHTML = `
+          <div class="issue-main">
+            <div class="issue-badge">${issue.severity}</div>
+            <div>
+              <div class="issue-title">${issue.message}</div>
+              <div class="issue-sub">${issue.host} / ${issue.service}</div>
+            </div>
+          </div>
+          <div class="issue-actions">
+            <button class="btn small" onclick="loadLogs('${issue.component_id}')">View Logs</button>
+            <button class="btn danger small" onclick="restartComponent('${issue.component_id}')">Restart</button>
+          </div>
+        `;
+
+        el.appendChild(item);
+      }
+    }
+
+    function renderComponents(components) {
+      const tbody = document.getElementById('components-table');
+      tbody.innerHTML = '';
+
+      let rows = components;
+      if (currentFilter === 'DOWN') rows = components.filter((row) => row.status !== 'UP');
+      if (currentFilter === 'UP') rows = components.filter((row) => row.status === 'UP');
+
+      if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" class="table-empty">No components matched current filter.</td></tr>';
+        return;
+      }
+
+      for (const row of rows) {
+        const tr = document.createElement('tr');
+        tr.className = row.status === 'UP' ? '' : 'row-bad';
+
+        tr.innerHTML = `
+          <td>
+            <span class="group-pill">${row.group}</span>
+          </td>
+          <td>
+            <div class="component-name">${row.component}</div>
+          </td>
+          <td>${row.host}</td>
+          <td><code>${row.service}</code></td>
+          <td><span class="status-pill ${statusClass(row.status)}">${row.status}</span></td>
+          <td>${row.sub}</td>
+          <td>${row.pid}</td>
+          <td>${row.checked_at}</td>
+          <td>
+            <div class="row-actions">
+              <button class="btn tiny" onclick="loadLogs('${row.id}')">Logs</button>
+              <button class="btn danger tiny" onclick="restartComponent('${row.id}')">Restart</button>
+            </div>
+          </td>
+        `;
+
+        tbody.appendChild(tr);
+      }
+    }
+
+    function renderStatusError(error) {
+      document.getElementById('cluster-card').className = 'hero-card bad';
+      document.getElementById('cluster-status-text').textContent = 'ERROR';
+      document.getElementById('cluster-detail').textContent = '/api/status 호출 실패';
+
+      document.getElementById('side-cluster-status').className = 'side-status bad';
+      document.getElementById('side-cluster-status').textContent = 'ERROR';
+
+      document.getElementById('summary').innerHTML = `
+        <div class="summary-card bad">
+          <div class="summary-top">
+            <div class="summary-icon">!</div>
+            <div>
+              <h3>Status API</h3>
+              <div class="summary-sub">Unable to fetch /api/status</div>
+            </div>
+          </div>
+          <div class="summary-status label-bad">ERROR</div>
+        </div>
+      `;
+
+      document.getElementById('issues-list').innerHTML = `
+        <div class="issue-card">
+          <div class="issue-main">
+            <div class="issue-badge">ERROR</div>
+            <div>
+              <div class="issue-title">Status API failed</div>
+              <div class="issue-sub">Check bigtop-web-console service journal.</div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('components-table').innerHTML =
+        '<tr><td colspan="9" class="table-empty">Failed to load component status.</td></tr>';
+
+      setOutput(
+        '[Frontend error]\\n' +
+        String(error) +
+        '\\n\\n' +
+        'Check commands:\\n' +
+        '  systemctl status bigtop-web-console --no-pager -l\\n' +
+        '  journalctl -u bigtop-web-console -n 120 --no-pager\\n' +
+        '  curl -i http://127.0.0.1:18090/api/status\\n'
+      );
+    }
+
+    async function loadLogs(componentId) {
+      try {
+        setOutput('Loading logs...');
+
+        const response = await fetch('/api/component/' + encodeURIComponent(componentId) + '/logs', {
+          cache: 'no-store'
+        });
+
+        const text = await response.text();
+
+        if (!response.ok) {
+          throw new Error('HTTP ' + response.status + '\\n' + text);
+        }
+
+        setOutput(text || '(no logs)');
+        showToast('Logs loaded', 'success');
+      } catch (error) {
+        setOutput('[Logs error]\\n' + String(error));
+        showToast('Failed to load logs', 'error');
+      }
+    }
+
+    async function restartComponent(componentId) {
+      if (!confirm('선택한 서비스를 재시작합니다. 계속할까요?')) {
+        return;
+      }
+
+      try {
+        setOutput('Restarting service...');
+
+        const response = await fetch('/api/component/' + encodeURIComponent(componentId) + '/restart', {
+          method: 'POST',
+          cache: 'no-store'
+        });
+
+        const data = await response.json();
+
+        setOutput(
+          'OK: ' + data.ok + '\\n' +
+          'Return code: ' + data.returncode + '\\n\\n' +
+          '[stdout]\\n' + data.stdout + '\\n\\n' +
+          '[stderr]\\n' + data.stderr
+        );
+
+        showToast(data.ok ? 'Restart completed' : 'Restart failed', data.ok ? 'success' : 'error');
+        await loadStatus();
+      } catch (error) {
+        setOutput('[Restart error]\\n' + String(error));
+        showToast('Restart request failed', 'error');
+      }
+    }
+
+    async function runIncidentSummary() {
+      try {
+        setOutput('Running incident summary...');
+
+        const response = await fetch('/api/action/incident-summary', {
+          method: 'POST',
+          cache: 'no-store'
+        });
+
+        const data = await response.json();
+
+        setOutput(
+          'OK: ' + data.ok + '\\n' +
+          'Return code: ' + data.returncode + '\\n\\n' +
+          '[stdout]\\n' + data.stdout + '\\n\\n' +
+          '[stderr]\\n' + data.stderr
+        );
+
+        showToast(data.ok ? 'Incident summary completed' : 'Incident summary failed', data.ok ? 'success' : 'error');
+      } catch (error) {
+        setOutput('[Incident Summary error]\\n' + String(error));
+        showToast('Incident summary request failed', 'error');
+      }
+    }
+
+    loadStatus();
+    setInterval(loadStatus, 10000);
+  </script>
+</body>
+</html>

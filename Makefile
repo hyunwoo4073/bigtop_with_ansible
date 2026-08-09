@@ -41,6 +41,12 @@ help:
 > @echo "  make recover                   Recover stopped or failed services"
 > @echo "  make smoke                     Run cluster smoke test"
 > @echo "  make post-reboot               Ping, recover, health check, and smoke test"
+> @echo "  make ops-console               Install and configure Bigtop Ops Console"
+> @echo "  make ops-console-check         Check Bigtop Ops Console status"
+> @echo "  make ops-console-logs          Check Ops Console log retention status"
+> @echo "  make web-console               Install and configure Bigtop Web Console"
+> @echo "  make web-console-check         Check Bigtop Web Console status"
+> @echo "  make incident-summary          Run Ops Console incident summary"
 > @echo
 > @echo "YARN / Spark:"
 > @echo "  make diagnostics APP_ID=...    Collect YARN/Spark application diagnostics"
@@ -75,36 +81,7 @@ dev-setup: venv collections
 
 .PHONY: fix-newline
 fix-newline:
-> @python3 - <<'PY'
-> from pathlib import Path
-> 
-> targets = [
->     Path(".yamllint"),
->     Path(".ansible-lint"),
->     Path("requirements-dev.txt"),
->     Path("Makefile"),
->     Path("README.md"),
->     Path("inventory/group_vars/all.yml.example"),
-> ]
-> 
-> for base in [Path("playbooks"), Path("roles"), Path("scripts"), Path("docs")]:
->     if base.exists():
->         for path in base.rglob("*"):
->             if path.is_file() and path.suffix in {".yml", ".yaml", ".j2", ".sh", ".md", ".txt"}:
->                 targets.append(path)
-> 
-> for file in sorted(set(targets)):
->     if not file.exists():
->         continue
->     data = file.read_bytes()
->     if not data:
->         continue
->     if b"\0" in data:
->         continue
->     if not data.endswith(b"\n"):
->         file.write_bytes(data + b"\n")
->         print(f"fixed newline: {file}")
-> PY
+> python3 scripts/fix-newline.py
 
 .PHONY: lint
 lint:
@@ -174,6 +151,43 @@ nm-storage:
 .PHONY: nm-storage-metrics
 nm-storage-metrics:
 > $(ANSIBLE_PLAYBOOK) $(PLAYBOOK_DIR)/27-yarn-nodemanager-storage-metrics.yml
+
+.PHONY: ops-console
+ops-console:
+> $(ANSIBLE_PLAYBOOK) $(PLAYBOOK_DIR)/28-ops-console.yml
+
+.PHONY: ops-console-check
+ops-console-check:
+> $(ANSIBLE) ops -b -m command -a "systemctl is-active OliveTin"
+> $(ANSIBLE) ops -b -m command -a "systemctl is-active nginx"
+> $(ANSIBLE) ops -m shell -a "ss -lntp | grep -E '1337|13370|OliveTin|nginx' || true"
+> $(ANSIBLE) ops -m shell -a "curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:13370"
+> $(ANSIBLE) ops -m shell -a "curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:1337 || true"
+
+.PHONY: ops-console-logs
+ops-console-logs:
+> $(ANSIBLE) ops -b -m command -a "test -f /etc/logrotate.d/bigtop-ops-console"
+> $(ANSIBLE) ops -b -m command -a "logrotate -d /etc/logrotate.d/bigtop-ops-console"
+> $(ANSIBLE) ops -b -m command -a "systemctl is-active cleanup-ops-console-logs.timer"
+> $(ANSIBLE) ops -b -m command -a "systemctl is-enabled cleanup-ops-console-logs.timer"
+> $(ANSIBLE) ops -b -m shell -a "systemctl list-timers --all | grep cleanup-ops-console-logs || true"
+> $(ANSIBLE) ops -b -m shell -a "du -sh /var/log/bigtop-ops-console /var/log/OliveTin 2>/dev/null || true"
+
+.PHONY: web-console
+web-console:
+> $(ANSIBLE_PLAYBOOK) $(PLAYBOOK_DIR)/30-web-console.yml
+
+.PHONY: web-console-check
+web-console-check:
+> $(ANSIBLE) ops -b -m command -a "systemctl is-active bigtop-web-console"
+> $(ANSIBLE) ops -b -m command -a "systemctl is-active nginx"
+> $(ANSIBLE) ops -b -m shell -a "ss -lntp | grep -E '1337|18090|bigtop-web-console|uvicorn|nginx' || true"
+> $(ANSIBLE) ops -m shell -a "curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18090/api/health"
+> $(ANSIBLE) ops -m shell -a "curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:1337 || true"
+
+.PHONY: incident-summary
+incident-summary:
+> $(ANSIBLE) ops -b -m command -a "/usr/local/bin/bigtop-opsctl incident-summary"
 
 .PHONY: prometheus
 prometheus:

@@ -1,0 +1,329 @@
+---
+- name: Ensure required packages for Ops Console
+  ansible.builtin.apt:
+    name:
+      - curl
+      - wget
+      - sudo
+      - nginx
+      - apache2-utils
+    state: present
+    update_cache: true
+  become: true
+  when: ops_console_enabled | bool
+
+- name: Download OliveTin deb package
+  ansible.builtin.get_url:
+    url: "{{ ops_console_deb_url }}"
+    dest: "{{ ops_console_deb_path }}"
+    mode: "0644"
+  become: true
+  when: ops_console_enabled | bool
+
+- name: Install OliveTin deb package
+  ansible.builtin.apt:
+    deb: "{{ ops_console_deb_path }}"
+    state: present
+  become: true
+  when: ops_console_enabled | bool
+
+- name: Ensure OliveTin config directory exists
+  ansible.builtin.file:
+    path: "{{ ops_console_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  when: ops_console_enabled | bool
+
+- name: Ensure Ops Console log directory exists
+  ansible.builtin.file:
+    path: "{{ ops_console_log_dir }}"
+    state: directory
+    owner: root
+    group: "{{ ops_console_run_user }}"
+    mode: "0775"
+  become: true
+  when: ops_console_enabled | bool
+
+- name: Ensure Ops Console audit log file exists
+  ansible.builtin.file:
+    path: "{{ ops_console_audit_log }}"
+    state: touch
+    owner: root
+    group: "{{ ops_console_run_user }}"
+    mode: "0664"
+  become: true
+  changed_when: false
+  when: ops_console_enabled | bool
+
+- name: Ensure OliveTin persistent results directory exists
+  ansible.builtin.file:
+    path: "{{ ops_console_olivetin_results_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  when: ops_console_enabled | bool
+
+- name: Ensure OliveTin persistent output directory exists
+  ansible.builtin.file:
+    path: "{{ ops_console_olivetin_output_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  when: ops_console_enabled | bool
+
+- name: Ensure logrotate is installed
+  ansible.builtin.apt:
+    name: logrotate
+    state: present
+    update_cache: true
+  become: true
+  when:
+    - ops_console_enabled | bool
+    - ops_console_logrotate_enabled | bool
+
+- name: Deploy Ops Console logrotate policy
+  ansible.builtin.template:
+    src: bigtop-ops-console-logrotate.j2
+    dest: "{{ ops_console_logrotate_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when:
+    - ops_console_enabled | bool
+    - ops_console_logrotate_enabled | bool
+
+- name: Validate Ops Console logrotate policy
+  ansible.builtin.command: "logrotate -d {{ ops_console_logrotate_file }}"
+  register: ops_console_logrotate_validate
+  changed_when: false
+  become: true
+  when:
+    - ops_console_enabled | bool
+    - ops_console_logrotate_enabled | bool
+
+- name: Deploy Ops Console log cleanup script
+  ansible.builtin.template:
+    src: cleanup-ops-console-logs.sh.j2
+    dest: "{{ ops_console_cleanup_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  when:
+    - ops_console_enabled | bool
+    - ops_console_cleanup_enabled | bool
+
+- name: Deploy Ops Console log cleanup service
+  ansible.builtin.template:
+    src: cleanup-ops-console-logs.service.j2
+    dest: "{{ ops_console_cleanup_service }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when:
+    - ops_console_enabled | bool
+    - ops_console_cleanup_enabled | bool
+
+- name: Deploy Ops Console log cleanup timer
+  ansible.builtin.template:
+    src: cleanup-ops-console-logs.timer.j2
+    dest: "{{ ops_console_cleanup_timer }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when:
+    - ops_console_enabled | bool
+    - ops_console_cleanup_enabled | bool
+
+- name: Reload systemd for Ops Console log cleanup timer
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+  when:
+    - ops_console_enabled | bool
+    - ops_console_cleanup_enabled | bool
+
+- name: Enable and start Ops Console log cleanup timer
+  ansible.builtin.systemd:
+    name: "{{ ops_console_cleanup_timer_name }}"
+    state: started
+    enabled: true
+  become: true
+  when:
+    - ops_console_enabled | bool
+    - ops_console_cleanup_enabled | bool
+
+- name: Deploy Bigtop ops control script
+  ansible.builtin.template:
+    src: bigtop-opsctl.sh.j2
+    dest: "{{ ops_console_ctl_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  when: ops_console_enabled | bool
+
+- name: Deploy OliveTin config
+  ansible.builtin.template:
+    src: olivetin-config.yaml.j2
+    dest: "{{ ops_console_config_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when: ops_console_enabled | bool
+
+- name: Restart OliveTin to apply Ops Console config
+  ansible.builtin.service:
+    name: OliveTin
+    state: restarted
+    enabled: true
+  become: true
+  when: ops_console_enabled | bool
+
+- name: Ensure Ops Console basic auth hash is configured
+  ansible.builtin.assert:
+    that:
+      - ops_console_basic_auth_password_hash is defined
+      - ops_console_basic_auth_password_hash | length > 0
+    fail_msg: "Set ops_console_basic_auth_password_hash in inventory/group_vars/all.yml. Generate it with: openssl passwd -apr1"
+  when:
+    - ops_console_enabled | bool
+    - ops_console_nginx_enabled | bool
+
+- name: Deploy Ops Console basic auth file
+  ansible.builtin.copy:
+    dest: "{{ ops_console_basic_auth_file }}"
+    content: "{{ ops_console_basic_auth_user }}:{{ ops_console_basic_auth_password_hash }}\n"
+    owner: root
+    group: www-data
+    mode: "0640"
+  become: true
+  when:
+    - ops_console_enabled | bool
+    - ops_console_nginx_enabled | bool
+
+- name: Deploy Nginx site for Ops Console
+  ansible.builtin.template:
+    src: nginx-bigtop-ops-console.conf.j2
+    dest: "{{ ops_console_nginx_site_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when:
+    - ops_console_enabled | bool
+    - ops_console_nginx_enabled | bool
+
+- name: Enable Nginx site for Ops Console
+  ansible.builtin.file:
+    src: "{{ ops_console_nginx_site_file }}"
+    dest: "{{ ops_console_nginx_site_link }}"
+    state: link
+    force: true
+  become: true
+  when:
+    - ops_console_enabled | bool
+    - ops_console_nginx_enabled | bool
+
+- name: Test Nginx config
+  ansible.builtin.command: nginx -t
+  changed_when: false
+  become: true
+  when:
+    - ops_console_enabled | bool
+    - ops_console_nginx_enabled | bool
+
+- name: Restart Nginx to apply Ops Console site
+  ansible.builtin.service:
+    name: nginx
+    state: restarted
+    enabled: true
+  become: true
+  when:
+    - ops_console_enabled | bool
+    - ops_console_nginx_enabled | bool
+
+- name: Ensure OliveTin service is enabled and started
+  ansible.builtin.service:
+    name: OliveTin
+    state: started
+    enabled: true
+  become: true
+  when: ops_console_enabled | bool
+
+- name: Ensure Nginx service is enabled and started
+  ansible.builtin.service:
+    name: nginx
+    state: started
+    enabled: true
+  become: true
+  when:
+    - ops_console_enabled | bool
+    - ops_console_nginx_enabled | bool
+
+- name: Show rendered OliveTin listen address
+  ansible.builtin.shell: "grep -n 'ListenAddressSingleHTTPFrontend\\|listenAddressSingleHTTPFrontend' {{ ops_console_config_file }} || true"
+  register: ops_console_olivetin_listen_config
+  changed_when: false
+  become: true
+  when: ops_console_enabled | bool
+
+- name: Print rendered OliveTin listen address
+  ansible.builtin.debug:
+    var: ops_console_olivetin_listen_config.stdout_lines
+  when: ops_console_enabled | bool
+
+- name: Show Ops Console listening ports
+  ansible.builtin.shell: "ss -lntp | grep -E '1337|13370|OliveTin|nginx' || true"
+  register: ops_console_ports
+  changed_when: false
+  become: true
+
+- name: Print Ops Console listening ports
+  ansible.builtin.debug:
+    var: ops_console_ports.stdout_lines
+
+- name: Wait for OliveTin internal web port
+  ansible.builtin.wait_for:
+    host: "127.0.0.1"
+    port: "{{ ops_console_internal_port }}"
+    timeout: 60
+  when: ops_console_enabled | bool
+
+- name: Check OliveTin internal HTTP response
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ ops_console_internal_port }}"
+    method: GET
+    status_code: 200
+  changed_when: false
+  when: ops_console_enabled | bool
+
+- name: Wait for Ops Console public web port
+  ansible.builtin.wait_for:
+    host: "127.0.0.1"
+    port: "{{ ops_console_public_port }}"
+    timeout: 60
+  when:
+    - ops_console_enabled | bool
+    - ops_console_nginx_enabled | bool
+
+- name: Check Ops Console public endpoint requires authentication
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ ops_console_public_port }}"
+    method: GET
+    status_code: 401
+  changed_when: false
+  when:
+    - ops_console_enabled | bool
+    - ops_console_nginx_enabled | bool

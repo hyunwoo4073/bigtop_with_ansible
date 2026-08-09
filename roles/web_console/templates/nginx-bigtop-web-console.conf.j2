@@ -1,0 +1,24 @@
+server {
+    listen {{ web_console_public_listen_address }}:{{ web_console_public_port }};
+    server_name _;
+
+    access_log /var/log/nginx/bigtop-web-console.access.log;
+    error_log /var/log/nginx/bigtop-web-console.error.log;
+
+    auth_basic "Bigtop Web Console";
+    auth_basic_user_file {{ web_console_basic_auth_file }};
+
+    location / {
+        proxy_pass http://{{ web_console_host }}:{{ web_console_port }};
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_buffering off;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+}

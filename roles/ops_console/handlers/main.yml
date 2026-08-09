@@ -1,0 +1,12 @@
+---
+- name: Restart OliveTin
+  ansible.builtin.service:
+    name: OliveTin
+    state: restarted
+  become: true
+
+- name: Restart nginx
+  ansible.builtin.service:
+    name: nginx
+    state: restarted
+  become: true

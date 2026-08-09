@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+RETENTION_DAYS="{{ ops_console_cleanup_retention_days }}"
+OLIVETIN_RESULTS_DIR="{{ ops_console_olivetin_results_dir }}"
+OLIVETIN_OUTPUT_DIR="{{ ops_console_olivetin_output_dir }}"
+OPS_AUDIT_LOG="{{ ops_console_audit_log }}"
+
+echo "============================================================"
+echo "Cleanup Ops Console logs"
+echo "Time           : $(date '+%Y-%m-%d %H:%M:%S')"
+echo "Retention days : ${RETENTION_DAYS}"
+echo "Results dir    : ${OLIVETIN_RESULTS_DIR}"
+echo "Output dir     : ${OLIVETIN_OUTPUT_DIR}"
+echo "Audit log      : ${OPS_AUDIT_LOG}"
+echo "============================================================"
+
+cleanup_dir() {
+  local dir="$1"
+  local label="$2"
+
+  if [[ ! -d "${dir}" ]]; then
+    echo "[SKIP] ${label}: directory not found: ${dir}"
+    return 0
+  fi
+
+  echo
+  echo "[CLEANUP] ${label}: ${dir}"
+
+  find "${dir}" \
+    -type f \
+    -mtime "+${RETENTION_DAYS}" \
+    -print \
+    -delete
+}
+
+cleanup_empty_dirs() {
+  local dir="$1"
+
+  if [[ ! -d "${dir}" ]]; then
+    return 0
+  fi
+
+  find "${dir}" \
+    -mindepth 1 \
+    -type d \
+    -empty \
+    -print \
+    -delete
+}
+
+cleanup_dir "${OLIVETIN_RESULTS_DIR}" "OliveTin results"
+cleanup_dir "${OLIVETIN_OUTPUT_DIR}" "OliveTin output"
+
+cleanup_empty_dirs "${OLIVETIN_RESULTS_DIR}"
+cleanup_empty_dirs "${OLIVETIN_OUTPUT_DIR}"
+
+echo
+echo "[DONE] cleanup completed"

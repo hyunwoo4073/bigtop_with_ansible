@@ -1,0 +1,1642 @@
+:root {
+  --bg: #f6f8fa;
+  --surface: #ffffff;
+  --surface-muted: #f9fafb;
+  --border: #e5e7eb;
+  --border-strong: #d1d5db;
+  --text: #111827;
+  --muted: #6b7280;
+  --muted-light: #9ca3af;
+  --sidebar: #0f172a;
+  --sidebar-hover: #1e293b;
+  --primary: #017cee;
+  --primary-soft: #eff6ff;
+  --success: #16a34a;
+  --success-soft: #ecfdf5;
+  --warning: #d97706;
+  --warning-soft: #fffbeb;
+  --danger: #dc2626;
+  --danger-soft: #fef2f2;
+  --shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 8px 24px rgba(15, 23, 42, 0.06);
+  --radius: 10px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+
+button,
+input,
+select {
+  font-family: inherit;
+}
+
+.airflow-shell {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.sidebar {
+  background: var(--sidebar);
+  color: #e5e7eb;
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 248px;
+  height: 100vh;
+  z-index: 30;
+}
+
+.workspace {
+  grid-column: 2;
+  min-width: 0;
+}
+
+.brand {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 8px 18px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.brand-logo {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #14b8a6;
+  color: white;
+  font-weight: 900;
+}
+
+.brand-title {
+  font-weight: 800;
+}
+
+.brand-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.nav {
+  display: grid;
+  gap: 3px;
+}
+
+.nav-item {
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: #cbd5e1;
+  padding: 9px 11px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.nav-item:hover,
+.nav-item.active {
+  background: var(--sidebar-hover);
+  color: white;
+}
+
+.sidebar-health {
+  margin-top: auto;
+  padding: 13px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-label,
+.section-kicker {
+  font-size: 11px;
+  color: var(--muted-light);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 800;
+  margin-bottom: 7px;
+}
+
+.sidebar-meta {
+  margin-top: 8px;
+  color: #9ca3af;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.topbar {
+  height: 72px;
+  background: white;
+  border-bottom: 1px solid var(--border);
+  padding: 12px 22px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.breadcrumb {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 24px;
+  letter-spacing: -0.03em;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.refresh-pill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.refresh-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--success);
+}
+
+.refresh-dot.loading {
+  background: var(--warning);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 410px;
+  gap: 18px;
+  padding: 20px 22px 38px;
+}
+
+.page {
+  min-width: 0;
+}
+
+.card,
+.home-hero,
+.detail-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-bottom: 16px;
+}
+
+.card {
+  padding: 16px;
+}
+
+.card.no-padding {
+  padding: 0;
+}
+
+.card-header {
+  margin-bottom: 13px;
+}
+
+.card-header h2 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+}
+
+.card-header p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.home-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  gap: 22px;
+  padding: 22px;
+  border-left: 5px solid var(--primary);
+}
+
+.home-hero-main h2 {
+  margin: 4px 0 0;
+  font-size: 38px;
+  letter-spacing: -0.06em;
+}
+
+.hero-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.home-hero-main p {
+  color: var(--muted);
+  margin: 8px 0 0;
+}
+
+.quick-actions {
+  display: flex;
+  gap: 9px;
+  margin-top: 18px;
+}
+
+.home-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.stat {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-muted);
+  padding: 13px;
+}
+
+.stat span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.stat strong {
+  display: block;
+  font-size: 28px;
+  margin-top: 7px;
+}
+
+.stat.success {
+  background: var(--success-soft);
+  border-color: #bbf7d0;
+}
+
+.stat.danger {
+  background: var(--danger-soft);
+  border-color: #fecaca;
+}
+
+.quick-link-grid,
+.group-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.quick-link {
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  border-radius: 9px;
+  padding: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.quick-link span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.quick-link strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 20px;
+}
+
+.quick-link.success {
+  background: var(--success-soft);
+  border-color: #bbf7d0;
+}
+
+.quick-link.danger {
+  background: var(--danger-soft);
+  border-color: #fecaca;
+}
+
+.group-card {
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  border-radius: 9px;
+  padding: 12px;
+}
+
+.group-card-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.group-card span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.progress {
+  height: 7px;
+  background: #e5e7eb;
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 12px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--success);
+}
+
+.progress-fill.warning {
+  background: var(--warning);
+}
+
+.progress-fill.danger {
+  background: var(--danger);
+}
+
+.incident-table,
+.snapshot-list {
+  display: grid;
+  gap: 8px;
+}
+
+.incident-line,
+.snapshot-row,
+.incident-card {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: white;
+  border-radius: 9px;
+  padding: 11px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  text-align: left;
+}
+
+.incident-line,
+.incident-card {
+  border-color: #fecaca;
+  background: var(--danger-soft);
+}
+
+.incident-line span,
+.snapshot-row span,
+.incident-card span {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.empty-state {
+  border: 1px dashed var(--border-strong);
+  border-radius: 9px;
+  background: var(--surface-muted);
+  padding: 18px;
+}
+
+.empty-state strong {
+  display: block;
+}
+
+.empty-state span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.list-header {
+  padding: 16px 16px 0;
+}
+
+.list-toolbar {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  margin-bottom: 13px;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-muted);
+}
+
+.tab {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 7px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-weight: 750;
+}
+
+.tab.active {
+  background: white;
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.search,
+.select {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: white;
+  padding: 9px 10px;
+  outline: none;
+}
+
+.search {
+  min-width: 300px;
+}
+
+.search.full {
+  min-width: 0;
+  width: 100%;
+}
+
+.search:focus,
+.select:focus {
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+.service-list {
+  border-top: 1px solid var(--border);
+}
+
+.service-head,
+.service-row {
+  display: grid;
+  grid-template-columns: 1.45fr 0.7fr 0.7fr 0.5fr 1fr 0.9fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.service-head {
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.service-row {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: white;
+  padding: 11px 14px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+}
+
+.service-row:hover,
+.service-row.selected {
+  background: var(--primary-soft);
+}
+
+.service-row span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.row-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.btn {
+  border: 1px solid var(--border-strong);
+  background: white;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 11px;
+  cursor: pointer;
+  font-weight: 750;
+}
+
+.btn:hover {
+  background: var(--surface-muted);
+}
+
+.btn.primary {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+
+.btn.danger {
+  color: #991b1b;
+  background: var(--danger-soft);
+  border-color: #fecaca;
+}
+
+.btn.tiny {
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.status-badge {
+  display: inline-flex;
+  justify-content: center;
+  min-width: 74px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  border: 1px solid var(--border);
+}
+
+.status-badge.success {
+  color: #166534;
+  background: var(--success-soft);
+  border-color: #bbf7d0;
+}
+
+.status-badge.warning {
+  color: #92400e;
+  background: var(--warning-soft);
+  border-color: #fed7aa;
+}
+
+.status-badge.danger {
+  color: #991b1b;
+  background: var(--danger-soft);
+  border-color: #fecaca;
+}
+
+.grid-view {
+  display: grid;
+  grid-template-columns: 160px repeat(auto-fit, minmax(90px, 1fr));
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  overflow: auto;
+}
+
+.grid-head-cell,
+.grid-host,
+.grid-empty,
+.grid-cell {
+  min-height: 54px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  place-items: center;
+  padding: 8px;
+}
+
+.grid-head-cell {
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.grid-host {
+  place-items: start;
+  background: white;
+}
+
+.grid-host span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.grid-cell {
+  border-top: 0;
+  border-left: 0;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.grid-cell.success {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.grid-cell.warning {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.grid-cell.danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.grid-cell.selected {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.grid-empty {
+  color: var(--muted-light);
+  background: #fafafa;
+}
+
+.admin-grid,
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 9px;
+}
+
+.admin-actions {
+  display: flex;
+  gap: 9px;
+  margin-top: 14px;
+}
+
+.detail-panel {
+  position: sticky;
+  top: 92px;
+  align-self: start;
+  max-height: calc(100vh - 112px);
+  overflow: auto;
+  padding: 15px;
+}
+
+.detail-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.detail-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.detail-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  border-radius: 9px;
+  margin-bottom: 12px;
+}
+
+.detail-tab {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  padding: 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 750;
+}
+
+.detail-tab.active {
+  background: white;
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.detail-body {
+  display: grid;
+  gap: 12px;
+}
+
+.detail-title-row {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-muted);
+  padding: 12px;
+}
+
+.detail-title-row span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.info-box {
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  border-radius: 9px;
+  padding: 10px;
+}
+
+.info-box span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.info-box strong {
+  display: block;
+  margin-top: 5px;
+  word-break: break-all;
+}
+
+.log-toolbar {
+  display: flex;
+  gap: 8px;
+}
+
+.log-viewer {
+  min-height: 390px;
+  max-height: 620px;
+  overflow: auto;
+  margin: 0;
+  border-radius: 9px;
+  background: #111827;
+  color: #e5e7eb;
+  padding: 13px;
+  font-family:
+    "JetBrains Mono",
+    "Fira Code",
+    Consolas,
+    monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.log-viewer.compact {
+  min-height: 240px;
+}
+
+.action-list {
+  display: grid;
+  gap: 9px;
+}
+
+.action-card {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-muted);
+  padding: 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.action-card span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.danger-action {
+  border-color: #fecaca;
+  background: var(--danger-soft);
+}
+
+.metadata-list {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  overflow: hidden;
+}
+
+.metadata-row {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 8px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.metadata-row:last-child {
+  border-bottom: 0;
+}
+
+.metadata-row span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.metadata-row code {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.alert {
+  margin: 16px 22px 0;
+  border-radius: 9px;
+  padding: 12px;
+}
+
+.danger-alert {
+  border: 1px solid #fecaca;
+  background: var(--danger-soft);
+  color: #991b1b;
+}
+
+.danger-alert pre {
+  white-space: pre-wrap;
+}
+
+@media (max-width: 1280px) {
+  .airflow-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: relative;
+    width: auto;
+    height: auto;
+  }
+
+  .workspace {
+    grid-column: 1;
+  }
+
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-panel {
+    position: relative;
+    top: auto;
+    max-height: none;
+  }
+
+  .home-hero {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .topbar,
+  .topbar-actions,
+  .list-toolbar,
+  .incident-card,
+  .incident-line,
+  .snapshot-row,
+  .action-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .layout {
+    padding: 14px;
+  }
+
+  .home-stat-grid,
+  .admin-grid,
+  .info-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .service-head {
+    display: none;
+  }
+
+  .service-row {
+    grid-template-columns: 1fr;
+  }
+
+  .search {
+    min-width: 0;
+    width: 100%;
+  }
+}
+
+/* ============================================================
+   Airflow-like fixed left navigation hard override
+   ------------------------------------------------------------
+   The previous responsive rule moved the sidebar to the top
+   when the browser width was <= 1280px.
+   Keep the navigation fixed on the left for desktop/tablet.
+   Only collapse it on small mobile screens.
+   ============================================================ */
+
+@media (min-width: 901px) {
+  .airflow-shell {
+    display: block !important;
+    min-height: 100vh !important;
+  }
+
+  .sidebar {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    width: 248px !important;
+    height: 100vh !important;
+    z-index: 100 !important;
+  }
+
+  .workspace {
+    margin-left: 248px !important;
+    grid-column: auto !important;
+    min-width: 0 !important;
+  }
+
+  .topbar {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 50 !important;
+  }
+
+  .layout {
+    grid-template-columns: minmax(0, 1fr) 410px !important;
+  }
+
+  .detail-panel {
+    position: sticky !important;
+    top: 92px !important;
+    max-height: calc(100vh - 112px) !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .airflow-shell {
+    display: block !important;
+  }
+
+  .sidebar {
+    position: relative !important;
+    width: auto !important;
+    height: auto !important;
+    bottom: auto !important;
+  }
+
+  .workspace {
+    margin-left: 0 !important;
+  }
+
+  .layout {
+    grid-template-columns: 1fr !important;
+  }
+
+  .detail-panel {
+    position: relative !important;
+    top: auto !important;
+    max-height: none !important;
+  }
+}
+
+/* ============================================================
+   Hide detail panel layout on Home/Admin
+   ------------------------------------------------------------
+   Home and Admin should use full width.
+   Detail panel is only used in Services/Grid/Incidents views.
+   ============================================================ */
+
+@media (min-width: 901px) {
+  .layout.no-detail {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .layout.with-detail {
+    grid-template-columns: minmax(0, 1fr) 410px !important;
+  }
+}
+
+/* ============================================================
+   Optional Service Details panel
+   ------------------------------------------------------------
+   Home/Admin/Incidents should not always reserve right space.
+   Services/Grid/Incidents can open Service Details only when needed.
+   ============================================================ */
+
+@media (min-width: 901px) {
+  .layout.no-detail {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .layout.with-detail {
+    grid-template-columns: minmax(0, 1fr) 410px !important;
+  }
+}
+
+.detail-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ============================================================
+   Services toolbar overflow fix + optional detail panel
+   ------------------------------------------------------------
+   Fixes:
+   - Search input overflowing in Services view
+   - Detail panel can be hidden and layout expands to full width
+   ============================================================ */
+
+@media (min-width: 901px) {
+  .layout.no-detail {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .layout.with-detail {
+    grid-template-columns: minmax(0, 1fr) 410px !important;
+  }
+}
+
+/* Services toolbar should wrap instead of overflowing */
+.list-toolbar {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 8px !important;
+  max-width: 100% !important;
+}
+
+.list-toolbar .tabs {
+  flex: 0 0 auto !important;
+}
+
+.list-toolbar .select {
+  flex: 0 1 150px !important;
+  min-width: 120px !important;
+  max-width: 180px !important;
+}
+
+.list-toolbar .search {
+  flex: 1 1 220px !important;
+  min-width: 160px !important;
+  max-width: 100% !important;
+  width: auto !important;
+}
+
+.card.no-padding {
+  overflow: hidden !important;
+}
+
+.service-list {
+  overflow-x: auto !important;
+}
+
+/* Keep table readable while preventing page-level overflow */
+.service-head,
+.service-row {
+  min-width: 760px !important;
+}
+
+/* Detail panel header close area */
+.detail-header-actions {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+/* When details are hidden, the page should use the freed space */
+.layout.no-detail .page {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+/* ============================================================
+   UX patch: readable Grid, Services toolbar, Detail toggle,
+   Admin refresh interval
+   ============================================================ */
+
+/* Services toolbar overflow fix */
+.list-toolbar {
+  display: grid !important;
+  grid-template-columns: auto minmax(120px, 160px) minmax(180px, 1fr) !important;
+  align-items: center !important;
+  gap: 8px !important;
+  max-width: 100% !important;
+}
+
+.list-toolbar .tabs {
+  min-width: 0 !important;
+}
+
+.list-toolbar .select {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.list-toolbar .search {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+.card.no-padding {
+  overflow: hidden !important;
+}
+
+.service-list {
+  overflow-x: auto !important;
+}
+
+.service-head,
+.service-row {
+  min-width: 760px !important;
+}
+
+/* Detail panel optional layout */
+@media (min-width: 901px) {
+  .layout.no-detail {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .layout.with-detail {
+    grid-template-columns: minmax(0, 1fr) 410px !important;
+  }
+
+  .layout.no-detail .page {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}
+
+.detail-header-actions {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+/* Readable Grid View */
+.grid-summary-bar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 160px)) minmax(240px, 1fr);
+  gap: 10px;
+  align-items: stretch;
+  margin-bottom: 14px;
+}
+
+.grid-summary-item {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-muted);
+  padding: 11px 12px;
+}
+
+.grid-summary-item span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.grid-summary-item strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 22px;
+}
+
+.grid-summary-item.success {
+  background: var(--success-soft);
+  border-color: #bbf7d0;
+}
+
+.grid-summary-item.danger {
+  background: var(--danger-soft);
+  border-color: #fecaca;
+}
+
+.grid-legend {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: white;
+  padding: 11px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.grid-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-dot,
+.state-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.legend-dot.success,
+.state-dot.success {
+  background: var(--success);
+}
+
+.legend-dot.warning,
+.state-dot.warning {
+  background: var(--warning);
+}
+
+.legend-dot.danger,
+.state-dot.danger {
+  background: var(--danger);
+}
+
+.readable-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.grid-node-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-muted);
+  overflow: hidden;
+}
+
+.grid-node-card.success {
+  border-color: #bbf7d0;
+}
+
+.grid-node-card.warning {
+  border-color: #fed7aa;
+}
+
+.grid-node-card.danger {
+  border-color: #fecaca;
+}
+
+.grid-node-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px;
+  background: white;
+  border-bottom: 1px solid var(--border);
+}
+
+.grid-node-name {
+  font-size: 17px;
+  font-weight: 850;
+  letter-spacing: -0.02em;
+}
+
+.grid-node-meta {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.grid-service-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+  padding: 12px;
+}
+
+.grid-service-tile {
+  border: 1px solid var(--border);
+  background: white;
+  border-radius: 10px;
+  padding: 11px;
+  text-align: left;
+  cursor: pointer;
+  min-height: 132px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.grid-service-tile:hover {
+  border-color: #93c5fd;
+  background: var(--primary-soft);
+}
+
+.grid-service-tile.selected {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.grid-service-tile.success {
+  border-left: 5px solid var(--success);
+}
+
+.grid-service-tile.warning {
+  border-left: 5px solid var(--warning);
+}
+
+.grid-service-tile.danger {
+  border-left: 5px solid var(--danger);
+}
+
+.tile-top {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.tile-top strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tile-component {
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.tile-service {
+  color: var(--muted);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.tile-footer {
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* Admin refresh interval */
+.settings-card {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  padding: 13px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+}
+
+.settings-card strong {
+  display: block;
+}
+
+.settings-card span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.interval-options {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.interval-button {
+  border: 1px solid var(--border-strong);
+  background: white;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.interval-button.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+}
+
+@media (max-width: 1100px) {
+  .list-toolbar {
+    grid-template-columns: 1fr !important;
+  }
+
+  .grid-summary-bar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .grid-legend {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .settings-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .interval-options {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 720px) {
+  .grid-summary-bar,
+  .readable-grid,
+  .grid-service-tiles {
+    grid-template-columns: 1fr;
+  }
+
+  .service-head,
+  .service-row {
+    min-width: 0 !important;
+  }
+}
+
+/* ============================================================
+   Grid status legend refinement
+   ------------------------------------------------------------
+   Make UP/UNKNOWN/DOWN less visually noisy.
+   ============================================================ */
+
+.grid-legend {
+  justify-content: flex-end !important;
+  gap: 10px !important;
+  font-size: 11px !important;
+  color: var(--muted) !important;
+}
+
+.grid-legend .legend-title {
+  color: var(--text) !important;
+  font-weight: 850 !important;
+  margin-right: 2px !important;
+}
+
+.grid-legend span {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  white-space: nowrap !important;
+}
+
+.legend-dot {
+  width: 7px !important;
+  height: 7px !important;
+}
+
+/* ============================================================
+   Grid summary bar overflow fix when Service Details is open
+   ------------------------------------------------------------
+   Problem:
+   - Grid summary uses Total / Healthy / Down / Status legend.
+   - When Service Details opens, the main content width shrinks.
+   - The status legend can overflow and look like it is sticking out.
+
+   Fix:
+   - Let the legend wrap.
+   - Move legend to a full-width second row when DetailPanel is open.
+   - Prevent page-level horizontal overflow.
+   ============================================================ */
+
+.grid-summary-bar {
+  max-width: 100% !important;
+  overflow: hidden !important;
+}
+
+.grid-summary-item,
+.grid-legend {
+  min-width: 0 !important;
+}
+
+.grid-legend {
+  overflow: hidden !important;
+  flex-wrap: wrap !important;
+  row-gap: 6px !important;
+  line-height: 1.2 !important;
+}
+
+/* Detail panel이 닫혀 있을 때는 기존처럼 한 줄 배치 */
+.layout.no-detail .grid-summary-bar {
+  grid-template-columns: repeat(3, minmax(100px, 160px)) minmax(0, 1fr) !important;
+}
+
+/* Detail panel이 열려 있을 때는 legend를 아래 줄로 내림 */
+.layout.with-detail .grid-summary-bar {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+}
+
+.layout.with-detail .grid-legend {
+  grid-column: 1 / -1 !important;
+  justify-content: flex-start !important;
+  background: var(--surface-muted) !important;
+}
+
+/* 좁은 화면에서는 전부 한 줄씩 내려서 안전하게 표시 */
+@media (max-width: 1100px) {
+  .grid-summary-bar {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+
+  .grid-legend {
+    grid-column: 1 / -1 !important;
+    justify-content: flex-start !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .grid-summary-bar {
+    grid-template-columns: 1fr !important;
+  }
+
+  .grid-legend {
+    grid-column: auto !important;
+  }
+}
+
+/* 혹시 누적 CSS 때문에 body가 가로로 밀리는 것 방지 */
+body {
+  overflow-x: hidden !important;
+}
+
+.page,
+.card,
+.readable-grid,
+.grid-node-card {
+  max-width: 100% !important;
+}
+
+/* ============================================================
+   Service lifecycle action buttons
+   ============================================================ */
+
+.btn.success {
+  color: #166534;
+  background: var(--success-soft);
+  border-color: #bbf7d0;
+}
+
+.btn.warning {
+  color: #92400e;
+  background: var(--warning-soft);
+  border-color: #fed7aa;
+}
+
+.success-action {
+  border-color: #bbf7d0 !important;
+  background: var(--success-soft) !important;
+}
+
+.warning-action {
+  border-color: #fed7aa !important;
+  background: var(--warning-soft) !important;
+}

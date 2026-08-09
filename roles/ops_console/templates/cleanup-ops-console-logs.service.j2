@@ -1,0 +1,7 @@
+[Unit]
+Description=Cleanup Bigtop Ops Console and OliveTin logs
+Documentation=man:find(1)
+
+[Service]
+Type=oneshot
+ExecStart={{ ops_console_cleanup_script }}

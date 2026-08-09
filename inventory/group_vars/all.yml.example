@@ -233,3 +233,72 @@ yarn_nodemanager_storage_metrics_interval: "5min"
 yarn_nodemanager_storage_used_warning_percent: 80
 yarn_nodemanager_storage_used_critical_percent: 90
 yarn_nodemanager_storage_available_warning_bytes: 1073741824
+
+# Bigtop Ops Console
+ops_console_enabled: true
+ops_console_host: "worker3"
+
+# Public endpoint exposed by Nginx
+ops_console_public_port: 1337
+ops_console_public_listen_address: "0.0.0.0"
+ops_console_public_url: "http://worker3:1337"
+
+# Internal OliveTin endpoint
+ops_console_internal_port: 13370
+ops_console_internal_listen_address: "127.0.0.1:13370"
+
+# Backward-compatible port value for health checks
+ops_console_port: "{{ ops_console_public_port }}"
+
+# Actual project path on worker3
+ops_console_project_dir: "/home/bae/bigtop-cluster-ansible"
+ops_console_run_user: "bae"
+
+# OliveTin
+ops_console_config_dir: "/etc/OliveTin"
+ops_console_config_file: "/etc/OliveTin/config.yaml"
+ops_console_ctl_script: "/usr/local/bin/bigtop-opsctl"
+
+# Nginx reverse proxy
+ops_console_nginx_enabled: true
+ops_console_nginx_site_name: "bigtop-ops-console"
+ops_console_nginx_site_file: "/etc/nginx/sites-available/bigtop-ops-console"
+ops_console_nginx_site_link: "/etc/nginx/sites-enabled/bigtop-ops-console"
+ops_console_basic_auth_file: "/etc/nginx/.htpasswd-bigtop-ops-console"
+
+# Do not store a real password in Git.
+# Set the actual password hash only in inventory/group_vars/all.yml.
+ops_console_basic_auth_user: "admin"
+ops_console_basic_auth_password_hash: ""
+
+# Audit log
+ops_console_log_dir: "/var/log/bigtop-ops-console"
+ops_console_audit_log: "/var/log/bigtop-ops-console/audit.log"
+
+# Component UI URLs
+ops_console_grafana_url: "http://worker3:3000"
+ops_console_prometheus_url: "http://worker3:9090"
+ops_console_alertmanager_url: "http://worker3:9093"
+ops_console_hdfs_namenode_url: "http://master:9870"
+ops_console_yarn_rm_url: "http://master:8088"
+ops_console_yarn_ui2_url: "http://master:8088/ui2"
+ops_console_spark_history_url: "http://master:18080"
+
+# OliveTin persistent action logs
+ops_console_olivetin_results_dir: "/var/log/OliveTin/results"
+ops_console_olivetin_output_dir: "/var/log/OliveTin/output"
+
+# Ops Console log retention
+ops_console_logrotate_enabled: true
+ops_console_logrotate_file: "/etc/logrotate.d/bigtop-ops-console"
+ops_console_logrotate_frequency: "daily"
+ops_console_logrotate_rotate: 14
+ops_console_logrotate_maxsize: "50M"
+
+ops_console_cleanup_enabled: true
+ops_console_cleanup_script: "/usr/local/sbin/cleanup-ops-console-logs.sh"
+ops_console_cleanup_service: "/etc/systemd/system/cleanup-ops-console-logs.service"
+ops_console_cleanup_timer: "/etc/systemd/system/cleanup-ops-console-logs.timer"
+ops_console_cleanup_timer_name: "cleanup-ops-console-logs.timer"
+ops_console_cleanup_retention_days: 30
+ops_console_cleanup_timer_calendar: "daily"

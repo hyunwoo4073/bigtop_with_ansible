@@ -1,0 +1,6 @@
+---
+- name: Install and configure Bigtop Web Console
+  hosts: ops
+  gather_facts: true
+  roles:
+    - web_console
