@@ -1,18 +1,32 @@
+import json
 import os
 import shlex
+import shutil
 import subprocess
 from datetime import datetime
+from html import escape
 from pathlib import Path
 from typing import Dict, List
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 
 PROJECT_DIR = os.environ.get("PROJECT_DIR", "{{ web_console_project_root | default(playbook_dir ~ '/..') }}")
 OPSCTL = os.environ.get("OPSCTL", "/usr/local/bin/bigtop-opsctl")
 FRONTEND_DIST_DIR = os.environ.get("FRONTEND_DIST_DIR", "/opt/bigtop-web-console/frontend-src/dist")
+
+ACTION_AUDIT_LOG = os.environ.get(
+    "ACTION_AUDIT_LOG",
+    "{{ web_console_audit_log_file | default('/var/log/bigtop-web-console/actions.log') }}",
+)
+ACTION_AUDIT_LOG_MAX_ITEMS = int(
+    os.environ.get(
+        "ACTION_AUDIT_LOG_MAX_ITEMS",
+        "{{ web_console_audit_log_max_items | default(200) }}",
+    )
+)
 
 REQUEST_TIMEOUT = 60
 STATUS_TIMEOUT = 8
@@ -40,6 +54,75 @@ COMPONENTS = [
 STOP_PROTECTED_SERVICES = {
     "bigtop-web-console",
     "nginx",
+}
+
+RUNBOOKS = {
+    "default": {
+        "title": "Monitoring alert response",
+        "path": "docs/runbooks/monitoring-alert-response.md",
+        "url": "/runbooks/monitoring-alert-response.md",
+        "reason": "General service or monitoring alert response",
+    },
+    "hadoop-hdfs-namenode": {
+        "title": "Cluster reboot and HDFS recovery",
+        "path": "docs/runbooks/cluster-reboot-recovery.md",
+        "url": "/runbooks/cluster-reboot-recovery.md",
+        "reason": "NameNode or HDFS core service issue",
+    },
+    "hadoop-hdfs-datanode": {
+        "title": "Cluster reboot and HDFS recovery",
+        "path": "docs/runbooks/cluster-reboot-recovery.md",
+        "url": "/runbooks/cluster-reboot-recovery.md",
+        "reason": "DataNode issue or HDFS service recovery",
+    },
+    "hadoop-yarn-resourcemanager": {
+        "title": "YARN and Spark application failure",
+        "path": "docs/runbooks/yarn-spark-application-failure.md",
+        "url": "/runbooks/yarn-spark-application-failure.md",
+        "reason": "ResourceManager or YARN scheduling issue",
+    },
+    "hadoop-yarn-nodemanager": {
+        "title": "NodeManager storage pressure",
+        "path": "docs/runbooks/nodemanager-storage-pressure.md",
+        "url": "/runbooks/nodemanager-storage-pressure.md",
+        "reason": "NodeManager issue, local directory issue, or container log/storage pressure",
+    },
+    "spark-history-server": {
+        "title": "Spark history and logs",
+        "path": "docs/runbooks/spark-history-and-logs.md",
+        "url": "/runbooks/spark-history-and-logs.md",
+        "reason": "Spark History Server or Spark event log issue",
+    },
+    "prometheus": {
+        "title": "Monitoring alert response",
+        "path": "docs/runbooks/monitoring-alert-response.md",
+        "url": "/runbooks/monitoring-alert-response.md",
+        "reason": "Prometheus or monitoring target issue",
+    },
+    "grafana-server": {
+        "title": "Monitoring alert response",
+        "path": "docs/runbooks/monitoring-alert-response.md",
+        "url": "/runbooks/monitoring-alert-response.md",
+        "reason": "Grafana dashboard or provisioning issue",
+    },
+    "prometheus-alertmanager": {
+        "title": "Monitoring alert response",
+        "path": "docs/runbooks/monitoring-alert-response.md",
+        "url": "/runbooks/monitoring-alert-response.md",
+        "reason": "Alertmanager or receiver issue",
+    },
+    "bigtop-web-console": {
+        "title": "Web Console operations",
+        "path": "README.md",
+        "url": "/runbooks/README.md",
+        "reason": "Web Console self-check, audit log, or proxy issue",
+    },
+    "nginx": {
+        "title": "Web Console operations",
+        "path": "README.md",
+        "url": "/runbooks/README.md",
+        "reason": "Nginx reverse proxy or Basic Auth issue",
+    },
 }
 
 
@@ -70,7 +153,79 @@ def find_component(component_id_value: str) -> Dict[str, str]:
     for component in COMPONENTS:
         if component_id(component) == component_id_value:
             return component
+
     raise HTTPException(status_code=404, detail=f"Unknown component: {component_id_value}")
+
+
+def runbook_for_issue(row: Dict) -> Dict:
+    return RUNBOOKS.get(row.get("service"), RUNBOOKS["default"])
+
+
+def compact_text(value: str, limit: int = 4000) -> str:
+    if not value:
+        return ""
+
+    value = str(value)
+    if len(value) <= limit:
+        return value
+
+    return value[:limit] + "\n...[truncated]"
+
+
+def append_action_audit(record: Dict) -> None:
+    audit_record = {
+        "recorded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        **record,
+    }
+
+    try:
+        audit_path = Path(ACTION_AUDIT_LOG)
+        audit_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with audit_path.open("a", encoding="utf-8") as file:
+            file.write(json.dumps(audit_record, ensure_ascii=False, default=str) + "\n")
+    except Exception as exc:
+        print(f"[audit-log-error] {exc}", flush=True)
+
+
+def read_action_audit(limit: int = 50) -> Dict:
+    limit = max(1, min(int(limit), ACTION_AUDIT_LOG_MAX_ITEMS))
+    audit_path = Path(ACTION_AUDIT_LOG)
+
+    if not audit_path.exists():
+        return {
+            "path": str(audit_path),
+            "count": 0,
+            "items": [],
+        }
+
+    try:
+        lines = audit_path.read_text(encoding="utf-8").splitlines()
+    except Exception as exc:
+        return {
+            "path": str(audit_path),
+            "count": 0,
+            "items": [],
+            "error": str(exc),
+        }
+
+    items = []
+    for line in lines[-limit:]:
+        if not line.strip():
+            continue
+
+        try:
+            items.append(json.loads(line))
+        except json.JSONDecodeError:
+            items.append({"raw": line, "parse_error": True})
+
+    items.reverse()
+
+    return {
+        "path": str(audit_path),
+        "count": len(items),
+        "items": items,
+    }
 
 
 def parse_systemd_output(output: str) -> Dict[str, str]:
@@ -190,6 +345,7 @@ def build_status() -> Dict:
             "component": row["component"],
             "service": row["service"],
             "host": row["host"],
+            "runbook": runbook_for_issue(row),
         }
         for row in components
         if row["status"] != "UP"
@@ -220,6 +376,218 @@ def build_status() -> Dict:
     }
 
 
+def build_self_check() -> Dict:
+    frontend_path = Path(FRONTEND_DIST_DIR)
+    project_path = Path(PROJECT_DIR)
+    opsctl_path = Path(OPSCTL)
+    audit_log_path = Path(ACTION_AUDIT_LOG)
+    audit_log_dir = audit_log_path.parent
+    logrotate_path = Path("/etc/logrotate.d/bigtop-web-console-actions")
+
+    checks = {
+        "project_dir_exists": project_path.exists(),
+        "project_dir_is_dir": project_path.is_dir(),
+        "frontend_dist_exists": frontend_path.exists(),
+        "frontend_dist_is_dir": frontend_path.is_dir(),
+        "opsctl_exists": opsctl_path.exists(),
+        "ansible_available": shutil.which("ansible") is not None,
+        "audit_log_dir_exists": audit_log_dir.exists(),
+        "audit_log_dir_writable": audit_log_dir.exists() and os.access(str(audit_log_dir), os.W_OK),
+        "audit_log_file_exists": audit_log_path.exists(),
+        "audit_log_file_writable": audit_log_path.exists() and os.access(str(audit_log_path), os.W_OK),
+        "logrotate_config_exists": logrotate_path.exists(),
+    }
+
+    warnings = []
+
+    if not checks["project_dir_exists"]:
+        warnings.append(f"PROJECT_DIR does not exist: {PROJECT_DIR}")
+
+    if not checks["frontend_dist_exists"]:
+        warnings.append(f"Frontend dist directory does not exist: {FRONTEND_DIST_DIR}")
+
+    if not checks["ansible_available"]:
+        warnings.append("ansible command is not available in service PATH")
+
+    if not checks["audit_log_dir_exists"]:
+        warnings.append(f"Audit log directory does not exist: {audit_log_dir}")
+
+    if checks["audit_log_dir_exists"] and not checks["audit_log_dir_writable"]:
+        warnings.append(f"Audit log directory is not writable by Web Console process: {audit_log_dir}")
+
+    if checks["audit_log_file_exists"] and not checks["audit_log_file_writable"]:
+        warnings.append(f"Audit log file is not writable by Web Console process: {audit_log_path}")
+
+    if not checks["logrotate_config_exists"]:
+        warnings.append(f"Logrotate config does not exist: {logrotate_path}")
+
+    return {
+        "status": "ok" if not warnings else "warning",
+        "service": "bigtop-web-console",
+        "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "paths": {
+            "project_dir": PROJECT_DIR,
+            "frontend_dist_dir": FRONTEND_DIST_DIR,
+            "opsctl": OPSCTL,
+            "audit_log": str(audit_log_path),
+            "audit_log_dir": str(audit_log_dir),
+            "logrotate_config": str(logrotate_path),
+        },
+        "checks": checks,
+        "warnings": warnings,
+    }
+
+
+def render_action_history_html(data: Dict) -> str:
+    rows = []
+
+    for item in data.get("items", []):
+        ok = item.get("ok")
+        ok_class = "ok" if ok else "fail"
+        blocked = "BLOCKED" if item.get("blocked") else ""
+        output = item.get("stderr_summary") or item.get("stdout_summary") or ""
+
+        rows.append(
+            "<tr>"
+            f"<td>{escape(str(item.get('recorded_at', '-')))}</td>"
+            f"<td>{escape(str(item.get('host', '-')))}</td>"
+            f"<td>{escape(str(item.get('group', '-')))}</td>"
+            f"<td>{escape(str(item.get('component', '-')))}</td>"
+            f"<td>{escape(str(item.get('service', '-')))}</td>"
+            f"<td>{escape(str(item.get('action', '-')))}</td>"
+            f"<td class='{ok_class}'>{escape(str(ok))}</td>"
+            f"<td>{escape(str(item.get('returncode', '-')))}</td>"
+            f"<td>{escape(blocked)}</td>"
+            f"<td><pre>{escape(str(output))}</pre></td>"
+            "</tr>"
+        )
+
+    if not rows:
+        rows.append("<tr><td colspan='10' class='empty'>No action history yet.</td></tr>")
+
+    rows_html = "".join(rows)
+    path = escape(str(data.get("path", "-")))
+    count = escape(str(data.get("count", 0)))
+
+    return (
+        "<!doctype html>"
+        "<html lang='ko'>"
+        "<head>"
+        "<meta charset='utf-8'>"
+        "<meta http-equiv='refresh' content='15'>"
+        "<title>Bigtop Web Console - Action History</title>"
+        "<style>"
+        "body{margin:0;padding:28px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;background:#f8fafc;color:#0f172a;}"
+        ".header{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-bottom:20px;}"
+        "h1{margin:0;font-size:24px;}"
+        ".meta{color:#64748b;font-size:13px;margin-top:6px;}"
+        ".links a{color:#2563eb;text-decoration:none;margin-left:12px;font-size:13px;font-weight:700;}"
+        ".card{background:white;border:1px solid #e2e8f0;border-radius:16px;overflow:auto;box-shadow:0 10px 30px rgba(15,23,42,.06);}"
+        "table{width:100%;border-collapse:collapse;font-size:13px;}"
+        "th{text-align:left;background:#f1f5f9;color:#334155;padding:12px;border-bottom:1px solid #e2e8f0;white-space:nowrap;}"
+        "td{padding:11px 12px;border-bottom:1px solid #eef2f7;vertical-align:top;}"
+        "tr:hover{background:#f8fafc;}"
+        ".ok{color:#15803d;font-weight:800;}"
+        ".fail{color:#b91c1c;font-weight:800;}"
+        ".empty{text-align:center;color:#64748b;padding:32px;}"
+        "pre{max-width:360px;max-height:120px;overflow:auto;margin:0;white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;color:#475569;}"
+        "</style>"
+        "</head>"
+        "<body>"
+        "<div class='header'>"
+        "<div>"
+        "<h1>Bigtop Web Console - Action History</h1>"
+        f"<div class='meta'>path: {path} / count: {count} / auto refresh: 15s</div>"
+        "</div>"
+        "<div class='links'>"
+        "<a href='/'>Web Console</a>"
+        "<a href='/api/actions/history?limit=50'>JSON</a>"
+        "<a href='/runbooks'>Runbooks</a>"
+        "</div>"
+        "</div>"
+        "<div class='card'>"
+        "<table>"
+        "<thead>"
+        "<tr>"
+        "<th>Time</th><th>Host</th><th>Group</th><th>Component</th><th>Service</th>"
+        "<th>Action</th><th>OK</th><th>RC</th><th>Blocked</th><th>Output</th>"
+        "</tr>"
+        "</thead>"
+        f"<tbody>{rows_html}</tbody>"
+        "</table>"
+        "</div>"
+        "</body>"
+        "</html>"
+    )
+
+
+def render_runbooks_html(data: Dict) -> str:
+    rows = []
+
+    for item in data.get("items", []):
+        url = escape(str(item.get("url", "")))
+        title = escape(str(item.get("title", "")))
+        path = escape(str(item.get("path", "")))
+        reason = escape(str(item.get("reason", "")))
+
+        rows.append(
+            "<tr>"
+            f"<td><a href='{url}'>{title}</a></td>"
+            f"<td>{path}</td>"
+            f"<td>{reason}</td>"
+            "</tr>"
+        )
+
+    if not rows:
+        rows.append("<tr><td colspan='3' class='empty'>No runbooks configured.</td></tr>")
+
+    rows_html = "".join(rows)
+    count = escape(str(data.get("count", 0)))
+
+    return (
+        "<!doctype html>"
+        "<html lang='ko'>"
+        "<head>"
+        "<meta charset='utf-8'>"
+        "<title>Bigtop Web Console - Runbooks</title>"
+        "<style>"
+        "body{margin:0;padding:28px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;background:#f8fafc;color:#0f172a;}"
+        ".header{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-bottom:20px;}"
+        "h1{margin:0;font-size:24px;}"
+        ".meta{color:#64748b;font-size:13px;margin-top:6px;}"
+        ".links a{color:#2563eb;text-decoration:none;margin-left:12px;font-size:13px;font-weight:700;}"
+        ".card{background:white;border:1px solid #e2e8f0;border-radius:16px;overflow:auto;box-shadow:0 10px 30px rgba(15,23,42,.06);}"
+        "table{width:100%;border-collapse:collapse;font-size:13px;}"
+        "th{text-align:left;background:#f1f5f9;color:#334155;padding:12px;border-bottom:1px solid #e2e8f0;white-space:nowrap;}"
+        "td{padding:11px 12px;border-bottom:1px solid #eef2f7;vertical-align:top;}"
+        "a{color:#2563eb;text-decoration:none;font-weight:800;}"
+        "tr:hover{background:#f8fafc;}"
+        ".empty{text-align:center;color:#64748b;padding:32px;}"
+        "</style>"
+        "</head>"
+        "<body>"
+        "<div class='header'>"
+        "<div>"
+        "<h1>Bigtop Web Console - Runbooks</h1>"
+        f"<div class='meta'>count: {count}</div>"
+        "</div>"
+        "<div class='links'>"
+        "<a href='/'>Web Console</a>"
+        "<a href='/api/runbooks'>JSON</a>"
+        "<a href='/actions/history'>Action History</a>"
+        "</div>"
+        "</div>"
+        "<div class='card'>"
+        "<table>"
+        "<thead><tr><th>Runbook</th><th>Path</th><th>Reason</th></tr></thead>"
+        f"<tbody>{rows_html}</tbody>"
+        "</table>"
+        "</div>"
+        "</body>"
+        "</html>"
+    )
+
+
 @app.get("/api/health")
 def health():
     return {"status": "ok", "service": "bigtop-web-console"}
@@ -228,6 +596,11 @@ def health():
 @app.get("/api/status")
 def api_status():
     return build_status()
+
+
+@app.get("/api/self-check")
+def api_self_check():
+    return build_self_check()
 
 
 @app.get("/api/component/{component_id_value:path}/logs", response_class=PlainTextResponse)
@@ -255,6 +628,21 @@ def run_component_lifecycle(component_id_value: str, action: str) -> Dict:
     host = component["host"]
 
     if action == "stop" and service in STOP_PROTECTED_SERVICES:
+        append_action_audit({
+            "action": action,
+            "host": host,
+            "service": service,
+            "component_id": component_id(component),
+            "component": component.get("component"),
+            "group": component.get("group"),
+            "blocked": True,
+            "ok": False,
+            "returncode": None,
+            "reason": "protected_stop",
+            "stdout_summary": "",
+            "stderr_summary": f"Stop is blocked for protected service: {service}",
+        })
+
         raise HTTPException(
             status_code=400,
             detail=f"Stop is blocked for protected service: {service}",
@@ -270,6 +658,20 @@ def run_component_lifecycle(component_id_value: str, action: str) -> Dict:
     )
 
     result = ansible_shell(host, command, become=True, timeout=REQUEST_TIMEOUT)
+
+    append_action_audit({
+        "action": action,
+        "host": host,
+        "service": service,
+        "component_id": component_id(component),
+        "component": component.get("component"),
+        "group": component.get("group"),
+        "blocked": False,
+        "ok": result.returncode == 0,
+        "returncode": result.returncode,
+        "stdout_summary": compact_text(result.stdout),
+        "stderr_summary": compact_text(result.stderr),
+    })
 
     return {
         "component": component,
@@ -314,6 +716,69 @@ def api_incident_summary():
         "stdout": result.stdout,
         "stderr": result.stderr,
     }
+
+
+@app.get("/api/actions/history")
+def api_action_history(limit: int = 50):
+    return read_action_audit(limit=limit)
+
+
+@app.get("/actions/history", response_class=HTMLResponse)
+def api_action_history_page(limit: int = 50):
+    return render_action_history_html(read_action_audit(limit=limit))
+
+
+@app.get("/api/runbooks")
+def api_runbooks():
+    items = []
+    seen = set()
+
+    for service, runbook in RUNBOOKS.items():
+        if service == "default":
+            continue
+
+        key = (runbook["title"], runbook["path"])
+        if key in seen:
+            continue
+
+        seen.add(key)
+        items.append({
+            "title": runbook["title"],
+            "path": runbook["path"],
+            "url": runbook["url"],
+            "reason": runbook["reason"],
+        })
+
+    return {
+        "count": len(items),
+        "items": items,
+    }
+
+
+@app.get("/runbooks", response_class=HTMLResponse)
+def api_runbooks_page():
+    return render_runbooks_html(api_runbooks())
+
+
+@app.get("/runbooks/{runbook_name:path}", response_class=PlainTextResponse)
+def api_runbook_file(runbook_name: str):
+    safe_name = runbook_name.strip("/")
+
+    if safe_name == "README.md":
+        candidate = Path(PROJECT_DIR) / "README.md"
+    else:
+        candidate = Path(PROJECT_DIR) / "docs" / "runbooks" / safe_name
+
+    root = Path(PROJECT_DIR).resolve()
+    resolved = candidate.resolve()
+
+    if not str(resolved).startswith(str(root)):
+        raise HTTPException(status_code=400, detail="Invalid runbook path")
+
+    if not resolved.exists() or not resolved.is_file():
+        raise HTTPException(status_code=404, detail=f"Runbook not found: {safe_name}")
+
+    return resolved.read_text(encoding="utf-8")
 
 
 frontend_path = Path(FRONTEND_DIST_DIR)

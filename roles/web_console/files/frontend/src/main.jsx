@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
+import './ops-tools.js'
+import './ops-tools.css'
 
 const API = {
   async serviceAction(componentId, action) {
