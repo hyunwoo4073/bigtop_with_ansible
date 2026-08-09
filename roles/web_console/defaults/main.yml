@@ -34,7 +34,20 @@ web_console_request_timeout_seconds: 60
 web_console_status_timeout_seconds: 8
 web_console_journal_lines: 160
 
-
 # Repository root used by the Web Console backend when running Ansible commands.
 # playbook_dir is usually <repo>/playbooks, so ../ points to the repository root.
 web_console_project_root: "{{ playbook_dir }}/.."
+
+# Web Console action audit log
+web_console_audit_log_dir: "/var/log/bigtop-web-console"
+web_console_audit_log_file: "{{ web_console_audit_log_dir }}/actions.log"
+web_console_audit_log_max_items: 200
+
+# Web Console action audit log
+web_console_audit_log_owner: "bae"
+web_console_audit_log_group: "bae"
+
+# Web Console action audit log rotation
+web_console_audit_log_rotate_count: 14
+web_console_audit_log_rotate_size: "10M"
+web_console_audit_log_rotate_config: "/etc/logrotate.d/bigtop-web-console-actions"

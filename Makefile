@@ -236,3 +236,50 @@ apply-ops:
 > $(ANSIBLE_PLAYBOOK) $(PLAYBOOK_DIR)/26-yarn-nodemanager-storage.yml
 > $(ANSIBLE_PLAYBOOK) $(PLAYBOOK_DIR)/27-yarn-nodemanager-storage-metrics.yml
 > $(ANSIBLE_PLAYBOOK) $(PLAYBOOK_DIR)/20-cluster-health-check.yml
+
+web-console-actions:
+> .venv/bin/ansible ops -b -m shell -a "tail -n 50 /var/log/bigtop-web-console/actions.log || true"
+
+web-console-actions-json:
+> .venv/bin/ansible ops -m shell -a "curl -s 'http://127.0.0.1:18090/api/actions/history?limit=20' | python3 -m json.tool"
+
+web-console-actions-page:
+> @echo "Open: http://worker3:1337/actions/history"
+> .venv/bin/ansible ops -m shell -a "curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18090/actions/history"
+
+web-console-logrotate-check:
+> .venv/bin/ansible ops -b -m shell -a "test -f /etc/logrotate.d/bigtop-web-console-actions && logrotate -d /etc/logrotate.d/bigtop-web-console-actions"
+
+web-console-self-check:
+> .venv/bin/ansible ops -m shell -a "curl -s http://127.0.0.1:18090/api/self-check | python3 -m json.tool"
+
+web-console-full-check:
+> bash scripts/check_web_console_full.sh
+
+wcf: web-console-full-check
+
+
+web-console-runbooks:
+> @echo "Open: http://worker3:1337/runbooks"
+> .venv/bin/ansible ops -m shell -a "curl -s http://127.0.0.1:18090/api/runbooks | python3 -m json.tool"
+
+web-console-runbooks-page:
+> .venv/bin/ansible ops -m shell -a "curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18090/runbooks"
+
+
+web-console-ui-check:
+> .venv/bin/ansible ops -m shell -a "curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18090/"
+> .venv/bin/ansible ops -m shell -a "curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18090/actions/history"
+> .venv/bin/ansible ops -m shell -a "curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18090/runbooks"
+> @echo "Open: http://worker3:1337"
+
+
+web-console-ui-clean-check:
+> .venv/bin/ansible ops -m shell -a "curl -s http://127.0.0.1:18090/ | grep -E 'ops-tools|assets' | head -20 || true"
+> .venv/bin/ansible ops -m shell -a "curl -s http://127.0.0.1:18090/api/self-check | python3 -m json.tool"
+> @echo "Open: http://worker3:1337"
+
+
+web-console-audit-permission-check:
+> .venv/bin/ansible ops -b -m shell -a "systemctl show bigtop-web-console --property=User --property=Group --value; ps -eo user,group,args | grep '[u]vicorn app:app' || true; ls -ld /var/log/bigtop-web-console; ls -lh /var/log/bigtop-web-console/actions.log"
+> .venv/bin/ansible ops -m shell -a "curl -s http://127.0.0.1:18090/api/self-check | python3 -m json.tool"

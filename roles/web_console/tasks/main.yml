@@ -84,6 +84,43 @@
   become_user: "{{ web_console_run_user }}"
   when: web_console_enabled | bool
 
+- name: Ensure Bigtop Web Console audit log directory exists
+  become: true
+  ansible.builtin.file:
+    path: "{{ web_console_audit_log_dir }}"
+    state: directory
+    owner: "{{ web_console_audit_log_owner | default(ansible_user_id) }}"
+    group: "{{ web_console_audit_log_group | default(web_console_audit_log_owner | default(ansible_user_id)) }}"
+    mode: "0755"
+  when: web_console_enabled | bool
+
+- name: Ensure Bigtop Web Console audit log file exists
+  become: true
+  ansible.builtin.file:
+    path: "{{ web_console_audit_log_file }}"
+    state: touch
+    owner: "{{ web_console_audit_log_owner | default(ansible_user_id) }}"
+    group: "{{ web_console_audit_log_group | default(web_console_audit_log_owner | default(ansible_user_id)) }}"
+    mode: "0644"
+  when: web_console_enabled | bool
+
+- name: Ensure logrotate package is installed for Bigtop Web Console audit log
+  become: true
+  ansible.builtin.package:
+    name: logrotate
+    state: present
+  when: web_console_enabled | bool
+
+- name: Deploy Bigtop Web Console audit logrotate config
+  become: true
+  ansible.builtin.template:
+    src: bigtop-web-console-actions.logrotate.j2
+    dest: "{{ web_console_audit_log_rotate_config | default('/etc/logrotate.d/bigtop-web-console-actions') }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: web_console_enabled | bool
+
 - name: Deploy Bigtop Web Console app
   ansible.builtin.template:
     src: app.py.j2

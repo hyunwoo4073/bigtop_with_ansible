@@ -1,0 +1,191 @@
+#bigtop-ops-tools {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 9999;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.ops-tools-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 16px;
+  border: 1px solid rgba(148, 163, 184, 0.42);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.94);
+  color: #ffffff;
+  font-weight: 850;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.28);
+  cursor: pointer;
+}
+
+.ops-tools-toggle:hover {
+  transform: translateY(-1px);
+}
+
+.ops-tools-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #22c55e;
+  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.18);
+}
+
+#bigtop-ops-tools.has-warning .ops-tools-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.18);
+}
+
+.ops-tools-panel {
+  position: absolute;
+  right: 0;
+  bottom: 52px;
+  width: 310px;
+  overflow: hidden;
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 22px 60px rgba(15, 23, 42, 0.22);
+  color: #0f172a;
+}
+
+.ops-tools-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 15px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.ops-tools-header strong {
+  display: block;
+  font-size: 14px;
+}
+
+.ops-tools-header small {
+  display: block;
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ops-tools-status {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.ops-tools-status.ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.ops-tools-status.warning {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.ops-tools-status.danger {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.ops-tools-section {
+  padding: 10px 8px 8px;
+}
+
+.ops-tools-section + .ops-tools-section {
+  border-top: 1px solid #e2e8f0;
+}
+
+.ops-tools-section-title {
+  padding: 0 7px 6px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ops-tools-links {
+  display: grid;
+  gap: 2px;
+}
+
+.ops-tools-links a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 38px;
+  padding: 0 11px;
+  border-radius: 12px;
+  color: #1e293b;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.ops-tools-links a:hover {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.ops-tools-summary {
+  margin: 0 7px 4px;
+  padding: 10px 11px;
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #475569;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.ops-tools-summary.ok {
+  color: #166534;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.ops-tools-summary.warning {
+  color: #92400e;
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.ops-tools-summary.danger {
+  color: #991b1b;
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.ops-tools-hint {
+  padding: 11px 14px 13px;
+  border-top: 1px solid #e2e8f0;
+  color: #64748b;
+  background: #f8fafc;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+@media (max-width: 720px) {
+  #bigtop-ops-tools {
+    right: 14px;
+    bottom: 14px;
+  }
+
+  .ops-tools-panel {
+    width: calc(100vw - 28px);
+  }
+}

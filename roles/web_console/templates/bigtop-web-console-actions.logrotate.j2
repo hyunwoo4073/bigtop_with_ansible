@@ -1,0 +1,11 @@
+{{ web_console_audit_log_file | default('/var/log/bigtop-web-console/actions.log') }} {
+    daily
+    rotate {{ web_console_audit_log_rotate_count | default(14) }}
+    size {{ web_console_audit_log_rotate_size | default('10M') }}
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    create 0644 {{ web_console_audit_log_owner | default(ansible_user_id) }} {{ web_console_audit_log_group | default(web_console_audit_log_owner | default(ansible_user_id)) }}
+}
