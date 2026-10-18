@@ -3,6 +3,8 @@ import os
 import shlex
 import shutil
 import subprocess
+import urllib.request
+import time
 from datetime import datetime
 from html import escape
 from pathlib import Path
@@ -598,6 +600,96 @@ def api_status():
     return build_status()
 
 
+# Read-only overview only: this does NOT execute Hadoop CLI, write HDFS files,
+# run YARN jobs, or change service states. Fixed internal endpoints prevent SSRF.
+FUNC_EXPECTED_DATANODES = 2
+FUNC_EXPECTED_NODEMANAGERS = 2
+
+
+def _functional_json(url: str) -> Dict:
+    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    with urllib.request.urlopen(request, timeout=5) as response:
+        return json.loads(response.read(1024 * 1024).decode("utf-8"))
+
+
+def _functional_count(source: Dict, name: str) -> int:
+    if name not in source or isinstance(source[name], bool):
+        raise ValueError(f"Metric missing or invalid: {name}")
+    value = int(source[name])
+    if value < 0:
+        raise ValueError(f"Negative metric: {name}")
+    return value
+
+
+def _functional_hdfs() -> Dict:
+    try:
+        data = _functional_json(
+            "http://master:9870/jmx?qry=Hadoop%3Aservice%3DNameNode%2Cname%3DFSNamesystemState"
+        )
+        bean = next(
+            item for item in data.get("beans", [])
+            if isinstance(item, dict) and "NumLiveDataNodes" in item
+        )
+        live = _functional_count(bean, "NumLiveDataNodes")
+        dead = _functional_count(bean, "NumDeadDataNodes")
+        status = "HEALTHY" if live >= FUNC_EXPECTED_DATANODES and dead == 0 else "DEGRADED"
+        return {
+            "status": status,
+            "live_datanodes": live,
+            "dead_datanodes": dead,
+            "expected_live": FUNC_EXPECTED_DATANODES,
+            "source": "NameNode JMX",
+            "error": "",
+        }
+    except Exception as exc:
+        return {"status": "UNKNOWN", "source": "NameNode JMX", "error": str(exc)[:240]}
+
+
+def _functional_yarn() -> Dict:
+    try:
+        data = _functional_json("http://master:8088/ws/v1/cluster/metrics")
+        metrics = data["clusterMetrics"]
+        active = _functional_count(metrics, "activeNodes")
+        lost = _functional_count(metrics, "lostNodes")
+        unhealthy = _functional_count(metrics, "unhealthyNodes")
+        status = (
+            "HEALTHY" if active >= FUNC_EXPECTED_NODEMANAGERS and lost == 0 and unhealthy == 0
+            else "DEGRADED"
+        )
+        return {
+            "status": status,
+            "active_nodemanagers": active,
+            "lost_nodemanagers": lost,
+            "unhealthy_nodemanagers": unhealthy,
+            "expected_active": FUNC_EXPECTED_NODEMANAGERS,
+            "source": "YARN ResourceManager REST",
+            "error": "",
+        }
+    except Exception as exc:
+        return {"status": "UNKNOWN", "source": "YARN ResourceManager REST", "error": str(exc)[:240]}
+
+
+def build_functional_health() -> Dict:
+    hdfs = _functional_hdfs()
+    yarn = _functional_yarn()
+    states = [hdfs["status"], yarn["status"]]
+    overall = "UNKNOWN" if "UNKNOWN" in states else (
+        "DEGRADED" if "DEGRADED" in states else "HEALTHY"
+    )
+    return {
+        "checked_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "status": overall,
+        "hdfs": hdfs,
+        "yarn": yarn,
+        "note": "JMX/REST node registration metrics only; not HDFS I/O or YARN job smoke testing",
+    }
+
+
+@app.get("/api/functional-health")
+def api_functional_health():
+    return build_functional_health()
+
+
 @app.get("/api/self-check")
 def api_self_check():
     return build_self_check()
@@ -619,6 +711,62 @@ def api_component_logs(component_id_value: str):
     return output or "(no logs)"
 
 
+def verify_lifecycle_state(host: str, service: str, expected_state: str) -> Dict:
+    """Best-effort, bounded post-action systemd verification via Ansible."""
+    attempts = 3
+    interval_seconds = 2
+    command = (
+        f"systemctl show {shlex.quote(service)} "
+        "--property=ActiveState --property=SubState "
+        "--property=MainPID --property=LoadState --no-page"
+    )
+
+    last_state = "unknown"
+    last_error = ""
+    checked = False
+
+    for attempt in range(1, attempts + 1):
+        if attempt > 1:
+            time.sleep(interval_seconds)
+
+        try:
+            result = ansible_shell(host, command, become=True, timeout=STATUS_TIMEOUT)
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            last_error = compact_text(str(exc), 400)
+            continue
+
+        if result.returncode != 0 or "ActiveState=" not in (result.stdout or ""):
+            last_error = compact_text((result.stderr or result.stdout or "systemctl show returned incomplete data"), 400)
+            continue
+
+        state = parse_systemd_output(result.stdout)
+        last_state = state["active"]
+        checked = True
+        load_state = state["load"]
+        if load_state != "loaded":
+            last_error = f"Unexpected unit LoadState: {load_state}"
+            continue
+
+        if last_state == expected_state:
+            return {
+                "verification_ok": True,
+                "verification_status": "verified",
+                "observed_state": last_state,
+                "verification_attempts": attempt,
+                "verification_error": "",
+            }
+
+        last_error = f"Expected ActiveState={expected_state}, observed={last_state}"
+
+    return {
+        "verification_ok": False,
+        "verification_status": "mismatch" if checked else "unavailable",
+        "observed_state": last_state,
+        "verification_attempts": attempts,
+        "verification_error": last_error or "No verifiable systemd state received",
+    }
+
+
 def run_component_lifecycle(component_id_value: str, action: str) -> Dict:
     if action not in {"start", "stop", "restart"}:
         raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
@@ -626,60 +774,86 @@ def run_component_lifecycle(component_id_value: str, action: str) -> Dict:
     component = find_component(component_id_value)
     service = component["service"]
     host = component["host"]
+    expected_state = "inactive" if action == "stop" else "active"
 
-    if action == "stop" and service in STOP_PROTECTED_SERVICES:
-        append_action_audit({
-            "action": action,
-            "host": host,
-            "service": service,
-            "component_id": component_id(component),
-            "component": component.get("component"),
-            "group": component.get("group"),
-            "blocked": True,
-            "ok": False,
-            "returncode": None,
-            "reason": "protected_stop",
-            "stdout_summary": "",
-            "stderr_summary": f"Stop is blocked for protected service: {service}",
-        })
-
-        raise HTTPException(
-            status_code=400,
-            detail=f"Stop is blocked for protected service: {service}",
-        )
-
-    quoted_service = shlex.quote(service)
-
-    command = (
-        f"systemctl {action} {quoted_service}; "
-        "rc=$?; "
-        f"systemctl is-active {quoted_service}; "
-        "exit $rc"
-    )
-
-    result = ansible_shell(host, command, become=True, timeout=REQUEST_TIMEOUT)
-
-    append_action_audit({
+    base_record = {
         "action": action,
         "host": host,
         "service": service,
         "component_id": component_id(component),
         "component": component.get("component"),
         "group": component.get("group"),
+    }
+
+    if action == "stop" and service in STOP_PROTECTED_SERVICES:
+        append_action_audit({
+            **base_record,
+            "blocked": True,
+            "ok": False,
+            "command_ok": False,
+            "verification_ok": False,
+            "verification_status": "not_run",
+            "expected_state": expected_state,
+            "observed_state": "unknown",
+            "verification_attempts": 0,
+            "returncode": None,
+            "reason": "protected_stop",
+            "stdout_summary": "",
+            "stderr_summary": f"Stop is blocked for protected service: {service}",
+        })
+        raise HTTPException(status_code=400, detail=f"Stop is blocked for protected service: {service}")
+
+    command = f"systemctl {action} {shlex.quote(service)}"
+    try:
+        result = ansible_shell(host, command, become=True, timeout=REQUEST_TIMEOUT)
+        command_ok = result.returncode == 0
+        returncode = result.returncode
+        stdout = result.stdout or ""
+        stderr = result.stderr or ""
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        command_ok = False
+        returncode = None
+        stdout = ""
+        stderr = compact_text(str(exc))
+
+    verification = {
+        "verification_ok": False,
+        "verification_status": "not_run",
+        "observed_state": "unknown",
+        "verification_attempts": 0,
+        "verification_error": "Command failed or timed out; state verification was not attempted",
+    }
+    if command_ok:
+        verification = verify_lifecycle_state(host, service, expected_state)
+
+    ok = command_ok and verification["verification_ok"]
+    reason = "verified" if ok else (
+        "command_failed" if not command_ok else verification["verification_status"]
+    )
+    audit = {
+        **base_record,
         "blocked": False,
-        "ok": result.returncode == 0,
-        "returncode": result.returncode,
-        "stdout_summary": compact_text(result.stdout),
-        "stderr_summary": compact_text(result.stderr),
-    })
+        "ok": ok,
+        "command_ok": command_ok,
+        "expected_state": expected_state,
+        **verification,
+        "returncode": returncode,
+        "reason": reason,
+        "stdout_summary": compact_text(stdout),
+        "stderr_summary": compact_text(stderr),
+    }
+    append_action_audit(audit)
 
     return {
         "component": component,
         "action": action,
-        "returncode": result.returncode,
-        "stdout": result.stdout,
-        "stderr": result.stderr,
-        "ok": result.returncode == 0,
+        "returncode": returncode,
+        "stdout": stdout,
+        "stderr": stderr,
+        "ok": ok,
+        "command_ok": command_ok,
+        "expected_state": expected_state,
+        **verification,
     }
 
 

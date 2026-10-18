@@ -1,0 +1,32 @@
+/* Incident -> Runbook navigation, scoped to existing Web Console screens. */
+.incident-card-main { flex: 1 1 280px; min-width: 0; }
+.incident-title-link {
+  display: block; appearance: none; border: 0; padding: 0; margin: 0;
+  background: transparent; color: var(--text); font: inherit; font-weight: 750;
+  text-align: left; cursor: pointer; overflow-wrap: anywhere;
+}
+.incident-title-link:hover:not(:disabled) { color: var(--primary); text-decoration: underline; }
+.incident-title-link:disabled { cursor: default; }
+.incident-title-link:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.incident-metadata { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 9px; }
+.incident-metadata span { margin: 0; font-size: 11px; }
+.incident-metadata strong { color: var(--text); font-weight: 650; }
+.incident-runbook-hint { margin-top: 10px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.incident-runbook-hint strong { color: var(--text); }
+.incident-runbook-hint small { display: block; font-size: 11px; margin-top: 3px; }
+.incident-runbook-actions { flex-wrap: wrap; justify-content: flex-end; }
+.runbook-incident-context {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 15px 16px; margin-bottom: 16px; border: 1px solid #bfdbfe;
+  background: #eff6ff; border-radius: 10px;
+}
+.runbook-incident-context > div { min-width: 0; }
+.runbook-context-label { color: #1d4ed8; font-size: 10px; letter-spacing: .08em; font-weight: 800; }
+.runbook-incident-context h3 { margin: 6px 0; font-size: 15px; line-height: 1.45; overflow-wrap: anywhere; }
+.runbook-incident-context p { margin: 3px 0 6px; font-size: 12px; color: #475569; overflow-wrap: anywhere; }
+.runbook-incident-context small { color: #475569; line-height: 1.5; }
+.runbook-incident-context > button { flex: 0 0 auto; }
+@media (max-width: 860px) {
+  .incident-runbook-actions { justify-content: flex-start; }
+  .runbook-incident-context { flex-direction: column; align-items: stretch; }
+}
