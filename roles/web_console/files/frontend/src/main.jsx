@@ -3,6 +3,10 @@ import { createRoot } from 'react-dom/client'
 import './styles.css'
 import './ops-tools.js'
 import './ops-tools.css'
+import ActionHistoryView from './ActionHistoryView.jsx'
+import RunbooksView from './RunbooksView.jsx'
+import SelfCheckPanel from './SelfCheckPanel.jsx'
+import './incident-runbook.css'
 
 const API = {
   async serviceAction(componentId, action) {
@@ -50,6 +54,8 @@ const VIEWS = [
   { key: 'services', label: 'Services' },
   { key: 'grid', label: 'Grid' },
   { key: 'incidents', label: 'Incidents' },
+  { key: 'action-history', label: 'Action History' },
+  { key: 'runbooks', label: 'Runbooks' },
   { key: 'admin', label: 'Admin' }
 ]
 
@@ -92,6 +98,7 @@ function App() {
   const [query, setQuery] = useState('')
   const [logQuery, setLogQuery] = useState('')
   const [error, setError] = useState(null)
+  const [runbookRequest, setRunbookRequest] = useState(null)
 
   async function refresh() {
     setLoading(true)
@@ -179,6 +186,7 @@ function App() {
   const showDetailPanel = detailCapableViews.includes(view) && detailVisible && selected
 
   function navigateView(nextView) {
+    if (nextView === 'runbooks') setRunbookRequest(null)
     setView(nextView)
 
     // Home/Admin/Incidents should not show Service Details by default.
@@ -301,6 +309,29 @@ function App() {
     }
   }
 
+  function openIncidentRunbook(issue) {
+    const runbook = issue?.runbook
+    if (!runbook?.url || !runbook.url.startsWith('/runbooks/')) return
+
+    const component = components.find((item) => item.id === issue.component_id)
+    setRunbookRequest({
+      url: runbook.url,
+      title: runbook.title,
+      path: runbook.path,
+      reason: runbook.reason,
+      issue: {
+        component_id: issue.component_id,
+        message: issue.message,
+        severity: issue.severity,
+        host: issue.host,
+        service: issue.service,
+        status: component?.status || 'UNKNOWN'
+      }
+    })
+    setDetailVisible(false)
+    setView('runbooks')
+  }
+
   return (
     <div className="airflow-shell">
       <aside className="sidebar">
@@ -405,6 +436,18 @@ function App() {
                 onSelect={selectComponent}
                 onLogs={viewLogs}
                 onRestart={restart}
+                onViewRunbook={openIncidentRunbook}
+              />
+            )}
+
+            {view === 'action-history' && (
+              <ActionHistoryView />
+            )}
+
+            {view === 'runbooks' && (
+              <RunbooksView
+                requestedRunbook={runbookRequest}
+                onBackToIncidents={() => runbookRequest?.issue && openIssue(runbookRequest.issue)}
               />
             )}
 
@@ -446,6 +489,8 @@ function viewTitle(view) {
   if (view === 'services') return 'Services'
   if (view === 'grid') return 'Grid'
   if (view === 'incidents') return 'Incidents'
+  if (view === 'action-history') return 'Action History'
+  if (view === 'runbooks') return 'Runbooks'
   if (view === 'admin') return 'Admin'
   return 'Home'
 }
@@ -687,34 +732,46 @@ function GridView({ nodes, selected, onSelect, onLogs }) {
   )
 }
 
-function IncidentsView({ issues, components, onSelect, onLogs, onRestart }) {
+function IncidentsView({ issues, components, onSelect, onLogs, onRestart, onViewRunbook }) {
   if (issues.length === 0) {
     return (
       <section className="card">
         <CardHeader title="Incidents" description="현재 감지된 장애 또는 비정상 서비스입니다." />
-        <EmptyState title="No active incidents" description="현재 등록된 서비스는 모두 정상입니다." />
+        <EmptyState title="No active incidents" description="현재 등록된 서비스는 모두 정상입니다. 장애가 감지되면 해당 서비스의 권장 Runbook 링크가 표시됩니다." />
       </section>
     )
   }
 
   return (
     <section className="card">
-      <CardHeader title="Incidents" description="이상 상태가 감지된 서비스만 표시합니다." />
-
+      <CardHeader title="Incidents" description="비정상 서비스의 상태와 관련 운영 문서를 바로 확인합니다. Runbook은 서비스별 권장 문서이며 자동 원인 진단은 아닙니다." />
       <div className="incident-table">
         {issues.map((issue) => {
           const component = components.find((item) => item.id === issue.component_id)
+          const runbook = issue.runbook
+          const hasRunbook = Boolean(runbook?.url?.startsWith('/runbooks/'))
           return (
-            <div key={issue.component_id} className="incident-card">
-              <div>
-                <strong>{issue.message}</strong>
+            <div key={issue.component_id} className="incident-card incident-runbook-card">
+              <div className="incident-card-main">
+                <button type="button" className="incident-title-link" disabled={!hasRunbook} onClick={() => onViewRunbook(issue)} title="관련 Runbook 보기">
+                  {issue.message}
+                </button>
                 <span>{issue.host} · {issue.service}</span>
+                <div className="incident-metadata">
+                  <span>상태: <strong>{component?.status || 'UNKNOWN'}</strong></span>
+                  <span>그룹: <strong>{issue.group || component?.group || '-'}</strong></span>
+                  <span>PID: <strong>{component?.pid || '-'}</strong></span>
+                </div>
+                <div className="incident-runbook-hint">
+                  관련 문서: <strong>{runbook?.title || '등록된 Runbook 없음'}</strong>
+                  {runbook?.reason && <small>{runbook.reason}</small>}
+                </div>
               </div>
-
-              <div className="row-actions">
-                <button className="btn tiny" onClick={() => component && onSelect(component, 'Overview')}>Details</button>
-                <button className="btn tiny" onClick={() => component && onLogs(component)}>Logs</button>
-                <button className="btn tiny danger" onClick={() => component && onRestart(component)}>Restart</button>
+              <div className="row-actions incident-runbook-actions">
+                <button className="btn tiny primary" type="button" disabled={!hasRunbook} onClick={() => onViewRunbook(issue)}>Runbook</button>
+                <button className="btn tiny" type="button" disabled={!component} onClick={() => onSelect(component, 'Overview')}>Details</button>
+                <button className="btn tiny" type="button" disabled={!component} onClick={() => onLogs(component)}>Logs</button>
+                <button className="btn tiny danger" type="button" disabled={!component} onClick={() => onRestart(component)}>Restart</button>
               </div>
             </div>
           )
@@ -737,6 +794,8 @@ function AdminView({ status, onRefresh, onIncidentSummary, refreshIntervalSecond
         <Info label="Cluster Status" value={status?.cluster_status || '-'} />
         <Info label="Check Interval" value={`${refreshIntervalSeconds} seconds`} />
       </div>
+
+      <SelfCheckPanel />
 
       <div className="settings-card">
         <div>

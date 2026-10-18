@@ -1,0 +1,39 @@
+.runbooks-view { min-width: 0; }
+.runbooks-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
+.runbooks-header h2 { font-size: 20px; margin: 0; }
+.runbooks-header p { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+.runbooks-layout { display: grid; grid-template-columns: minmax(190px, 270px) minmax(0, 1fr); min-height: 440px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.runbooks-list { background: var(--surface-muted); border-right: 1px solid var(--border); min-width: 0; padding: 10px; }
+.runbooks-search { display: grid; gap: 6px; margin-bottom: 10px; }
+.runbooks-search span { font-size: 12px; color: var(--muted); font-weight: 750; }
+.runbooks-search input { padding: 10px 12px; width: 100%; min-width: 0; border: 1px solid var(--border-strong); border-radius: 8px; font: inherit; font-size: 13px; background: var(--surface); }
+.runbooks-list-count { padding: 4px 7px 10px; font-size: 11px; color: var(--muted); }
+.runbook-item { display: flex; flex-direction: column; align-items: flex-start; text-align: left; width: 100%; gap: 5px; border: 1px solid transparent; border-radius: 9px; background: transparent; padding: 12px; cursor: pointer; margin-bottom: 5px; color: var(--text); }
+.runbook-item:hover { background: #eef5ff; }
+.runbook-item.selected { border-color: #bfdbfe; background: #eff6ff; }
+.runbook-item strong { font-size: 13px; font-weight: 780; line-height: 1.35; }
+.runbook-item small { color: var(--muted); font-size: 11px; line-height: 1.4; }
+.runbook-content { min-width: 0; overflow: hidden; }
+.runbook-content-toolbar { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; padding: 16px 18px; background: var(--surface-muted); border-bottom: 1px solid var(--border); }
+.runbook-content-toolbar > div { display: grid; gap: 5px; min-width: 0; }
+.runbook-content-toolbar strong { font-size: 15px; }
+.runbook-content-toolbar span { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.runbook-content-toolbar a { white-space: nowrap; color: var(--primary); font-size: 12px; font-weight: 700; text-decoration: none; }
+.runbooks-empty { padding: 32px 18px; text-align: center; color: var(--muted); font-size: 13px; }
+.runbook-error { padding: 12px 14px; border: 1px solid #fecaca; border-radius: 8px; margin: 12px; background: var(--danger-soft); color: #991b1b; font-size: 13px; overflow-wrap: anywhere; }
+.runbook-markdown { padding: 14px 20px 28px; max-height: 680px; overflow: auto; color: var(--text); font-size: 13px; line-height: 1.75; overflow-wrap: anywhere; }
+.runbook-markdown h1 { font-size: 21px; padding-bottom: 8px; border-bottom: 1px solid var(--border); margin: 12px 0 16px; }
+.runbook-markdown h2 { font-size: 17px; margin: 24px 0 10px; }
+.runbook-markdown h3, .runbook-markdown h4 { font-size: 14px; margin: 20px 0 8px; }
+.runbook-markdown p { margin: 11px 0; }
+.runbook-markdown ul, .runbook-markdown ol { padding-left: 24px; margin: 10px 0; }
+.runbook-markdown li { margin: 4px 0; }
+.runbook-markdown code { font-size: 12px; background: #f1f5f9; padding: 2px 5px; border-radius: 4px; }
+.runbook-code-wrap { max-width: 100%; overflow: auto; border: 1px solid #334155; border-radius: 8px; background: #0f172a; margin: 12px 0; }
+.runbook-code-wrap > span { display: block; font-size: 11px; color: #94a3b8; padding: 8px 12px 0; }
+.runbook-code-wrap pre { padding: 12px 14px; margin: 0; color: #e2e8f0; overflow-x: auto; font-size: 12px; line-height: 1.6; }
+.runbook-code-wrap code { background: transparent; color: inherit; padding: 0; white-space: pre; }
+.runbook-markdown blockquote { border-left: 3px solid #93c5fd; margin: 14px 0; background: #eff6ff; padding: 6px 14px; }
+.runbook-markdown hr { border: 0; border-top: 1px solid var(--border); margin: 22px 0; }
+.runbook-markdown a { color: var(--primary); }
+@media (max-width: 760px) { .runbooks-layout { grid-template-columns: minmax(0, 1fr); } .runbooks-list { border-right: 0; border-bottom: 1px solid var(--border); } .runbook-markdown { max-height: none; } }
