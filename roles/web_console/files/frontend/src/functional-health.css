@@ -1,0 +1,21 @@
+.functional-health-panel { margin: 20px 0; padding: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-muted); min-width: 0; }
+.functional-health-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.functional-health-heading h3 { margin: 0; font-size: 16px; }
+.functional-health-heading p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+.functional-health-actions { display: flex; gap: 8px; align-items: center; }
+.functional-health-badge { padding: 5px 9px; border-radius: 999px; font-size: 11px; font-weight: 800; background: #e2e8f0; color: #475569; }
+.functional-health-badge.healthy { background: #dcfce7; color: #166534; }
+.functional-health-badge.degraded { background: #fef3c7; color: #92400e; }
+.functional-health-badge.unknown { background: #fee2e2; color: #991b1b; }
+.functional-health-meta { margin: 12px 0; color: var(--muted); font-size: 12px; }
+.functional-health-cards { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
+.functional-health-card { padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); min-width: 0; }
+.functional-health-card-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.functional-health-source { font-size: 11px; color: var(--muted); margin: 6px 0 12px; }
+.functional-health-metrics { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
+.functional-health-metric { display: flex; flex-direction: column; padding: 10px; gap: 4px; border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
+.functional-health-metric span { color: var(--muted); font-size: 11px; }
+.functional-health-metric strong { font-size: 18px; }
+.functional-health-error { color: #991b1b; border: 1px solid #fecaca; background: #fef2f2; padding: 10px; font-size: 12px; border-radius: 8px; overflow-wrap: anywhere; }
+.functional-health-note { color: var(--muted); font-size: 12px; margin: 12px 0 0; }
+@media (max-width: 760px) { .functional-health-cards { grid-template-columns: 1fr; } }

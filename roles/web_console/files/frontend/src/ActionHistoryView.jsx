@@ -157,7 +157,8 @@ export default function ActionHistoryView() {
               const state = actionResult(item)
               const stdout = item.stdout_summary || ''
               const stderr = item.stderr_summary || ''
-              const details = [stderr && `[stderr]\n${stderr}`, stdout && `[stdout]\n${stdout}`].filter(Boolean).join('\n\n')
+              const verification = item.expected_state ? `State verification: ${item.verification_status || 'unknown'}\nExpected: ${item.expected_state}\nObserved: ${item.observed_state || 'unknown'}\nAttempts: ${item.verification_attempts ?? 0}${item.verification_error ? `\nError: ${item.verification_error}` : ''}` : ''
+              const details = [verification, stderr && `[stderr]\n${stderr}`, stdout && `[stdout]\n${stdout}`].filter(Boolean).join('\n\n')
               return (
                 <tr key={`${item.recorded_at || item.timestamp || 'record'}-${item.component_id || item.service || 'service'}-${index}`}>
                   <td className="action-history-nowrap">{display(item.recorded_at || item.timestamp)}</td>

@@ -1,0 +1,17 @@
+.incident-demo-panel { border: 2px dashed #d97706; background: #fffbeb; margin-bottom: 16px; }
+.incident-demo-heading { display: flex; justify-content: space-between; align-items: center; gap: 18px; }
+.incident-demo-heading h2 { margin: 7px 0; font-size: 17px; color: #92400e; }
+.incident-demo-heading p { font-size: 12px; line-height: 1.6; color: #92400e; margin: 0; }
+.incident-demo-tag { color: #92400e; letter-spacing: .04em; font-size: 10px; font-weight: 800; }
+.incident-demo-heading > button, .incident-demo-example > button { flex: 0 0 auto; }
+.incident-demo-example { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 16px; background: #fff; margin-top: 15px; border: 1px solid #f59e0b; border-radius: 9px; }
+.incident-demo-example-body { display: grid; gap: 7px; min-width: 0; }
+.incident-demo-example strong { color: #92400e; overflow-wrap: anywhere; }
+.incident-demo-example span:not(.incident-demo-tag), .incident-demo-example small { color: #78350f; }
+.runbook-incident-context.incident-demo-context { background: #fffbeb; border-color: #f59e0b; }
+.runbook-incident-context.incident-demo-context .runbook-context-label { color: #92400e; }
+.runbook-incident-context .incident-demo-notice { font-weight: 700; color: #92400e; }
+@media (max-width: 860px) {
+  .incident-demo-heading, .incident-demo-example { flex-direction: column; align-items: stretch; }
+  .incident-demo-heading > button, .incident-demo-example > button { flex: 0 1 auto; }
+}

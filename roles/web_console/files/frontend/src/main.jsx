@@ -6,7 +6,10 @@ import './ops-tools.css'
 import ActionHistoryView from './ActionHistoryView.jsx'
 import RunbooksView from './RunbooksView.jsx'
 import SelfCheckPanel from './SelfCheckPanel.jsx'
+import FunctionalHealthPanel from './FunctionalHealthPanel.jsx'
 import './incident-runbook.css'
+import IncidentDemoPanel from './IncidentDemoPanel.jsx'
+import './incident-demo.css'
 
 const API = {
   async serviceAction(componentId, action) {
@@ -61,6 +64,9 @@ const VIEWS = [
 
 const DETAIL_TABS = ['Overview', 'Logs', 'Actions', 'Details']
 
+// The preview toggle is hidden unless the operator explicitly opts in by URL.
+const INCIDENT_DEMO_ALLOWED = new URLSearchParams(window.location.search).get('incident_demo') === '1'
+
 function tone(status) {
   if (status === 'UP' || status === 'HEALTHY') return 'success'
   if (status === 'DEGRADED' || status === 'UNKNOWN' || status === 'LOADING') return 'warning'
@@ -99,6 +105,7 @@ function App() {
   const [logQuery, setLogQuery] = useState('')
   const [error, setError] = useState(null)
   const [runbookRequest, setRunbookRequest] = useState(null)
+  const [demoEnabled, setDemoEnabled] = useState(false)
 
   async function refresh() {
     setLoading(true)
@@ -227,8 +234,15 @@ function App() {
       const result = await API.serviceAction(component.id, action)
       setOutput(
         `Action: ${result.action}\n` +
-        `OK: ${result.ok}\n` +
-        `Return code: ${result.returncode}\n\n` +
+        `Result: ${result.ok ? 'VERIFIED SUCCESS' : 'FAILED / UNVERIFIED'}\n` +
+        `Command succeeded: ${result.command_ok}\n` +
+        `Service state verified: ${result.verification_ok}\n` +
+        `Expected ActiveState: ${result.expected_state}\n` +
+        `Observed ActiveState: ${result.observed_state || 'unknown'}\n` +
+        `Verification: ${result.verification_status || 'not_run'}\n` +
+        `Verification attempts: ${result.verification_attempts ?? 0}\n` +
+        `Verification error: ${result.verification_error || '-'}\n` +
+        `Command return code: ${result.returncode}\n\n` +
         `[stdout]\n${result.stdout || ''}\n\n` +
         `[stderr]\n${result.stderr || ''}`
       )
@@ -259,8 +273,15 @@ function App() {
     try {
       const result = await API.restart(component.id)
       setOutput(
-        `OK: ${result.ok}\n` +
-        `Return code: ${result.returncode}\n\n` +
+        `Result: ${result.ok ? 'VERIFIED SUCCESS' : 'FAILED / UNVERIFIED'}\n` +
+        `Command succeeded: ${result.command_ok}\n` +
+        `Service state verified: ${result.verification_ok}\n` +
+        `Expected ActiveState: ${result.expected_state}\n` +
+        `Observed ActiveState: ${result.observed_state || 'unknown'}\n` +
+        `Verification: ${result.verification_status || 'not_run'}\n` +
+        `Verification attempts: ${result.verification_attempts ?? 0}\n` +
+        `Verification error: ${result.verification_error || '-'}\n` +
+        `Command return code: ${result.returncode}\n\n` +
         `[stdout]\n${result.stdout || ''}\n\n` +
         `[stderr]\n${result.stderr || ''}`
       )
@@ -325,7 +346,8 @@ function App() {
         severity: issue.severity,
         host: issue.host,
         service: issue.service,
-        status: component?.status || 'UNKNOWN'
+        status: issue.simulated ? 'DOWN (SIMULATED)' : (component?.status || 'UNKNOWN'),
+        simulated: Boolean(issue.simulated)
       }
     })
     setDetailVisible(false)
@@ -430,14 +452,23 @@ function App() {
             )}
 
             {view === 'incidents' && (
-              <IncidentsView
+              <>
+                {INCIDENT_DEMO_ALLOWED && (
+                  <IncidentDemoPanel
+                    enabled={demoEnabled}
+                    onToggle={() => setDemoEnabled((current) => !current)}
+                    onOpenRunbook={openIncidentRunbook}
+                  />
+                )}
+                <IncidentsView
                 issues={issues}
                 components={components}
                 onSelect={selectComponent}
                 onLogs={viewLogs}
                 onRestart={restart}
                 onViewRunbook={openIncidentRunbook}
-              />
+                />
+              </>
             )}
 
             {view === 'action-history' && (
@@ -447,7 +478,13 @@ function App() {
             {view === 'runbooks' && (
               <RunbooksView
                 requestedRunbook={runbookRequest}
-                onBackToIncidents={() => runbookRequest?.issue && openIssue(runbookRequest.issue)}
+                onBackToIncidents={() => {
+                  setView('incidents')
+                  setDetailVisible(false)
+                  if (runbookRequest?.issue && !runbookRequest.issue.simulated) {
+                    openIssue(runbookRequest.issue)
+                  }
+                }}
               />
             )}
 
@@ -796,6 +833,7 @@ function AdminView({ status, onRefresh, onIncidentSummary, refreshIntervalSecond
       </div>
 
       <SelfCheckPanel />
+      <FunctionalHealthPanel />
 
       <div className="settings-card">
         <div>

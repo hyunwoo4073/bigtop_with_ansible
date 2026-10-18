@@ -215,12 +215,13 @@ export default function RunbooksView({ requestedRunbook = null, onBackToIncident
         <button type="button" className="btn" onClick={() => { setReloadList((n) => n + 1); setReloadDocument((n) => n + 1) }}>Refresh</button>
       </header>
       {activeIncident && (
-        <div className="runbook-incident-context">
+        <div className={activeIncident.simulated ? "runbook-incident-context incident-demo-context" : "runbook-incident-context"}>
           <div>
-            <span className="runbook-context-label">FROM INCIDENTS</span>
+            <span className="runbook-context-label">{activeIncident.simulated ? "SIMULATION — NOT A REAL INCIDENT" : "FROM INCIDENTS"}</span>
             <h3>{activeIncident.message}</h3>
             <p>{activeIncident.host} / {activeIncident.service} · 상태 {activeIncident.status || 'UNKNOWN'} · 심각도 {activeIncident.severity || '-'}</p>
             <small>연결된 권장 문서: {selected?.title || requestedRunbook?.title || 'Runbook'} (서비스별 추천이며 원인 확정이 아닙니다.)</small>
+            {activeIncident.simulated && <p className="incident-demo-notice">브라우저 UI에서만 생성한 가상 장애입니다. 실제 NameNode 상태·클러스터 지표·작업 기록은 변경되지 않았습니다.</p>}
           </div>
           <button type="button" className="btn" onClick={onBackToIncidents}>Back to Incident</button>
         </div>
