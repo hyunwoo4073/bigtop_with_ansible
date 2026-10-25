@@ -1,5 +1,6 @@
 import json
 import os
+import uuid
 import shlex
 import shutil
 import subprocess
@@ -174,8 +175,51 @@ def compact_text(value: str, limit: int = 4000) -> str:
     return value[:limit] + "\n...[truncated]"
 
 
+# Optional PostgreSQL store. Existing JSONL remains a durable fallback.
+WEB_CONSOLE_DB_DSN = os.environ.get("WEB_CONSOLE_DB_DSN", "")
+
+
+def _db_connect():
+    import psycopg
+    return psycopg.connect(WEB_CONSOLE_DB_DSN, connect_timeout=3)
+
+
+def _db_write_action(record: Dict) -> None:
+    if not WEB_CONSOLE_DB_DSN:
+        return
+    try:
+        with _db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO action_history
+                       (event_id, recorded_at, action, host, service, ok, blocked, payload)
+                       VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                       ON CONFLICT (event_id) DO NOTHING""",
+                    (record["event_id"], record["recorded_at"], record.get("action"),
+                     record.get("host"), record.get("service"), record.get("ok"),
+                     bool(record.get("blocked", False)),
+                     json.dumps(record, ensure_ascii=False, default=str)),
+                )
+    except Exception as exc:
+        # Service control must never fail merely because PostgreSQL is down.
+        print(f"[postgres-audit-warning] {type(exc).__name__}", flush=True)
+
+
+def _db_read_actions(limit: int) -> Dict:
+    with _db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT payload FROM action_history ORDER BY seq DESC LIMIT %s",
+                (limit,),
+            )
+            items = [row[0] for row in cur.fetchall()]
+    return {"path": "postgresql:action_history", "count": len(items),
+            "items": items, "storage": "postgresql"}
+
+
 def append_action_audit(record: Dict) -> None:
     audit_record = {
+        "event_id": str(uuid.uuid4()),
         "recorded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         **record,
     }
@@ -189,9 +233,16 @@ def append_action_audit(record: Dict) -> None:
     except Exception as exc:
         print(f"[audit-log-error] {exc}", flush=True)
 
+    _db_write_action(audit_record)
+
 
 def read_action_audit(limit: int = 50) -> Dict:
     limit = max(1, min(int(limit), ACTION_AUDIT_LOG_MAX_ITEMS))
+    if WEB_CONSOLE_DB_DSN:
+        try:
+            return _db_read_actions(limit)
+        except Exception as exc:
+            print(f"[postgres-read-warning] {type(exc).__name__}", flush=True)
     audit_path = Path(ACTION_AUDIT_LOG)
 
     if not audit_path.exists():
@@ -892,6 +943,22 @@ def api_incident_summary():
     }
 
 
+@app.get("/api/storage/health")
+def api_storage_health():
+    if not WEB_CONSOLE_DB_DSN:
+        return {"storage": "file", "postgresql": "disabled", "ok": False}
+    try:
+        with _db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT count(*) FROM action_history")
+                count = cur.fetchone()[0]
+        return {"storage": "postgresql", "postgresql": "connected", "ok": True,
+                "action_count": count}
+    except Exception as exc:
+        return {"storage": "file", "postgresql": "unavailable", "ok": False,
+                "error_type": type(exc).__name__}
+
+
 @app.get("/api/actions/history")
 def api_action_history(limit: int = 50):
     return read_action_audit(limit=limit)
@@ -953,6 +1020,83 @@ def api_runbook_file(runbook_name: str):
         raise HTTPException(status_code=404, detail=f"Runbook not found: {safe_name}")
 
     return resolved.read_text(encoding="utf-8")
+
+
+# BEGIN BIGTOP INVENTORY READ API V1
+# This is a read-only projection of the Ansible-managed PostgreSQL metadata.
+# It is NOT the source of truth for running services or lifecycle commands.
+@app.get('/api/metadata')
+def api_platform_metadata(include_absent: bool = False):
+    import os as _inventory_os
+    from fastapi import HTTPException as _InventoryHTTPException
+
+    dsn = _inventory_os.environ.get('WEB_CONSOLE_DB_DSN')
+    if not dsn:
+        raise _InventoryHTTPException(status_code=503, detail='PostgreSQL metadata store is not configured')
+    try:
+        import psycopg as _inventory_psycopg
+        with _inventory_psycopg.connect(dsn, connect_timeout=5) as conn:
+            with conn.cursor() as cur:
+                cur.execute('''
+                    SELECT cluster_slug, description, last_synced_at
+                    FROM public.platform_clusters
+                    ORDER BY cluster_slug LIMIT 50
+                ''')
+                clusters = [
+                    {'slug': slug, 'description': description,
+                     'last_synced_at': synced.isoformat() if synced else None}
+                    for slug, description, synced in cur.fetchall()
+                ]
+                cur.execute('''
+                    SELECT cluster_slug, host_name, inventory_address,
+                           inventory_groups, is_present, last_seen_at
+                    FROM public.platform_hosts
+                    WHERE (%s OR is_present)
+                    ORDER BY cluster_slug, host_name LIMIT 2000
+                ''', (include_absent,))
+                hosts = [
+                    {'cluster_slug': cluster, 'name': name, 'address': addr,
+                     'groups': groups if isinstance(groups, list) else [],
+                     'is_present': present,
+                     'last_seen_at': seen.isoformat() if seen else None}
+                    for cluster, name, addr, groups, present, seen in cur.fetchall()
+                ]
+                cur.execute('''
+                    SELECT cluster_slug, host_name, service_name,
+                           component_name, group_name, is_present
+                    FROM public.platform_service_instances
+                    WHERE (%s OR is_present)
+                    ORDER BY cluster_slug, host_name, group_name, service_name
+                    LIMIT 5000
+                ''', (include_absent,))
+                services = [
+                    {'cluster_slug': cluster, 'host': host, 'service': service,
+                     'component': component, 'group': group, 'is_present': present}
+                    for cluster, host, service, component, group, present in cur.fetchall()
+                ]
+                cur.execute('''
+                    SELECT cluster_slug, synced_at, host_count, service_count
+                    FROM public.platform_metadata_sync_runs
+                    ORDER BY id DESC LIMIT 1
+                ''')
+                sync = cur.fetchone()
+    except Exception as exc:
+        # Do not include the exception or DSN in public HTTP responses.
+        print(f'[inventory-query-error] {type(exc).__name__}', flush=True)
+        raise _InventoryHTTPException(status_code=503, detail='Metadata database unavailable or not synchronized') from None
+
+    return {
+        'ok': True, 'source': 'postgresql:ansible-inventory-snapshot',
+        'read_only': True, 'include_absent': include_absent,
+        'clusters': clusters, 'hosts': hosts, 'services': services,
+        'summary': {'clusters': len(clusters), 'hosts': len(hosts), 'services': len(services)},
+        'latest_sync': {
+            'cluster_slug': sync[0], 'at': sync[1].isoformat() if sync[1] else None,
+            'host_count': sync[2], 'service_count': sync[3]
+        } if sync else None,
+        'note': 'Inventory snapshot only; service availability is shown in Services and Health.',
+    }
+# END BIGTOP INVENTORY READ API V1
 
 
 frontend_path = Path(FRONTEND_DIST_DIR)

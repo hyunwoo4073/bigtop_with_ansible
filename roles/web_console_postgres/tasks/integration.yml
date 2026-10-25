@@ -1,0 +1,191 @@
+---
+- name: Read Web Console runtime user configured in systemd
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - show
+      - --property=User
+      - --value
+      - "{{ web_console_postgres_service }}"
+  register: web_console_postgres_systemd_user
+  changed_when: false
+
+- name: Read Web Console runtime group configured in systemd
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - show
+      - --property=Group
+      - --value
+      - "{{ web_console_postgres_service }}"
+  register: web_console_postgres_systemd_group
+  changed_when: false
+
+- name: Resolve effective Web Console service user
+  ansible.builtin.set_fact:
+    web_console_postgres_runtime_user: "{{ web_console_postgres_systemd_user.stdout | trim | default('root', true) }}"
+
+- name: Check the effective service account and its primary group
+  ansible.builtin.command:
+    argv:
+      - id
+      - -gn
+      - "{{ web_console_postgres_runtime_user }}"
+  register: web_console_postgres_primary_group
+  changed_when: false
+
+- name: Resolve effective Web Console service group
+  ansible.builtin.set_fact:
+    web_console_postgres_runtime_group: >-
+      {{ (web_console_postgres_systemd_group.stdout | trim)
+         or (web_console_postgres_primary_group.stdout | trim) }}
+
+- name: Check effective service identity is populated
+  ansible.builtin.assert:
+    that:
+      - web_console_postgres_runtime_user | length > 0
+      - web_console_postgres_runtime_group | length > 0
+    fail_msg: 'Could not resolve the existing Web Console systemd runtime identity.'
+
+- name: Ensure Web Console Python virtualenv exists
+  ansible.builtin.stat:
+    path: "{{ web_console_postgres_venv }}/bin/python"
+  register: web_console_postgres_venv_stat
+
+- name: Require existing managed Web Console deployment
+  ansible.builtin.assert:
+    that:
+      - web_console_postgres_venv_stat.stat.exists
+    fail_msg: 'Deploy the existing web_console role before DB integration.'
+
+- name: Install PostgreSQL driver into managed Web Console venv
+  ansible.builtin.pip:
+    name: 'psycopg[binary]>=3.2,<4'
+    virtualenv: "{{ web_console_postgres_venv }}"
+    state: present
+  notify: Restart Bigtop Web Console after PostgreSQL configuration
+
+- name: Grant Web Console group read access to credential directory
+  ansible.builtin.file:
+    path: "{{ web_console_postgres_conf_dir }}"
+    owner: root
+    group: "{{ web_console_postgres_runtime_group }}"
+    mode: '0750'
+
+- name: Install managed DB connection environment
+  ansible.builtin.template:
+    src: db.env.j2
+    dest: "{{ web_console_postgres_env_file }}"
+    owner: root
+    group: "{{ web_console_postgres_runtime_group }}"
+    mode: '0640'
+  no_log: true
+  notify: Restart Bigtop Web Console after PostgreSQL configuration
+
+- name: Ensure Web Console systemd override directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/bigtop-web-console.service.d
+    state: directory
+    mode: '0755'
+
+- name: Add managed EnvironmentFile to Web Console systemd service
+  ansible.builtin.template:
+    src: 20-postgresql.conf.j2
+    dest: /etc/systemd/system/bigtop-web-console.service.d/20-postgresql.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Bigtop Web Console after PostgreSQL configuration
+
+- name: Install idempotent action history backfill helper
+  ansible.builtin.copy:
+    src: backfill_web_console_actions.py
+    dest: "{{ web_console_postgres_app_dir }}/backfill_web_console_actions.py"
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Configure action history sync service
+  ansible.builtin.template:
+    src: pg_history_sync.service.j2
+    dest: /etc/systemd/system/bigtop-web-console-history-sync.service
+    owner: root
+    group: root
+    mode: '0644'
+  register: web_console_postgres_sync_service
+
+- name: Configure history reconciliation timer
+  ansible.builtin.template:
+    src: pg_history_sync.timer.j2
+    dest: /etc/systemd/system/bigtop-web-console-history-sync.timer
+    owner: root
+    group: root
+    mode: '0644'
+  register: web_console_postgres_sync_timer
+
+- name: Reload systemd after unit or override changes
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: web_console_postgres_sync_service.changed or web_console_postgres_sync_timer.changed
+
+- name: Apply any pending Web Console DB configuration restart before testing runtime
+  ansible.builtin.meta: flush_handlers
+
+- name: Check whether the running Web Console loaded DB settings
+  ansible.builtin.shell:
+    cmd: |
+      pid="$(systemctl show --property=MainPID --value {{ web_console_postgres_service | quote }})"
+      if [ "$pid" -gt 0 ] 2>/dev/null && [ -r "/proc/$pid/environ" ] &&
+         grep -azq '^WEB_CONSOLE_DB_DSN=' "/proc/$pid/environ"; then
+        printf 'configured\n'
+      else
+        printf 'missing\n'
+      fi
+    executable: /bin/bash
+  register: web_console_postgres_running_env
+  changed_when: false
+  no_log: true
+
+- name: Recover runtime PostgreSQL settings after an earlier partial deployment
+  ansible.builtin.systemd_service:
+    name: "{{ web_console_postgres_service }}"
+    daemon_reload: true
+    state: restarted
+  when: web_console_postgres_running_env.stdout != 'configured'
+
+- name: Import historical JSONL records idempotently
+  ansible.builtin.command:
+    argv:
+      - "{{ web_console_postgres_venv }}/bin/python"
+      - "{{ web_console_postgres_app_dir }}/backfill_web_console_actions.py"
+      - --log
+      - "{{ web_console_postgres_log_file }}"
+  environment:
+    WEB_CONSOLE_DB_DSN: "postgresql://{{ web_console_postgres_user }}:{{ web_console_postgres_password }}@{{ web_console_postgres_host }}:{{ web_console_postgres_port }}/{{ web_console_postgres_db }}"
+  register: web_console_postgres_import_result
+  changed_when: "'Imported: 0;' not in web_console_postgres_import_result.stdout"
+  when: web_console_postgres_import_enabled
+  no_log: true
+
+- name: Enable periodic JSONL reconciliation
+  ansible.builtin.systemd_service:
+    name: bigtop-web-console-history-sync.timer
+    enabled: true
+    state: started
+  when: web_console_postgres_reconcile_enabled
+
+- name: Disable reconciliation when configured off
+  ansible.builtin.systemd_service:
+    name: bigtop-web-console-history-sync.timer
+    enabled: false
+    state: stopped
+  when: not web_console_postgres_reconcile_enabled
+
+- name: Verify driver import under deployed interpreter
+  ansible.builtin.command:
+    argv:
+      - "{{ web_console_postgres_venv }}/bin/python"
+      - -c
+      - 'import psycopg; print("psycopg ready")'
+  register: web_console_postgres_driver_check
+  changed_when: false

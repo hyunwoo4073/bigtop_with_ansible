@@ -1,0 +1,16 @@
+[Unit]
+Description=Bigtop Web Console JSONL to PostgreSQL reconciliation
+After=postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=oneshot
+User={{ web_console_postgres_runtime_user }}
+Group={{ web_console_postgres_runtime_group }}
+EnvironmentFile={{ web_console_postgres_env_file }}
+ExecStart={{ web_console_postgres_venv }}/bin/python {{ web_console_postgres_app_dir }}/backfill_web_console_actions.py --log {{ web_console_postgres_log_file }}
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

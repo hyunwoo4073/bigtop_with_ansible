@@ -1,0 +1,12 @@
+---
+# Metadata is an inventory-driven read model; never the controller's source of truth.
+web_console_metadata_cluster_slug: bigtop-lab
+web_console_metadata_inventory_snapshot: /var/lib/bigtop-web-console/metadata-inventory.json
+web_console_metadata_state_dir: /var/lib/bigtop-web-console
+web_console_metadata_sync_script: /usr/local/lib/bigtop-web-console/sync_metadata.py
+web_console_metadata_schema: /usr/local/lib/bigtop-web-console/metadata_schema.sql
+web_console_metadata_app_source: "{{ web_console_postgres_app_dir | default('/opt/bigtop-web-console') }}/app.py"
+web_console_metadata_python: "{{ web_console_postgres_venv | default('/opt/bigtop-web-console/.venv') }}/bin/python"
+web_console_metadata_env_file: "{{ web_console_postgres_env_file | default('/etc/bigtop-web-console/db.env') }}"
+web_console_metadata_min_hosts: 1
+web_console_metadata_min_services: 1

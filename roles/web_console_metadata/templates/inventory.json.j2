@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "cluster_slug": {{ web_console_metadata_cluster_slug | to_json }},
+  "hosts": [
+{% for host_name in (groups['all'] | default([]) | sort) %}
+    {
+      "name": {{ host_name | to_json }},
+      "address": {{ (hostvars[host_name].ansible_host | default(host_name)) | string | to_json }},
+      "groups": {{ (hostvars[host_name].group_names | default([]) | sort) | to_json }}
+    }{% if not loop.last %},{% endif %}
+{% endfor %}
+  ]
+}

@@ -5,6 +5,7 @@ import './ops-tools.js'
 import './ops-tools.css'
 import ActionHistoryView from './ActionHistoryView.jsx'
 import RunbooksView from './RunbooksView.jsx'
+import InventoryView from './InventoryView.jsx'
 import SelfCheckPanel from './SelfCheckPanel.jsx'
 import FunctionalHealthPanel from './FunctionalHealthPanel.jsx'
 import './incident-runbook.css'
@@ -56,6 +57,7 @@ const VIEWS = [
   { key: 'home', label: 'Home' },
   { key: 'services', label: 'Services' },
   { key: 'grid', label: 'Grid' },
+  { key: 'inventory', label: 'Inventory' },
   { key: 'incidents', label: 'Incidents' },
   { key: 'action-history', label: 'Action History' },
   { key: 'runbooks', label: 'Runbooks' },
@@ -471,6 +473,8 @@ function App() {
               </>
             )}
 
+            {view === 'inventory' && <InventoryView />}
+
             {view === 'action-history' && (
               <ActionHistoryView />
             )}
@@ -525,6 +529,7 @@ function viewTitle(view) {
   if (view === 'home') return 'Home'
   if (view === 'services') return 'Services'
   if (view === 'grid') return 'Grid'
+  if (view === 'inventory') return 'Cluster Inventory'
   if (view === 'incidents') return 'Incidents'
   if (view === 'action-history') return 'Action History'
   if (view === 'runbooks') return 'Runbooks'

@@ -1,0 +1,94 @@
+---
+- name: Validate existing Web Console runtime and PostgreSQL configuration
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ web_console_metadata_app_source }}"
+    - "{{ web_console_metadata_python }}"
+    - "{{ web_console_metadata_env_file }}"
+  register: web_console_metadata_requirements
+
+- name: Fail safely when Web Console PostgreSQL setup is incomplete
+  ansible.builtin.assert:
+    that:
+      - web_console_metadata_requirements.results | map(attribute='stat.exists') | min
+    fail_msg: 'Deploy playbooks/31-web-console-postgres.yml successfully before syncing metadata.'
+
+- name: Create metadata sync runtime directory
+  ansible.builtin.file:
+    path: "{{ web_console_metadata_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+
+- name: Create metadata helper directory
+  ansible.builtin.file:
+    path: /usr/local/lib/bigtop-web-console
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Deploy metadata sync helper
+  ansible.builtin.copy:
+    src: sync_metadata.py
+    dest: "{{ web_console_metadata_sync_script }}"
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Deploy non-destructive metadata schema
+  ansible.builtin.copy:
+    src: metadata_schema.sql
+    dest: "{{ web_console_metadata_schema }}"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Render inventory metadata snapshot without host secrets
+  ansible.builtin.template:
+    src: inventory.json.j2
+    dest: "{{ web_console_metadata_inventory_snapshot }}"
+    owner: root
+    group: root
+    mode: '0640'
+
+- name: Verify inventory and Web Console component catalog before database changes
+  ansible.builtin.command:
+    argv:
+      - "{{ web_console_metadata_python }}"
+      - "{{ web_console_metadata_sync_script }}"
+      - --inventory
+      - "{{ web_console_metadata_inventory_snapshot }}"
+      - --app
+      - "{{ web_console_metadata_app_source }}"
+      - --schema
+      - "{{ web_console_metadata_schema }}"
+      - --min-hosts
+      - "{{ web_console_metadata_min_hosts | string }}"
+      - --min-services
+      - "{{ web_console_metadata_min_services | string }}"
+      - --dry-run
+  register: web_console_metadata_preflight
+  changed_when: false
+
+- name: Synchronize cluster hosts and services into PostgreSQL transactionally
+  ansible.builtin.shell: |
+    set -a
+    . {{ web_console_metadata_env_file | quote }}
+    set +a
+    exec {{ web_console_metadata_python | quote }} {{ web_console_metadata_sync_script | quote }} \
+      --inventory {{ web_console_metadata_inventory_snapshot | quote }} \
+      --app {{ web_console_metadata_app_source | quote }} \
+      --schema {{ web_console_metadata_schema | quote }} \
+      --min-hosts {{ web_console_metadata_min_hosts | int }} \
+      --min-services {{ web_console_metadata_min_services | int }}
+  args:
+    executable: /bin/bash
+  register: web_console_metadata_sync_result
+  changed_when: "'Synchronized:' in web_console_metadata_sync_result.stdout"
+
+- name: Display metadata synchronization result
+  ansible.builtin.debug:
+    msg: "{{ web_console_metadata_sync_result.stdout | trim }}"
