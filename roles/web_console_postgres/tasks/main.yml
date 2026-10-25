@@ -1,0 +1,6 @@
+---
+- name: Provision local PostgreSQL
+  ansible.builtin.import_tasks: database.yml
+
+- name: Configure Web Console PostgreSQL integration
+  ansible.builtin.import_tasks: integration.yml

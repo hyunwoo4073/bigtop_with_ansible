@@ -1,0 +1,10 @@
+[Unit]
+Description=Reconcile Bigtop Web Console action history
+
+[Timer]
+OnCalendar={{ web_console_postgres_reconcile_calendar }}
+Persistent=true
+Unit=bigtop-web-console-history-sync.service
+
+[Install]
+WantedBy=timers.target

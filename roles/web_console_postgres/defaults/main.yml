@@ -1,0 +1,15 @@
+---
+web_console_postgres_db: bigtop_console
+web_console_postgres_user: bigtop_console_app
+web_console_postgres_host: 127.0.0.1
+web_console_postgres_port: 5432
+web_console_postgres_conf_dir: /etc/bigtop-web-console
+web_console_postgres_password_file: /etc/bigtop-web-console/postgres.password
+web_console_postgres_env_file: /etc/bigtop-web-console/db.env
+web_console_postgres_venv: "{{ web_console_venv_dir | default('/opt/bigtop-web-console/.venv') }}"
+web_console_postgres_app_dir: "{{ web_console_app_dir | default('/opt/bigtop-web-console') }}"
+web_console_postgres_service: bigtop-web-console
+web_console_postgres_log_file: "{{ web_console_audit_log_file | default('/var/log/bigtop-web-console/actions.log') }}"
+web_console_postgres_import_enabled: true
+web_console_postgres_reconcile_enabled: true
+web_console_postgres_reconcile_calendar: '*-*-* *:0/5:00'

@@ -1,0 +1,6 @@
+---
+- name: Restart Bigtop Web Console after PostgreSQL configuration
+  ansible.builtin.systemd_service:
+    name: "{{ web_console_postgres_service }}"
+    daemon_reload: true
+    state: restarted

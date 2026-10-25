@@ -1,0 +1,38 @@
+---
+# Reusable entry point: DB + metadata sync + frontend/backend read-only Inventory UI.
+- name: Provision and synchronize the Web Console metadata dependencies
+  ansible.builtin.import_playbook: 32-web-console-metadata.yml
+
+- name: Verify Web Console read-only metadata API after deployment
+  hosts: ops
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Confirm inventory metadata API is available
+      ansible.builtin.uri:
+        url: http://127.0.0.1:18090/api/metadata
+        method: GET
+        return_content: true
+        status_code: 200
+        timeout: 15
+      register: web_console_inventory_api
+      changed_when: false
+      retries: 3
+      delay: 2
+      until: web_console_inventory_api.status == 200
+
+    - name: Assert synchronized inventory has records
+      ansible.builtin.assert:
+        that:
+          - web_console_inventory_api.json.ok | bool
+          - web_console_inventory_api.json.read_only | bool
+          - (web_console_inventory_api.json.summary.hosts | int) >= 1
+          - (web_console_inventory_api.json.summary.services | int) >= 1
+        fail_msg: 'Metadata API returned no active records; inspect playbook 32 sync result.'
+
+    - name: Report synced metadata summary
+      ansible.builtin.debug:
+        msg: >-
+          Cluster Inventory: {{ web_console_inventory_api.json.summary.clusters }} clusters,
+          {{ web_console_inventory_api.json.summary.hosts }} hosts,
+          {{ web_console_inventory_api.json.summary.services }} services

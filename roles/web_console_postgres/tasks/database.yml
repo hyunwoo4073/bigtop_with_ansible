@@ -1,0 +1,151 @@
+---
+- name: Validate local PostgreSQL resource names
+  ansible.builtin.assert:
+    that:
+      - web_console_postgres_db is match('^[a-z_][a-z0-9_]*$')
+      - web_console_postgres_user is match('^[a-z_][a-z0-9_]*$')
+    fail_msg: 'Only PostgreSQL identifiers using lowercase ASCII letters, digits, and underscores are supported.'
+
+- name: Install local PostgreSQL dependencies
+  ansible.builtin.apt:
+    name:
+      - postgresql
+      - postgresql-client
+      - python3-psycopg2
+      - acl
+      - openssl
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure PostgreSQL is enabled and running
+  ansible.builtin.systemd_service:
+    name: postgresql
+    state: started
+    enabled: true
+
+- name: Ensure credential directory exists
+  ansible.builtin.file:
+    path: "{{ web_console_postgres_conf_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Check whether managed database password exists
+  ansible.builtin.stat:
+    path: "{{ web_console_postgres_password_file }}"
+  register: web_console_postgres_password_stat
+  no_log: true
+
+- name: Generate password only on initial provisioning
+  ansible.builtin.command: openssl rand -hex 32
+  register: web_console_postgres_new_password
+  when: not web_console_postgres_password_stat.stat.exists
+  changed_when: true
+  no_log: true
+
+- name: Persist generated password without placing it in Git
+  ansible.builtin.copy:
+    content: "{{ web_console_postgres_new_password.stdout }}
+"
+    dest: "{{ web_console_postgres_password_file }}"
+    owner: root
+    group: root
+    mode: '0600'
+  when: not web_console_postgres_password_stat.stat.exists
+  no_log: true
+
+- name: Enforce secure managed password-file permissions
+  ansible.builtin.file:
+    path: "{{ web_console_postgres_password_file }}"
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Read managed database password
+  ansible.builtin.slurp:
+    src: "{{ web_console_postgres_password_file }}"
+  register: web_console_postgres_password_content
+  no_log: true
+
+- name: Set PostgreSQL password for use in this play only
+  ansible.builtin.set_fact:
+    web_console_postgres_password: "{{ web_console_postgres_password_content.content | b64decode | trim }}"
+  no_log: true
+
+- name: Validate managed password format
+  ansible.builtin.assert:
+    that:
+      - web_console_postgres_password is match('^[0-9a-f]{64}$')
+    fail_msg: 'Managed PostgreSQL password file contains an unexpected format.'
+  no_log: true
+
+- name: Ensure PostgreSQL login role exists
+  become: true
+  become_user: postgres
+  community.postgresql.postgresql_user:
+    name: "{{ web_console_postgres_user }}"
+    password: "{{ web_console_postgres_password }}"
+    role_attr_flags: LOGIN
+    login_unix_socket: /var/run/postgresql
+    state: present
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  no_log: true
+
+- name: Ensure application database exists without replacing it
+  become: true
+  become_user: postgres
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  community.postgresql.postgresql_db:
+    name: "{{ web_console_postgres_db }}"
+    owner: "{{ web_console_postgres_user }}"
+    encoding: UTF-8
+    login_unix_socket: /var/run/postgresql
+    state: present
+
+- name: Copy idempotent DDL to target
+  ansible.builtin.copy:
+    src: web_console_action_history.sql
+    dest: /var/lib/postgresql/web_console_action_history.sql
+    owner: postgres
+    group: postgres
+    mode: '0640'
+
+- name: Ensure action history table and indexes exist as DB owner
+  become: true
+  become_user: postgres
+  community.postgresql.postgresql_script:
+    login_db: "{{ web_console_postgres_db }}"
+    path: /var/lib/postgresql/web_console_action_history.sql
+    login_host: "{{ web_console_postgres_host }}"
+    login_port: "{{ web_console_postgres_port | int }}"
+    login_user: "{{ web_console_postgres_user }}"
+    login_password: "{{ web_console_postgres_password }}"
+  changed_when: false
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  no_log: true
+
+- name: Validate database TCP authentication without disclosing password
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/psql
+      - -h
+      - "{{ web_console_postgres_host }}"
+      - -p
+      - "{{ web_console_postgres_port | string }}"
+      - -U
+      - "{{ web_console_postgres_user }}"
+      - -d
+      - "{{ web_console_postgres_db }}"
+      - -tAc
+      - 'SELECT 1'
+  environment:
+    PGPASSWORD: "{{ web_console_postgres_password }}"
+  register: web_console_postgres_connection_check
+  changed_when: false
+  failed_when: web_console_postgres_connection_check.stdout | trim != '1'
+  no_log: true

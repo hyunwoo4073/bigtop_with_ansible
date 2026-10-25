@@ -1,0 +1,13 @@
+---
+# End-to-end entry point: PostgreSQL and the existing console first, metadata second.
+- name: Provision Web Console and PostgreSQL before metadata synchronization
+  ansible.builtin.import_playbook: 31-web-console-postgres.yml
+
+- name: Synchronize Web Console platform metadata
+  hosts: ops
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Synchronize inventory and service registry
+      ansible.builtin.import_role:
+        name: web_console_metadata

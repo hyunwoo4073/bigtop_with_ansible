@@ -1,0 +1,43 @@
+---
+- name: Deploy Bigtop Web Console with durable PostgreSQL action history
+  hosts: ops
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Provision PostgreSQL and schema first
+      ansible.builtin.import_role:
+        name: web_console_postgres
+        tasks_from: database.yml
+
+    - name: Deploy existing Web Console from project sources
+      ansible.builtin.import_role:
+        name: web_console
+
+    - name: Configure DB credentials, driver, backfill, and reconciliation
+      ansible.builtin.import_role:
+        name: web_console_postgres
+        tasks_from: integration.yml
+
+    - name: Apply service restart handlers before API verification
+      ansible.builtin.meta: flush_handlers
+
+    - name: Wait for Web Console internal API
+      ansible.builtin.uri:
+        url: 'http://127.0.0.1:18090/api/health'
+        status_code: 200
+      register: web_console_postgres_api_health
+      retries: 5
+      delay: 2
+      until: web_console_postgres_api_health is succeeded
+
+    - name: Confirm DB history integration is running
+      ansible.builtin.uri:
+        url: 'http://127.0.0.1:18090/api/storage/health'
+        return_content: true
+        status_code: 200
+      register: web_console_postgres_storage_health
+      failed_when: not (web_console_postgres_storage_health.json.ok | default(false) | bool)
+
+    - name: Summarize managed database state
+      ansible.builtin.debug:
+        msg: 'Web Console PostgreSQL connected. Action events: {{ web_console_postgres_storage_health.json.action_count | default("unknown") }}'
