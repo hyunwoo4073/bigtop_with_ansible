@@ -1,0 +1,13 @@
+---
+web_console_pg_observability_database: "{{ web_console_pg_backup_database | default('bigtop_console') }}"
+web_console_pg_observability_backup_dir: "{{ web_console_pg_backup_dir | default('/var/backups/bigtop-web-console/postgresql') }}"
+web_console_pg_observability_backup_timer: bigtop-web-console-pg-backup.timer
+web_console_pg_observability_collector_dir: /var/lib/prometheus/node-exporter
+web_console_pg_observability_metric_file: "{{ web_console_pg_observability_collector_dir }}/web_console_pg_backup.prom"
+web_console_pg_observability_script_dir: /usr/local/lib/bigtop-web-console
+web_console_pg_observability_config_file: /etc/bigtop-web-console/pg-backup-observability.json
+web_console_pg_observability_service_name: bigtop-web-console-pg-backup-observer.service
+web_console_pg_observability_timer_name: bigtop-web-console-pg-backup-observer.timer
+web_console_pg_observability_interval_minutes: 10
+web_console_pg_observability_minimum_bytes: 1024
+web_console_pg_observability_restore_timeout: 60

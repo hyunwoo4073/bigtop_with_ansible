@@ -1,0 +1,128 @@
+---
+- name: Validate backup monitoring configuration
+  ansible.builtin.assert:
+    that:
+      - web_console_pg_observability_database is match('^[a-z][a-z0-9_]*$')
+      - web_console_pg_observability_backup_dir is match('^/var/backups/[A-Za-z0-9_./-]+$')
+      - "'..' not in web_console_pg_observability_backup_dir.split('/')"
+      - web_console_pg_observability_collector_dir is match('^/var/lib/prometheus/[A-Za-z0-9_./-]+$')
+      - web_console_pg_observability_script_dir is match('^/usr/local/lib/[A-Za-z0-9_./-]+$')
+      - web_console_pg_observability_interval_minutes | int >= 1
+      - web_console_pg_observability_interval_minutes | int <= 1440
+      - web_console_pg_observability_minimum_bytes | int >= 100
+      - web_console_pg_observability_restore_timeout | int >= 1
+    fail_msg: Backup observability paths and parameters must be safe and valid.
+
+- name: Confirm existing backup and Node Exporter collector directories
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ web_console_pg_observability_backup_dir }}"
+    - "{{ web_console_pg_observability_collector_dir }}"
+    - "{{ web_console_pg_observability_script_dir }}"
+  register: web_console_pg_observability_paths
+
+- name: Stop if backup or Node Exporter is not installed
+  ansible.builtin.assert:
+    that:
+      - item.stat.isdir | default(false)
+    fail_msg: "Missing {{ item.item }}. Install backup role 34 and enable Node Exporter textfile collector first."
+  loop: "{{ web_console_pg_observability_paths.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Verify backup scheduler unit exists
+  ansible.builtin.stat:
+    path: "/etc/systemd/system/{{ web_console_pg_observability_backup_timer }}"
+  register: web_console_pg_observability_backup_unit
+
+- name: Require the managed PostgreSQL backup scheduler
+  ansible.builtin.assert:
+    that:
+      - web_console_pg_observability_backup_unit.stat.isreg | default(false)
+    fail_msg: Existing 34 PostgreSQL backup timer is missing.
+
+- name: Deploy read-only backup observer
+  ansible.builtin.copy:
+    src: pg_backup_metrics.py
+    dest: "{{ web_console_pg_observability_script_dir }}/pg_backup_metrics.py"
+    owner: root
+    group: root
+    mode: '0755'
+  register: web_console_pg_observability_script_deploy
+
+- name: Deploy observer configuration without secrets
+  ansible.builtin.template:
+    src: config.json.j2
+    dest: "{{ web_console_pg_observability_config_file }}"
+    owner: root
+    group: root
+    mode: '0644'
+  register: web_console_pg_observability_config_deploy
+
+- name: Validate deployed observer Python syntax
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -m
+      - py_compile
+      - "{{ web_console_pg_observability_script_dir }}/pg_backup_metrics.py"
+  changed_when: false
+
+- name: Deploy backup observer systemd service
+  ansible.builtin.template:
+    src: observer.service.j2
+    dest: "/etc/systemd/system/{{ web_console_pg_observability_service_name }}"
+    owner: root
+    group: root
+    mode: '0644'
+  register: web_console_pg_observability_service_deploy
+  notify: Reload backup observer units
+
+- name: Deploy backup observer systemd timer
+  ansible.builtin.template:
+    src: observer.timer.j2
+    dest: "/etc/systemd/system/{{ web_console_pg_observability_timer_name }}"
+    owner: root
+    group: root
+    mode: '0644'
+  register: web_console_pg_observability_timer_deploy
+  notify: Reload backup observer units
+
+- name: Flush pending systemd unit changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable monitoring timer
+  ansible.builtin.systemd_service:
+    name: "{{ web_console_pg_observability_timer_name }}"
+    enabled: true
+    state: started
+
+- name: Check whether a previously published metric is present
+  ansible.builtin.stat:
+    path: "{{ web_console_pg_observability_metric_file }}"
+  register: web_console_pg_observability_metric_stat
+
+- name: Generate initial metrics or refresh when observer configuration changes
+  ansible.builtin.systemd_service:
+    name: "{{ web_console_pg_observability_service_name }}"
+    state: started
+  when: >-
+    not web_console_pg_observability_metric_stat.stat.exists or
+    web_console_pg_observability_script_deploy.changed or
+    web_console_pg_observability_config_deploy.changed or
+    web_console_pg_observability_service_deploy.changed or
+    web_console_pg_observability_timer_deploy.changed
+
+- name: Verify Node Exporter exposes the PostgreSQL backup metrics
+  ansible.builtin.uri:
+    url: http://127.0.0.1:9100/metrics
+    return_content: true
+    status_code: 200
+    timeout: 15
+  register: web_console_pg_observability_node_metrics
+  changed_when: false
+  failed_when: >-
+    web_console_pg_observability_node_metrics.status | default(0) != 200 or
+    'bigtop_web_console_pg_backup_collector_success' not in
+    (web_console_pg_observability_node_metrics.content | default(''))

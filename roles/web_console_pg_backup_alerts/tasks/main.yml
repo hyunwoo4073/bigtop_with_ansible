@@ -1,0 +1,180 @@
+---
+- name: Validate PostgreSQL backup alert thresholds and managed paths
+  ansible.builtin.assert:
+    that:
+      - web_console_pg_backup_alerts_backup_age_seconds | int >= 3600
+      - web_console_pg_backup_alerts_observer_age_seconds | int >= 600
+      - web_console_pg_backup_alerts_rule_filename is match('^[A-Za-z0-9_-]+\.yml$')
+      - web_console_pg_backup_alerts_rule_dir == '/etc/prometheus/rules'
+      - web_console_pg_backup_alerts_prometheus_config == '/etc/prometheus/prometheus.yml'
+    fail_msg: Invalid PostgreSQL backup alert settings.
+
+- name: Check the existing Prometheus configuration
+  ansible.builtin.stat:
+    path: "{{ web_console_pg_backup_alerts_prometheus_config }}"
+  register: web_console_pg_backup_alerts_prom_config_stat
+
+- name: Require existing Prometheus deployment
+  ansible.builtin.assert:
+    that:
+      - web_console_pg_backup_alerts_prom_config_stat.stat.isreg | default(false)
+    fail_msg: Install existing Prometheus role (playbook 14) first.
+
+- name: Check backup observer metric file
+  ansible.builtin.stat:
+    path: "{{ web_console_pg_backup_alerts_metric_path }}"
+  register: web_console_pg_backup_alerts_metric_stat
+
+- name: Require the 35 PostgreSQL backup observer
+  ansible.builtin.assert:
+    that:
+      - web_console_pg_backup_alerts_metric_stat.stat.isreg | default(false)
+    fail_msg: Deploy and verify playbook 35 first; observer metric file is missing.
+
+- name: Read the deployed Prometheus configuration
+  ansible.builtin.slurp:
+    src: "{{ web_console_pg_backup_alerts_prometheus_config }}"
+  register: web_console_pg_backup_alerts_existing_config
+
+- name: Extract Prometheus rule file patterns
+  ansible.builtin.set_fact:
+    web_console_pg_backup_alerts_rule_file_patterns: >-
+      {{ ((web_console_pg_backup_alerts_existing_config.content | b64decode | from_yaml).rule_files | default([])) }}
+
+- name: Verify existing rule_files covers the new managed rule
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - -c
+      - |-
+        import fnmatch
+        import json
+        import sys
+        patterns = json.loads(sys.argv[1])
+        target = sys.argv[2]
+        found = any(fnmatch.fnmatchcase(target, str(p)) for p in patterns)
+        print('Prometheus rule_files covers alert rule:', found)
+        sys.exit(0 if found else 2)
+      - "{{ web_console_pg_backup_alerts_rule_file_patterns | to_json }}"
+      - "{{ web_console_pg_backup_alerts_rule_path }}"
+  register: web_console_pg_backup_alerts_rules_included
+  changed_when: false
+  failed_when: false
+
+- name: Refuse to deploy a rule Prometheus would silently ignore
+  ansible.builtin.assert:
+    that:
+      - web_console_pg_backup_alerts_rules_included.rc == 0
+    fail_msg: >-
+      The deployed /etc/prometheus/prometheus.yml rule_files does not cover
+      {{ web_console_pg_backup_alerts_rule_path }}. Update the managed
+      roles/prometheus/templates/prometheus.yml.j2 to include /etc/prometheus/rules/*.yml,
+      deploy playbook 14, then rerun playbook 36. No live rule was changed.
+
+- name: Verify existing Prometheus configuration before modification
+  ansible.builtin.command:
+    argv:
+      - promtool
+      - check
+      - config
+      - "{{ web_console_pg_backup_alerts_prometheus_config }}"
+  changed_when: false
+
+- name: Ensure Prometheus backup alert rule directory exists
+  ansible.builtin.file:
+    path: "{{ web_console_pg_backup_alerts_rule_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Validate and deploy dedicated PostgreSQL backup alert rules
+  block:
+    - name: Render a staged alert rule outside the active rule glob
+      ansible.builtin.template:
+        src: web-console-pg-backup.yml.j2
+        dest: "{{ web_console_pg_backup_alerts_staging_path }}"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Check new alert rules with promtool before activation
+      ansible.builtin.command:
+        argv:
+          - promtool
+          - check
+          - rules
+          - "{{ web_console_pg_backup_alerts_staging_path }}"
+      changed_when: false
+
+    - name: Publish the verified alert rules in the existing Prometheus rule glob
+      ansible.builtin.copy:
+        src: "{{ web_console_pg_backup_alerts_staging_path }}"
+        dest: "{{ web_console_pg_backup_alerts_rule_path }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0644'
+        backup: true
+      notify: Reload Prometheus backup alert rules
+
+    - name: Validate all loaded Prometheus rules after file deployment
+      ansible.builtin.command:
+        argv:
+          - promtool
+          - check
+          - config
+          - "{{ web_console_pg_backup_alerts_prometheus_config }}"
+      changed_when: false
+  always:
+    - name: Remove the temporary validation rule
+      ansible.builtin.file:
+        path: "{{ web_console_pg_backup_alerts_staging_path }}"
+        state: absent
+
+- name: Reload Prometheus only when the managed alert rule changed
+  ansible.builtin.meta: flush_handlers
+
+- name: Read live Prometheus alert rules
+  ansible.builtin.uri:
+    url: "{{ web_console_pg_backup_alerts_prometheus_url }}/api/v1/rules?type=alert"
+    return_content: true
+    status_code: 200
+    timeout: 15
+  register: web_console_pg_backup_alerts_live_rules
+  changed_when: false
+  until: >-
+    web_console_pg_backup_alerts_live_rules.json.status | default('') == 'success' and
+    (
+      web_console_pg_backup_alerts_expected | difference(
+        web_console_pg_backup_alerts_live_rules.json.data.groups |
+        default([]) | map(attribute='rules') | flatten |
+        map(attribute='name') | list
+      ) | length
+    ) == 0
+  retries: 8
+  delay: 2
+
+- name: Query Prometheus Alertmanager discovery
+  ansible.builtin.uri:
+    url: "{{ web_console_pg_backup_alerts_prometheus_url }}/api/v1/alertmanagers"
+    return_content: true
+    status_code: 200
+    timeout: 15
+  register: web_console_pg_backup_alerts_alertmanagers
+  changed_when: false
+
+- name: Ensure Prometheus is connected to at least one Alertmanager
+  ansible.builtin.assert:
+    that:
+      - web_console_pg_backup_alerts_alertmanagers.json.status == 'success'
+      - web_console_pg_backup_alerts_alertmanagers.json.data.activeAlertmanagers | length > 0
+    fail_msg: >-
+      Rules are loaded, but Prometheus does not report an active Alertmanager.
+      Check the existing Prometheus alerting configuration and Alertmanager service.
+
+- name: Check Alertmanager API health
+  ansible.builtin.uri:
+    url: "{{ web_console_pg_backup_alerts_alertmanager_url }}/-/ready"
+    return_content: false
+    status_code: 200
+    timeout: 15
+  changed_when: false

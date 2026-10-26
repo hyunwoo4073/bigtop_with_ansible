@@ -1,0 +1,101 @@
+--- a/roles/web_console/templates/app.py.j2
++++ b/roles/web_console/templates/app.py.j2
+@@ -1,5 +1,6 @@
+ import json
+ import os
++import uuid
+ import shlex
+ import shutil
+ import subprocess
+@@ -172,8 +173,51 @@
+     return value[:limit] + "\n...[truncated]"
+ 
+ 
++# Optional PostgreSQL store. Existing JSONL remains a durable fallback.
++WEB_CONSOLE_DB_DSN = os.environ.get("WEB_CONSOLE_DB_DSN", "")
++
++
++def _db_connect():
++    import psycopg
++    return psycopg.connect(WEB_CONSOLE_DB_DSN, connect_timeout=3)
++
++
++def _db_write_action(record: Dict) -> None:
++    if not WEB_CONSOLE_DB_DSN:
++        return
++    try:
++        with _db_connect() as conn:
++            with conn.cursor() as cur:
++                cur.execute(
++                    """INSERT INTO action_history
++                       (event_id, recorded_at, action, host, service, ok, blocked, payload)
++                       VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, %s::jsonb)
++                       ON CONFLICT (event_id) DO NOTHING""",
++                    (record["event_id"], record["recorded_at"], record.get("action"),
++                     record.get("host"), record.get("service"), record.get("ok"),
++                     bool(record.get("blocked", False)),
++                     json.dumps(record, ensure_ascii=False, default=str)),
++                )
++    except Exception as exc:
++        # Service control must never fail merely because PostgreSQL is down.
++        print(f"[postgres-audit-warning] {type(exc).__name__}", flush=True)
++
++
++def _db_read_actions(limit: int) -> Dict:
++    with _db_connect() as conn:
++        with conn.cursor() as cur:
++            cur.execute(
++                "SELECT payload FROM action_history ORDER BY seq DESC LIMIT %s",
++                (limit,),
++            )
++            items = [row[0] for row in cur.fetchall()]
++    return {"path": "postgresql:action_history", "count": len(items),
++            "items": items, "storage": "postgresql"}
++
++
+ def append_action_audit(record: Dict) -> None:
+     audit_record = {
++        "event_id": str(uuid.uuid4()),
+         "recorded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+         **record,
+     }
+@@ -187,9 +231,16 @@
+     except Exception as exc:
+         print(f"[audit-log-error] {exc}", flush=True)
+ 
++    _db_write_action(audit_record)
++
+ 
+ def read_action_audit(limit: int = 50) -> Dict:
+     limit = max(1, min(int(limit), ACTION_AUDIT_LOG_MAX_ITEMS))
++    if WEB_CONSOLE_DB_DSN:
++        try:
++            return _db_read_actions(limit)
++        except Exception as exc:
++            print(f"[postgres-read-warning] {type(exc).__name__}", flush=True)
+     audit_path = Path(ACTION_AUDIT_LOG)
+ 
+     if not audit_path.exists():
+@@ -718,6 +769,22 @@
+     }
+ 
+ 
++@app.get("/api/storage/health")
++def api_storage_health():
++    if not WEB_CONSOLE_DB_DSN:
++        return {"storage": "file", "postgresql": "disabled", "ok": False}
++    try:
++        with _db_connect() as conn:
++            with conn.cursor() as cur:
++                cur.execute("SELECT count(*) FROM action_history")
++                count = cur.fetchone()[0]
++        return {"storage": "postgresql", "postgresql": "connected", "ok": True,
++                "action_count": count}
++    except Exception as exc:
++        return {"storage": "file", "postgresql": "unavailable", "ok": False,
++                "error_type": type(exc).__name__}
++
++
+ @app.get("/api/actions/history")
+ def api_action_history(limit: int = 50):
+     return read_action_audit(limit=limit)

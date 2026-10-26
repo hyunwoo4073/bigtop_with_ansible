@@ -1099,6 +1099,152 @@ def api_platform_metadata(include_absent: bool = False):
 # END BIGTOP INVENTORY READ API V1
 
 
+# BEGIN BIGTOP POSTGRES BACKUP DASHBOARD API V1
+# Read-only Prometheus proxy: never touches PostgreSQL, filesystem or systemd.
+@app.get('/api/ops/postgresql-backup')
+def api_postgresql_backup_dashboard():
+    import math as _pgb_math
+    import os as _pgb_os
+    import time as _pgb_time
+    from urllib.parse import urlencode as _pgb_urlencode
+    from urllib.request import Request as _PGBRequest, urlopen as _pgb_urlopen
+
+    endpoint = _pgb_os.environ.get('WEB_CONSOLE_PROMETHEUS_URL',
+                                    'http://127.0.0.1:9090').rstrip('/')
+    checked_at = int(_pgb_time.time())
+    expected = (
+        'collector_success', 'last_check_timestamp_seconds', 'archive_count',
+        'latest_archive_size_bytes', 'latest_archive_timestamp_seconds',
+        'latest_archive_valid', 'last_valid_timestamp_seconds', 'timer_active',
+    )
+    prefix = 'bigtop_web_console_pg_backup_'
+    errors = []
+    issues = []
+    metrics = {}
+    alerts = []
+    expected_alerts = {
+        'BigtopPGBackupNoArchives', 'BigtopPGBackupStale',
+        'BigtopPGBackupLatestArchiveInvalid', 'BigtopPGBackupTimerInactive',
+        'BigtopPGBackupCollectorFailed', 'BigtopPGBackupObserverStale',
+        'BigtopPGBackupMetricsMissing',
+    }
+    rules_loaded = False
+    alertmanager_connected = None
+
+    def query_prometheus(path, params=None):
+        url = endpoint + path
+        if params:
+            url += '?' + _pgb_urlencode(params)
+        with _pgb_urlopen(_PGBRequest(url, headers={'Accept': 'application/json'}),
+                          timeout=4) as response:
+            result = __import__('json').load(response)
+        if not isinstance(result, dict) or result.get('status') != 'success':
+            raise ValueError('Unexpected Prometheus API response')
+        return result.get('data') or {}
+
+    try:
+        data = query_prometheus('/api/v1/query', {
+            'query': '{__name__=~"bigtop_web_console_pg_backup_.*"}',
+        })
+        duplicates = set()
+        for item in data.get('result', []):
+            full_name = item.get('metric', {}).get('__name__', '')
+            key = full_name[len(prefix):] if full_name.startswith(prefix) else ''
+            if key not in expected:
+                continue
+            if key in metrics:
+                duplicates.add(key)
+                continue
+            raw = item.get('value', [None, None])
+            number = float(raw[1])
+            if not _pgb_math.isfinite(number):
+                raise ValueError('Non-finite metric')
+            metrics[key] = number
+        if duplicates:
+            errors.append('Duplicate backup metric series: ' + ', '.join(sorted(duplicates)))
+        missing = sorted(set(expected).difference(metrics))
+        if missing:
+            errors.append('Missing backup metrics: ' + ', '.join(missing))
+    except Exception:
+        errors.append('Cannot read PostgreSQL backup metrics from Prometheus')
+
+    try:
+        data = query_prometheus('/api/v1/rules', {'type': 'alert'})
+        for group in data.get('groups', []):
+            if group.get('name') != 'bigtop-postgresql-backup':
+                continue
+            rules_loaded = True
+            for rule in group.get('rules', []):
+                if rule.get('type') != 'alerting':
+                    continue
+                if rule.get('labels', {}).get('component') != 'postgresql-backup':
+                    continue
+                alerts.append({
+                    'name': str(rule.get('name', '')),
+                    'state': str(rule.get('state', 'unknown')),
+                    'severity': str(rule.get('labels', {}).get('severity', 'unknown')),
+                    'summary': str(rule.get('annotations', {}).get('summary', '')),
+                })
+        alerts.sort(key=lambda row: row['name'])
+        missing_alerts = expected_alerts - {item['name'] for item in alerts}
+        if not rules_loaded or missing_alerts:
+            errors.append('Missing PostgreSQL backup alert rules: ' +
+                          ', '.join(sorted(missing_alerts)))
+    except Exception:
+        errors.append('Cannot read PostgreSQL backup alert rules')
+
+    try:
+        data = query_prometheus('/api/v1/alertmanagers')
+        alertmanager_connected = bool(data.get('activeAlertmanagers', []))
+        if not alertmanager_connected:
+            issues.append('Prometheus has no active Alertmanager')
+    except Exception:
+        errors.append('Cannot verify Prometheus Alertmanager connection')
+
+    # Missing or ambiguous data MUST NEVER be reported as HEALTHY.
+    state = 'UNKNOWN' if errors else 'HEALTHY'
+    age = None
+    check_age = None
+    if 'latest_archive_timestamp_seconds' in metrics:
+        age = max(0, checked_at - metrics['latest_archive_timestamp_seconds'])
+    if 'last_check_timestamp_seconds' in metrics:
+        check_age = max(0, checked_at - metrics['last_check_timestamp_seconds'])
+    if len(metrics) == len(expected):
+        if metrics['collector_success'] != 1:
+            issues.append('Backup observer reported a failure')
+        if metrics['archive_count'] < 1:
+            issues.append('No PostgreSQL backup archives available')
+        if metrics['latest_archive_valid'] != 1:
+            issues.append('Latest PostgreSQL backup is not valid')
+        if metrics['timer_active'] != 1:
+            issues.append('Backup systemd timer is inactive')
+        if age is not None and age > 93600:
+            issues.append('Latest backup is older than 26 hours')
+        if check_age is not None and check_age > 1800:
+            issues.append('Backup observer is older than 30 minutes')
+    for item in alerts:
+        if item['state'] in ('firing', 'pending'):
+            issues.append('Backup alert ' + item['name'] + ' is ' + item['state'])
+    if issues and not errors:
+        state = 'DEGRADED'
+    return {
+        'ok': state == 'HEALTHY', 'read_only': True, 'status': state,
+        'source': 'prometheus', 'checked_at': checked_at,
+        'thresholds': {'backup_age_seconds': 93600, 'observer_age_seconds': 1800},
+        'metrics': {key: metrics.get(key) for key in expected},
+        'backup_age_seconds': age, 'observer_age_seconds': check_age,
+        'rules_loaded': rules_loaded, 'alertmanager_connected': alertmanager_connected,
+        'alerts': alerts,
+        'alert_summary': {
+            'total': len(alerts),
+            'firing': sum(a['state'] == 'firing' for a in alerts),
+            'pending': sum(a['state'] == 'pending' for a in alerts),
+        },
+        'issues': issues, 'errors': errors,
+    }
+# END BIGTOP POSTGRES BACKUP DASHBOARD API V1
+
+
 frontend_path = Path(FRONTEND_DIST_DIR)
 
 if frontend_path.exists():

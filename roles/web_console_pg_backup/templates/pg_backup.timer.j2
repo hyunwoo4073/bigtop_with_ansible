@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily PostgreSQL backup for Bigtop Web Console
+
+[Timer]
+OnCalendar={{ web_console_pg_backup_calendar }}
+Persistent=true
+AccuracySec=1min
+RandomizedDelaySec=5min
+Unit={{ web_console_pg_backup_service }}
+
+[Install]
+WantedBy=timers.target

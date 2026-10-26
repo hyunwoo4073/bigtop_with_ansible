@@ -8,6 +8,11 @@ Apache Bigtop과 Ansible을 사용해 Hadoop 기반 미니 데이터 플랫폼�
 
 ## 구성
 
+<!-- BEGIN BIGTOP README OCT2026 OVERVIEW -->
+> **2026년 10월 운영 확장:** Web Console 조치 이력 PostgreSQL 영속화, 메타데이터/Inventory, 백업·복원 검증(34), 백업 관측(35), Prometheus 백업 장애 알림(36)을 추가했습니다. **37번 Admin 백업 대시보드는 현장 배포 완료 여부를 확인해야 합니다.** 상세 내용은 아래 「Web Console 운영 확장」 절을 참조하세요.
+<!-- END BIGTOP README OCT2026 OVERVIEW -->
+
+
 현재 클러스터는 4대 VM 기준입니다.
 
 ```text
@@ -2889,6 +2894,11 @@ skip_list:
 
 ## Bigtop Web Console
 
+<!-- BEGIN BIGTOP README OCT2026 WEB NOTE -->
+> 2026년 10월 이후의 PostgreSQL/Inventory/백업/알림 확장 내용은 「Web Console 운영 확장: Action History · PostgreSQL · Inventory · 백업/알림 (2026-10)」에서 다룹니다.
+<!-- END BIGTOP README OCT2026 WEB NOTE -->
+
+
 Bigtop Web Console은 Ambari 없는 개인 VM 환경에서 주요 Hadoop/Spark/Monitoring/Ops 서비스를 한 화면에서 확인하고 조치하기 위한 경량 통합 운영 UI입니다.
 
 본 프로젝트의 Web Console은 기존 Prometheus/Grafana를 대체하지 않습니다.
@@ -3440,6 +3450,227 @@ ansible ops -b -m shell -a "nginx -t"
 ansible ops -b -m command -a "systemctl is-active nginx"
 ```
 
+<!-- BEGIN BIGTOP WEB CONSOLE OPERATIONS 2026-10 -->
+## Web Console 운영 확장: Action History · PostgreSQL · Inventory · 백업/알림 (2026-10)
+
+> **문서 범위:** 기존 HDFS/YARN/Spark/모니터링 설명을 유지하면서, 2026년 10월까지 추가한 운영 기능을 정리합니다. 실제 재배포는 저장소의 Ansible Playbook/Role을 기준으로 수행합니다. ZIP·임시 적용 스크립트는 배포 소스가 아닙니다.
+>
+> **적용 상태:** 31~36번 단계는 이전 작업 및 점검 결과에 기반해 정리했습니다. **37번 PostgreSQL Backup Admin 패널은 패키지를 제작·전달했으나 이 문서 작성 시점에 worker3 실제 배포 완료 여부가 확인되지 않았습니다.** 아래 기능 설명은 구현 범위이며 모든 엔드포인트의 실운영 상태를 보장하지 않습니다.
+
+### 운영 아키텍처 및 책임 경계
+
+```text
+[브라우저] -- Basic Auth --> [worker3 Nginx :1337]
+                                 |
+                                 v
+                     [FastAPI :127.0.0.1:18090]
+                       |       |          |
+                       |       |          +--> [Prometheus :9090] -- Alert rules --> [Alertmanager :9093]
+                       |       |                     ^
+                       |       |                     |
+                       |       |             [Node Exporter textfile :9100]
+                       |       |                     ^
+                       |       |               [Backup observer timer]
+                       |       |
+                       |       +--> [PostgreSQL on worker3: bigtop_console]
+                       |                   | Action History / inventory snapshot
+                       |                   | (백업: pg_dump + systemd timer)
+                       |
+                       +--> [원격 호스트 systemd / HDFS NameNode JMX / YARN REST]
+```
+
+- **Ansible**: 호스트·서비스 선언 정보 및 배포의 기준(source of truth). `inventory/`와 `roles/web_console`의 서비스 정의를 관리합니다.
+- **PostgreSQL**: Action History의 영속 저장소와 클러스터 메타데이터의 *읽기 모델*. 실제 서비스 상태, 서비스 제어 권한, Ansible 설정의 기준이 아닙니다.
+- **Web Console**: API·React를 통한 운영 조회/제어 UI. 기존 Grafana 및 Prometheus를 대체하지 않습니다.
+- **Prometheus / Alertmanager**: 백업 상태 측정·알림 평가 및 기존 알림 전달 설정을 담당합니다.
+- **보안 경계**: 외부 접근은 Nginx Basic Auth를 경유합니다. 내부 FastAPI `18090` 및 DB 접속 정보를 외부에 노출하지 않습니다. Basic Auth는 사용자별 RBAC 및 감사 주체 식별을 대체하지 않습니다.
+
+### 단계별 기능 및 Ansible 진입점
+
+| 단계 | 진입점 | 주요 변경 | 비고 |
+|---|---|---|---|
+| 30 | `playbooks/30-web-console.yml` | FastAPI + React/Vite + Nginx Web Console | 기본 운영 UI |
+| 31 | `playbooks/31-web-console-postgres.yml` | PostgreSQL, Action History 저장·백필·JSONL 재동기화 | 기존 기록 보존 |
+| 32 | `playbooks/32-web-console-metadata.yml` | Ansible inventory와 Web Console 컴포넌트 메타데이터 스냅샷 | 31번을 import |
+| 33 | `playbooks/33-web-console-inventory.yml` | `/api/metadata`, React `Inventory` 읽기 전용 화면 | 32번을 import |
+| 34 | `playbooks/34-web-console-postgres-backup.yml` | `pg_dump` 정기 백업 및 격리된 복원 검증 | 데이터 변경 없음 |
+| 35 | `playbooks/35-web-console-pg-backup-observability.yml` | Node Exporter textfile 백업 메트릭 | 34번 Role 재사용 |
+| 36 | `playbooks/36-web-console-pg-backup-alerts.yml` | 백업 실패/지연 등 7개 Prometheus 알림 | 기존 Alertmanager 사용 |
+| 37 | `playbooks/37-web-console-pg-backup-dashboard.yml` | Admin 백업 상태 및 Alert Rule 읽기 전용 패널 | **실배포 확인 필요** |
+
+`32`는 `31`을, `33`은 `32`를 순서대로 호출합니다. `35`는 `34`의 백업 Role을 재사용합니다. `36`은 규칙만 배포하며 PostgreSQL 서버/백업 스크립트를 재설치하지 않습니다. `37`은 기존 `web_console` Role을 재배포합니다.
+
+```text
+추가 Role
+roles/web_console_postgres/           # 영속 Action History, 비밀번호·DB 관리 및 동기화
+roles/web_console_metadata/           # inventory/서비스 메타데이터 동기화
+roles/web_console_pg_backup/          # pg_dump 백업과 임시 DB 복원 검증
+roles/web_console_pg_observability/   # 백업 상태 메트릭 게시
+roles/web_console_pg_backup_alerts/   # Prometheus 백업 알림 규칙
+
+확장 프런트엔드/백엔드
+roles/web_console/templates/app.py.j2
+roles/web_console/files/frontend/src/main.jsx
+roles/web_console/files/frontend/src/InventoryView.jsx
+roles/web_console/files/frontend/src/inventory.css
+roles/web_console/files/frontend/src/BackupHealthPanel.jsx     # 37단계 적용 시
+roles/web_console/files/frontend/src/backup-health.css        # 37단계 적용 시
+
+주요 문서
+docs/web_console_postgres.md
+docs/web_console_metadata.md
+docs/web_console_pg_backup.md
+docs/web_console_pg_backup_observability.md
+docs/web_console_pg_backup_alerts.md
+```
+
+### Web Console UI 및 API
+
+| 화면/기능 | 내용 |
+|---|---|
+| Home / Services / Grid / Incidents / Admin | 상태 조회, 서비스 로그, 제어, 장애 및 관리자 기능 |
+| Action History | Start/Stop/Restart 조치 이력 조회; PostgreSQL 영속화 + JSONL 보존 |
+| Runbooks | 장애 상황별 운영 문서 연결 및 조회 |
+| Self Check | Web Console 자체 점검 API·화면 |
+| Incidents 테스트 모드 | `?incident_demo=1`로 브라우저 로컬 테스트 데이터 표시; Hadoop 서비스 변경 없음 |
+| HDFS/YARN Functional Health | NameNode JMX, YARN REST 기반 읽기 전용 진단(`HEALTHY/DEGRADED/UNKNOWN`) |
+| Inventory | 동기화된 호스트/서비스 메타데이터 조회. `IN INVENTORY`는 서버 생존 상태를 뜻하지 않음 |
+| PostgreSQL Backup (37) | Admin 백업/알림/Alertmanager 상태 조회; 실배포 확인 필요 |
+
+주요 API:
+
+```text
+GET /api/health                        # FastAPI health
+GET /api/status                        # Web Console service status
+GET /api/actions/history               # Action audit/history
+GET /api/storage/health                # PostgreSQL Action History 연결 상태
+GET /api/runbooks                      # Runbook 목록
+GET /api/self-check                    # Console self-check
+GET /api/metadata                      # PostgreSQL inventory read model
+GET /api/metadata?include_absent=true  # 현재 인벤토리에서 제외된 항목 포함
+GET /api/ops/postgresql-backup         # 37단계: Prometheus 백업/알림 상태
+```
+
+서비스 lifecycle action 이후에는 `systemctl ActiveState`를 재확인하고 결과를 Action History에 기록합니다. 단순히 명령 실행 성공만으로 최종 서비스 상태가 정상이라고 판단하지 않습니다.
+
+PostgreSQL은 `bigtop_console` DB를 기본 사용합니다. DB 장애 중에도 `/var/log/bigtop-web-console/actions.log` JSON Lines를 보존하고, `bigtop-web-console-history-sync.timer`가 기본 5분마다 미반영 기록을 동기화합니다. 별도로 `Action History` 기록이 0건인 것은 오류가 아닐 수 있으므로 DB 연결 상태와 구분합니다.
+
+메타데이터는 `platform_clusters`, `platform_hosts`, `platform_service_instances`, `platform_metadata_sync_runs` 테이블을 사용합니다. 32/33번 Playbook 실행 시 스냅샷을 갱신하며, 목록에서 제거된 항목은 삭제하지 않고 `is_present=false`로 표시합니다. 웹 페이지 자동 갱신은 Ansible 동기화를 실행하지 않습니다.
+
+### PostgreSQL 백업 및 복원 검증 (34)
+
+- 백업 대상: 기존 PostgreSQL `bigtop_console` (기본값, `web_console_pg_backup_database`로 변경 가능)
+- 형식: `pg_dump -Fc` (PostgreSQL custom archive)
+- 경로: `/var/backups/bigtop-web-console/postgresql/` (`postgres` 소유, 제한 권한)
+- 일정: 매일 **03:30**, worker3 서버 로컬 시간; systemd의 `RandomizedDelaySec=5min` 설정으로 약간 늦게 실행될 수 있음
+- 보관: 기본 14일. 백업 검증 실패 시 기존 정상 백업을 자동 삭제하지 않음
+- 복원 테스트: 가장 최근 백업을 **임시 DB**에 `pg_restore`한 뒤 테이블 존재 검증 및 임시 DB 제거. 운영 DB에 복원하지 않음
+
+```bash
+sudo systemctl start bigtop-web-console-pg-backup.service
+sudo journalctl -u bigtop-web-console-pg-backup.service -n 40 --no-pager
+sudo -u postgres /usr/local/lib/bigtop-web-console/pg_restore_check.sh
+sudo systemctl list-timers --all | grep bigtop-web-console-pg-backup
+```
+
+`pg_restore --list`는 백업 파일 구조 검사일 뿐 실제 복원 성공을 보장하지 않습니다. **별도 임시 DB 복원 검증**까지 수행해야 합니다. 실제 장애 복구 시 운영 DB에 `pg_restore --clean`을 직접 실행하지 않습니다. 애플리케이션 쓰기 중지, 추가 안전 백업, 새 DB 복원 및 검증 후 전환하는 절차가 필요합니다.
+
+### 백업 모니터링과 알림 (35~36)
+
+35번 Role은 10분마다 백업 파일, 유효성, 타이머 상태를 점검해 다음 파일에 메트릭을 갱신합니다.
+
+```text
+/var/lib/prometheus/node-exporter/web_console_pg_backup.prom
+```
+
+메트릭 접두어는 `bigtop_web_console_pg_backup_`이며 주요 지표는 다음과 같습니다.
+
+| 메트릭 접미사 | 의미 |
+|---|---|
+| `collector_success` | Observer 실행 성공 여부 |
+| `last_check_timestamp_seconds` | 마지막 메트릭 갱신 시각 |
+| `archive_count` | 보관 중인 백업 파일 수 |
+| `latest_archive_timestamp_seconds` | 최신 백업 파일 시각 |
+| `latest_archive_size_bytes` | 최신 백업 용량 |
+| `latest_archive_valid` | 최신 파일의 `pg_restore --list` 구조 검증 결과 |
+| `last_valid_timestamp_seconds` | 마지막으로 유효한 백업의 시각 |
+| `timer_active` | 백업 systemd Timer 활성 여부 |
+
+36번 Role은 `/etc/prometheus/rules/web-console-pg-backup.yml`에 기존 Alertmanager로 전송할 Alert Rule 7개를 배포합니다.
+
+| Alert 이름 | 감지 조건 | `for` 대기 |
+|---|---|---|
+| `BigtopPGBackupNoArchives` | 백업 없음 | 15m |
+| `BigtopPGBackupStale` | 최신 백업 파일 시각이 26시간 초과 | 15m |
+| `BigtopPGBackupLatestArchiveInvalid` | 최신 백업 손상 | 10m |
+| `BigtopPGBackupTimerInactive` | 백업 Timer 비활성 | 10m |
+| `BigtopPGBackupCollectorFailed` | Observer 실패 | 10m |
+| `BigtopPGBackupObserverStale` | 메트릭이 30분 이상 갱신되지 않음 | 10m |
+| `BigtopPGBackupMetricsMissing` | Prometheus가 메트릭을 수집하지 못함 | 10m |
+
+```bash
+systemctl is-active bigtop-web-console-pg-backup-observer.timer
+sudo cat /var/lib/prometheus/node-exporter/web_console_pg_backup.prom
+curl -fsS http://127.0.0.1:9100/metrics | grep bigtop_web_console_pg_backup_
+sudo promtool check rules /etc/prometheus/rules/web-console-pg-backup.yml
+curl -fsS 'http://127.0.0.1:9090/api/v1/rules?type=alert' | python3 -m json.tool
+curl -fsS http://127.0.0.1:9090/api/v1/alertmanagers | python3 -m json.tool
+```
+
+**장애 처리 참고:** 36번 배포 직후 Prometheus가 재로드되면서 Ansible의 `activeAlertmanagers` 검증이 일시적으로 실패한 사례가 있었습니다. 당시 Alertmanager는 `active`, `/-/ready`는 `200`, Prometheus API의 `activeAlertmanagers`에는 `http://worker3:9093/api/v2/alerts`가 확인되었고, 이후 Playbook 재실행으로 완료됐습니다. 동일 증상에서는 설정을 임의로 수정하기 전에 서비스 상태/API를 확인하세요. 재발 시 Ansible 검증 Task에 `retries`·`delay`를 적용하는 것이 적절합니다.
+
+알림 규칙이 Prometheus에 *로드*되는 것과 Alertmanager를 통한 Slack/이메일 등 *외부 전달*은 별개의 단계입니다. 실제 전송 채널·라우팅 설정은 기존 Alertmanager 구성에 따릅니다.
+
+### Admin PostgreSQL Backup 패널 (37 — 배포 확인 필요)
+
+37번 소스는 FastAPI `GET /api/ops/postgresql-backup`에서 Prometheus의 백업 메트릭·7개 Rule·Alertmanager 연결을 읽고, Admin에서 `HEALTHY`, `DEGRADED`, `UNKNOWN`으로 보여줍니다. React는 60초마다 조회하며 Refresh 버튼을 제공합니다. 상태를 평가할 수 없으면 **`UNKNOWN`으로 표시**합니다. 브라우저에서 Prometheus로 직접 요청하지 않습니다.
+
+```bash
+# 37번 소스와 플레이북을 적용한 뒤에만 사용
+.venv/bin/ansible-playbook playbooks/37-web-console-pg-backup-dashboard.yml \
+  -e ansible_connection=local
+curl -fsS http://127.0.0.1:18090/api/ops/postgresql-backup | python3 -m json.tool
+```
+
+`37`은 조회 기능만 제공합니다. 데이터베이스 복원, 백업 파일 삭제, Alertmanager 알림 해제 기능이 아닙니다.
+
+### 반복 배포 및 기본 점검
+
+worker3가 `ops` 노드이자 Ansible Controller일 때 아래 `-e ansible_connection=local`을 사용합니다. 다른 서버를 Controller로 사용할 경우에는 대상 호스트 SSH 설정을 따릅니다.
+
+```bash
+cd ~/bigtop-cluster-ansible
+make lint
+.venv/bin/ansible-galaxy collection install -r collections/requirements.yml
+
+# 기능을 개별적으로 관리할 때
+.venv/bin/ansible-playbook playbooks/31-web-console-postgres.yml -e ansible_connection=local
+.venv/bin/ansible-playbook playbooks/33-web-console-inventory.yml -e ansible_connection=local
+.venv/bin/ansible-playbook playbooks/34-web-console-postgres-backup.yml -e ansible_connection=local
+.venv/bin/ansible-playbook playbooks/35-web-console-pg-backup-observability.yml -e ansible_connection=local
+.venv/bin/ansible-playbook playbooks/36-web-console-pg-backup-alerts.yml -e ansible_connection=local
+# 37번은 소스 실제 적용 이후에만 실행
+```
+
+```bash
+# 연결 및 API 점검 (worker3 로컬)
+curl -fsS http://127.0.0.1:18090/api/health | python3 -m json.tool
+curl -fsS http://127.0.0.1:18090/api/storage/health | python3 -m json.tool
+curl -fsS http://127.0.0.1:18090/api/metadata | python3 -m json.tool
+sudo systemctl is-active postgresql bigtop-web-console prometheus prometheus-alertmanager
+```
+
+**CI:** GitHub Actions에서 `community.postgresql.postgresql_user` 모듈 로드 실패가 발생할 경우, 해당 Collection을 `collections/requirements.yml`에 등록하고 CI의 `ansible-galaxy collection install -r collections/requirements.yml`이 실행되는지 확인합니다. 별도의 `collections/requirements-web-console-postgres.yml`만 수정하면 기본 CI 설치 목록에는 반영되지 않을 수 있습니다. 수정 후 GitHub Actions 오류는 해결된 것으로 확인했습니다.
+
+### 안전 수칙 및 남은 과제
+
+- **DB 비밀번호·DSN·`.env` 금지:** 실제 `/etc/bigtop-web-console/db.env`, `/etc/bigtop-web-console/postgres.password`, SQL 덤프·실백업 파일은 Git에 추가하지 않습니다.
+- **단일 worker3 백업의 한계:** 백업 파일과 PostgreSQL 데이터가 같은 VM에 있으므로 VM 전체 손상/유실에는 취약합니다. 외부 노드로 암호화된 백업 복제 및 별도 복구 테스트가 필요합니다.
+- **Metadata의 의미:** PostgreSQL 메타데이터는 조회용 스냅샷이며 Ansible inventory·서비스 선언의 기준 정보가 아닙니다. DB에서 호스트나 서비스를 직접 추가해 배포하는 구조가 아닙니다.
+- **Web Console 권한:** 현재 Basic Auth는 인증 진입점일 뿐 API별 RBAC 또는 개별 조치 주체 식별을 제공하는 것으로 간주해서는 안 됩니다.
+- **향후 개선 우선순위:** 37번 현장 배포 검증 → off-host 백업 복제/재해복구 → 주기적인 임시 DB 복원 검증 및 알림 → DB 스키마 마이그레이션 → RBAC/감사 주체 고도화.
+<!-- END BIGTOP WEB CONSOLE OPERATIONS 2026-10 -->
+
 ## Git에 포함하지 않는 파일
 
 실제 IP, 사용자명, SSH key, 로그 파일은 Git에 올리지 않습니다.
@@ -3501,6 +3732,11 @@ inventory/group_vars/all.yml.example
 ```
 
 ## 현재 완료 상태
+
+<!-- BEGIN BIGTOP README OCT2026 COMPLETED NOTE -->
+> 아래 기존 완료 목록은 초기 구축 이력이며, 추가된 31~36번 기능의 구성과 확인 방법은 「Web Console 운영 확장」 절을 참조하세요. 37번은 별도 현장 배포 확인이 필요합니다.
+<!-- END BIGTOP README OCT2026 COMPLETED NOTE -->
+
 
 ```text
 Core Cluster
@@ -3564,6 +3800,11 @@ Bigtop Web Console
 ```
 
 ## 향후 계획
+
+<!-- BEGIN BIGTOP README OCT2026 ROADMAP NOTE -->
+> 아래 목록은 당시 작성된 초기 개선 계획입니다. CI 의존성 오류 해결 및 PostgreSQL 백업·관측·알림은 이후 수행했습니다. 현재 우선순위는 37번 현장 검증, 백업의 외부 노드 복제, DB 복원 정기 검증, 스키마 마이그레이션 및 권한 관리입니다.
+<!-- END BIGTOP README OCT2026 ROADMAP NOTE -->
+
 
 ```text
 1. Admin 화면에 Action History / Runbooks / Self Check를 native React component로 정식 편입

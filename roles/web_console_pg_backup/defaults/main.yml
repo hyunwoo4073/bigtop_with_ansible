@@ -1,0 +1,10 @@
+---
+# Read-only default: use the existing Web Console database, never create or replace it.
+web_console_pg_backup_database: "{{ web_console_postgres_db | default('bigtop_console') }}"
+web_console_pg_backup_dir: /var/backups/bigtop-web-console/postgresql
+web_console_pg_backup_script_dir: /usr/local/lib/bigtop-web-console
+web_console_pg_backup_calendar: '*-*-* 03:30:00'
+web_console_pg_backup_retention_days: 14
+web_console_pg_backup_min_bytes: 1024
+web_console_pg_backup_service: bigtop-web-console-pg-backup.service
+web_console_pg_backup_timer: bigtop-web-console-pg-backup.timer

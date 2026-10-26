@@ -1,0 +1,10 @@
+---
+- name: Reload Prometheus backup alert rules
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - kill
+      - --signal=HUP
+      - --kill-who=main
+      - "{{ web_console_pg_backup_alerts_prometheus_service }}"
+  changed_when: true

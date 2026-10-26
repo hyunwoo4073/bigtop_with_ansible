@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodically update Bigtop Web Console PostgreSQL backup health metrics
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec={{ web_console_pg_observability_interval_minutes | int }}min
+AccuracySec=1min
+Unit={{ web_console_pg_observability_service_name }}
+
+[Install]
+WantedBy=timers.target
