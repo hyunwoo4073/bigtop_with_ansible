@@ -1,0 +1,7 @@
+---
+- name: Configure PostgreSQL backup failure alerts for Bigtop Web Console
+  hosts: ops
+  become: true
+  gather_facts: false
+  roles:
+    - role: web_console_pg_backup_alerts

@@ -1,0 +1,22 @@
+---
+web_console_pg_backup_alerts_prometheus_config: /etc/prometheus/prometheus.yml
+web_console_pg_backup_alerts_prometheus_service: prometheus
+web_console_pg_backup_alerts_rule_dir: /etc/prometheus/rules
+web_console_pg_backup_alerts_rule_filename: web-console-pg-backup.yml
+web_console_pg_backup_alerts_rule_path: >-
+  {{ web_console_pg_backup_alerts_rule_dir }}/{{ web_console_pg_backup_alerts_rule_filename }}
+web_console_pg_backup_alerts_staging_path: >-
+  {{ web_console_pg_backup_alerts_rule_dir }}/.web-console-pg-backup.staging
+web_console_pg_backup_alerts_backup_age_seconds: 93600
+web_console_pg_backup_alerts_observer_age_seconds: 1800
+web_console_pg_backup_alerts_prometheus_url: http://127.0.0.1:9090
+web_console_pg_backup_alerts_alertmanager_url: http://127.0.0.1:9093
+web_console_pg_backup_alerts_metric_path: /var/lib/prometheus/node-exporter/web_console_pg_backup.prom
+web_console_pg_backup_alerts_expected:
+  - BigtopPGBackupNoArchives
+  - BigtopPGBackupStale
+  - BigtopPGBackupLatestArchiveInvalid
+  - BigtopPGBackupTimerInactive
+  - BigtopPGBackupCollectorFailed
+  - BigtopPGBackupObserverStale
+  - BigtopPGBackupMetricsMissing

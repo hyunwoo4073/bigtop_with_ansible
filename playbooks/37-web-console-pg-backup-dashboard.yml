@@ -1,0 +1,47 @@
+---
+- name: Deploy read-only PostgreSQL backup dashboard in Web Console
+  hosts: ops
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Redeploy existing Web Console from Ansible-managed templates
+      ansible.builtin.import_role:
+        name: web_console
+
+    - name: Apply Web Console handlers before validating the dashboard API
+      ansible.builtin.meta: flush_handlers
+
+    - name: Verify backup dashboard endpoint is available
+      ansible.builtin.uri:
+        url: http://127.0.0.1:18090/api/ops/postgresql-backup
+        method: GET
+        return_content: true
+        status_code: 200
+        timeout: 20
+      register: web_console_backup_dashboard_response
+      changed_when: false
+      until: web_console_backup_dashboard_response.status == 200
+      retries: 6
+      delay: 2
+
+    - name: Assert dashboard is read-only and Prometheus data is available
+      ansible.builtin.assert:
+        that:
+          - web_console_backup_dashboard_response.json.read_only | bool
+          - web_console_backup_dashboard_response.json.source == 'prometheus'
+          - web_console_backup_dashboard_response.json.status in ['HEALTHY', 'DEGRADED']
+          - web_console_backup_dashboard_response.json.metrics.archive_count is not none
+          - web_console_backup_dashboard_response.json.rules_loaded | bool
+          - web_console_backup_dashboard_response.json.alertmanager_connected | bool
+        fail_msg: >-
+          Dashboard API is deployed but observability is incomplete.
+          Check Prometheus backup metrics (35), alert rules and Alertmanager (36),
+          and the local Web Console service logs.
+
+    - name: Report current backup dashboard health
+      ansible.builtin.debug:
+        msg: >-
+          Backup dashboard: {{ web_console_backup_dashboard_response.json.status }};
+          archives={{ web_console_backup_dashboard_response.json.metrics.archive_count }};
+          rules={{ web_console_backup_dashboard_response.json.alert_summary.total }};
+          firing={{ web_console_backup_dashboard_response.json.alert_summary.firing }}

@@ -7,6 +7,7 @@ import ActionHistoryView from './ActionHistoryView.jsx'
 import RunbooksView from './RunbooksView.jsx'
 import InventoryView from './InventoryView.jsx'
 import SelfCheckPanel from './SelfCheckPanel.jsx'
+import BackupHealthPanel from './BackupHealthPanel.jsx'
 import FunctionalHealthPanel from './FunctionalHealthPanel.jsx'
 import './incident-runbook.css'
 import IncidentDemoPanel from './IncidentDemoPanel.jsx'
@@ -838,6 +839,8 @@ function AdminView({ status, onRefresh, onIncidentSummary, refreshIntervalSecond
       </div>
 
       <SelfCheckPanel />
+
+      <BackupHealthPanel />
       <FunctionalHealthPanel />
 
       <div className="settings-card">

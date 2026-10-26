@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Managed by Ansible. Executed as the local PostgreSQL OS user.
+set -Eeuo pipefail
+umask 077
+
+DB={{ web_console_pg_backup_database | quote }}
+DEST={{ web_console_pg_backup_dir | quote }}
+RETENTION_DAYS={{ web_console_pg_backup_retention_days | int }}
+MIN_BYTES={{ web_console_pg_backup_min_bytes | int }}
+
+[[ "$(id -un)" == postgres ]] || { echo 'ERROR: run as postgres OS account' >&2; exit 1; }
+[[ -d "$DEST" && -w "$DEST" ]] || { echo 'ERROR: backup directory unavailable' >&2; exit 1; }
+
+timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+archive="$DEST/${DB}_${timestamp}_$$.dump"
+partial="$(mktemp "$DEST/.${DB}_${timestamp}_XXXXXXXX.partial")"
+trap 'rm -f -- "$partial"' EXIT
+
+# Connect over the local UNIX socket using postgres peer authentication.
+pg_dump --dbname="$DB" --no-password --format=custom --compress=6 --file="$partial"
+pg_restore --list "$partial" >/dev/null
+bytes="$(stat -c '%s' "$partial")"
+if (( bytes < MIN_BYTES )); then
+  echo "ERROR: archive unexpectedly small ($bytes bytes)" >&2
+  exit 1
+fi
+
+chmod 0600 "$partial"
+mv -- "$partial" "$archive"
+trap - EXIT
+
+# Delete only matching managed backup archives after a verified new backup exists.
+find "$DEST" -maxdepth 1 -type f -name "${DB}_*.dump" \
+  -mmin "+$((RETENTION_DAYS * 1440))" -delete
+printf 'BACKUP OK archive=%s bytes=%s\n' "$archive" "$bytes"

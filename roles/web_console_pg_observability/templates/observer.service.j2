@@ -1,0 +1,14 @@
+[Unit]
+Description=Publish Bigtop Web Console PostgreSQL backup health metrics
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0022
+ExecStart=/usr/bin/python3 {{ web_console_pg_observability_script_dir }}/pg_backup_metrics.py --config {{ web_console_pg_observability_config_file }}
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+Nice=10

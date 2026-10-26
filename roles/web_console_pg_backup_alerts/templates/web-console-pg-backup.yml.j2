@@ -1,0 +1,75 @@
+# Managed by Ansible: roles/web_console_pg_backup_alerts
+# Metric producer: roles/web_console_pg_observability (playbook 35)
+groups:
+  - name: bigtop-postgresql-backup
+    interval: 1m
+    rules:
+      - alert: BigtopPGBackupNoArchives
+        expr: bigtop_web_console_pg_backup_archive_count == 0
+        for: 15m
+        labels:
+          severity: critical
+          component: postgresql-backup
+        annotations:
+          summary: No PostgreSQL backup archive is available
+          description: The backup observer reports zero completed backup archives.
+
+      - alert: BigtopPGBackupStale
+        expr: (time() - bigtop_web_console_pg_backup_latest_archive_timestamp_seconds) > {{ web_console_pg_backup_alerts_backup_age_seconds }}
+        for: 15m
+        labels:
+          severity: critical
+          component: postgresql-backup
+        annotations:
+          summary: PostgreSQL backup is older than the expected interval
+          description: The newest archive exceeds the maximum accepted age.
+
+      - alert: BigtopPGBackupLatestArchiveInvalid
+        expr: (bigtop_web_console_pg_backup_latest_archive_valid == 0) and (bigtop_web_console_pg_backup_archive_count > 0)
+        for: 10m
+        labels:
+          severity: critical
+          component: postgresql-backup
+        annotations:
+          summary: Latest PostgreSQL backup archive failed validation
+          description: pg_restore could not validate the newest managed archive.
+
+      - alert: BigtopPGBackupTimerInactive
+        expr: bigtop_web_console_pg_backup_timer_active == 0
+        for: 10m
+        labels:
+          severity: warning
+          component: postgresql-backup
+        annotations:
+          summary: PostgreSQL backup scheduler is not active
+          description: The systemd backup timer is stopped or unavailable.
+
+      - alert: BigtopPGBackupCollectorFailed
+        expr: bigtop_web_console_pg_backup_collector_success == 0
+        for: 10m
+        labels:
+          severity: warning
+          component: postgresql-backup
+        annotations:
+          summary: PostgreSQL backup observer failed its last check
+          description: Observer reported an internal collection or filesystem error.
+
+      - alert: BigtopPGBackupObserverStale
+        expr: (time() - bigtop_web_console_pg_backup_last_check_timestamp_seconds) > {{ web_console_pg_backup_alerts_observer_age_seconds }}
+        for: 10m
+        labels:
+          severity: warning
+          component: postgresql-backup
+        annotations:
+          summary: PostgreSQL backup observer has not published fresh data
+          description: The textfile metric has not been refreshed within the allowed interval.
+
+      - alert: BigtopPGBackupMetricsMissing
+        expr: absent(bigtop_web_console_pg_backup_last_check_timestamp_seconds)
+        for: 10m
+        labels:
+          severity: warning
+          component: postgresql-backup
+        annotations:
+          summary: PostgreSQL backup metrics are missing from Prometheus
+          description: The backup observer metric is absent from Prometheus scraping.

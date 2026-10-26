@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Managed by Ansible. Restore into a disposable database; production is untouched.
+set -Eeuo pipefail
+umask 077
+
+DB={{ web_console_pg_backup_database | quote }}
+DEST={{ web_console_pg_backup_dir | quote }}
+[[ "$(id -un)" == postgres ]] || { echo 'ERROR: run as postgres OS account' >&2; exit 1; }
+
+shopt -s nullglob
+archives=("$DEST"/"${DB}"_*.dump)
+[[ -e "${archives[0]:-}" ]] || { echo 'ERROR: no backup archives found' >&2; exit 1; }
+archive="${1:-${archives[-1]}}"
+archive="$(realpath -e -- "$archive")"
+[[ "$archive" == "$DEST"/"${DB}"_*.dump ]] || {
+  echo 'ERROR: archive must be a managed backup in the backup directory' >&2
+  exit 1
+}
+pg_restore --list "$archive" >/dev/null
+
+test_db="wc_restore_test_$(date +%s)_$$"
+created=0
+cleanup() {
+  if (( created == 1 )); then
+    dropdb --if-exists --force "$test_db" >/dev/null 2>&1 || echo "WARNING: cleanup needed: $test_db" >&2
+  fi
+}
+trap cleanup EXIT
+createdb --template=template0 "$test_db"
+created=1
+pg_restore --exit-on-error --no-owner --no-acl --dbname="$test_db" "$archive"
+
+tables="$(psql --no-psqlrc --tuples-only --no-align --dbname="$test_db" \
+  --command="SELECT COUNT(*) FROM pg_catalog.pg_tables WHERE schemaname = 'public';")"
+[[ "$tables" =~ ^[0-9]+$ ]] && (( tables > 0 )) || {
+  echo 'ERROR: restored database has no public tables' >&2
+  exit 1
+}
+printf 'RESTORE VERIFY OK archive=%s public_tables=%s temp_db=%s (will be removed)\n' \
+  "$archive" "$tables" "$test_db"

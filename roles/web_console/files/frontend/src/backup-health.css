@@ -1,0 +1,27 @@
+.pgb-panel { margin: 22px 0 0; border: 1px solid var(--border, #e5e7eb); border-radius: 12px; padding: 20px; background: var(--surface, #fff); }
+.pgb-heading, .pgb-heading-actions, .pgb-alerts-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.pgb-heading h3 { margin: 0 0 5px; font-size: 18px; }
+.pgb-heading p, .pgb-foot { margin: 0; color: var(--muted, #6b7280); font-size: 12px; }
+.pgb-heading-actions { flex-shrink: 0; }
+.pgb-pill { border-radius: 999px; padding: 4px 9px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.pgb-good { color: #166534; background: #dcfce7; }
+.pgb-warn { color: #92400e; background: #fef3c7; }
+.pgb-bad { color: #991b1b; background: #fee2e2; }
+.pgb-notice { margin-top: 12px; padding: 10px 12px; border-radius: 8px; font-size: 12px; }
+.pgb-error { color: #991b1b; background: #fef2f2; }
+.pgb-warning { color: #92400e; background: #fffbeb; }
+.pgb-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 10px; margin: 16px 0 24px; }
+.pgb-stats > div { display: flex; flex-direction: column; gap: 9px; min-width: 0; padding: 13px; border: 1px solid var(--border, #e5e7eb); border-radius: 9px; background: var(--surface-muted, #f9fafb); }
+.pgb-stats span { color: var(--muted, #6b7280); font-size: 12px; }
+.pgb-stats strong { overflow-wrap: anywhere; font-size: 14px; }
+.pgb-alerts-title { padding-bottom: 11px; border-bottom: 1px solid var(--border, #e5e7eb); }
+.pgb-alerts-title span { color: var(--muted, #6b7280); font-size: 12px; }
+.pgb-rule-list { display: grid; }
+.pgb-rule { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--border, #e5e7eb); }
+.pgb-rule strong, .pgb-rule small { display: block; overflow-wrap: anywhere; }
+.pgb-rule strong { font-size: 12px; }
+.pgb-rule small { color: var(--muted, #6b7280); margin-top: 3px; }
+.pgb-active-alerts { background: #fffbeb; color: #92400e; padding: 12px; border-radius: 8px; margin: 12px 0; font-size: 12px; }
+.pgb-empty { color: var(--muted, #6b7280); padding: 12px 0; font-size: 12px; }
+.pgb-foot { margin-top: 13px; }
+@media (max-width: 640px) { .pgb-heading, .pgb-alerts-title { align-items: flex-start; flex-direction: column; } .pgb-heading-actions { width: 100%; justify-content: space-between; } }
