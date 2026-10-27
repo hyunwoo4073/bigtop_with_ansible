@@ -1,0 +1,6 @@
+---
+- name: Explain explicit multi-host deployment requirement
+  ansible.builtin.fail:
+    msg: >-
+      This role is configured through three import_role tasks. Run
+      playbooks/38-web-console-pg-remote-replica.yml, not the bare role.

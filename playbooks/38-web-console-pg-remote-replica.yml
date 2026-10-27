@@ -1,0 +1,42 @@
+---
+# Run from worker3, WITHOUT '-e ansible_connection=local': worker2 must use SSH.
+- name: Prepare restricted PostgreSQL replica sender on worker3
+  hosts: ops
+  connection: local
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Run PostgreSQL replica sender preparation
+      ansible.builtin.import_role:
+        name: web_console_pg_remote_replica
+        tasks_from: source_prepare
+
+- name: Configure isolated PostgreSQL backup receiver
+  hosts: "{{ web_console_pg_remote_replica_target_host | default('worker2') }}"
+  become: true
+  gather_facts: true
+  pre_tasks:
+    - name: Refuse applying receiver configuration to the controller
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname not in groups['ops']
+          - ansible_facts['hostname'] == inventory_hostname
+        fail_msg: >-
+          Wrong receiver host or a globally overridden local connection.
+          Never pass -e ansible_connection=local to this playbook.
+  tasks:
+    - name: Configure PostgreSQL backup replica receiver
+      ansible.builtin.import_role:
+        name: web_console_pg_remote_replica
+        tasks_from: receiver
+
+- name: Activate verified backup replication from worker3
+  hosts: ops
+  connection: local
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Activate remote PostgreSQL backup replication
+      ansible.builtin.import_role:
+        name: web_console_pg_remote_replica
+        tasks_from: source_deploy

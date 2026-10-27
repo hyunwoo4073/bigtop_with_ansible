@@ -1,0 +1,75 @@
+---
+- name: Validate replica source configuration
+  ansible.builtin.assert:
+    that:
+      - groups['ops'] | length == 1
+      - web_console_pg_remote_replica_target_host in groups['all']
+      - web_console_pg_remote_replica_target_host not in groups['ops']
+      - web_console_pg_remote_replica_database is match('^[a-z][a-z0-9_]*$')
+      - web_console_pg_remote_replica_source_dir is match('^/var/backups/[a-zA-Z0-9_./-]+$')
+      - web_console_pg_remote_replica_dest_dir is match('^/var/backups/[a-zA-Z0-9_./-]+$')
+      - "'..' not in web_console_pg_remote_replica_source_dir.split('/')"
+      - "'..' not in web_console_pg_remote_replica_dest_dir.split('/')"
+      - web_console_pg_remote_replica_dest_user is match('^[a-z_][a-z0-9_-]*$')
+      - web_console_pg_remote_replica_dest_home is match('^/var/lib/[a-zA-Z0-9_./-]+$')
+      - web_console_pg_remote_replica_ssh_dir is match('^/var/lib/postgresql/[a-zA-Z0-9_./-]+$')
+      - web_console_pg_remote_replica_key_name is match('^[a-zA-Z0-9_.-]+$')
+      - web_console_pg_remote_replica_retention_days | int >= 15
+      - web_console_pg_remote_replica_retention_days | int <= 365
+    fail_msg: Unsafe replication configuration or missing worker inventory.
+
+- name: Ensure rsync and SSH client exist on worker3
+  ansible.builtin.apt:
+    name:
+      - rsync
+      - openssh-client
+    state: present
+    update_cache: false
+
+- name: Ensure existing local backup directory is available
+  ansible.builtin.stat:
+    path: "{{ web_console_pg_remote_replica_source_dir }}"
+  register: web_console_pg_remote_replica_source_dir_info
+
+- name: Refuse replication before PostgreSQL backup provisioning
+  ansible.builtin.assert:
+    that:
+      - web_console_pg_remote_replica_source_dir_info.stat.isdir | default(false)
+    fail_msg: Deploy and run playbook 34 before configuring replication.
+
+- name: Create restricted PostgreSQL SSH directory
+  ansible.builtin.file:
+    path: "{{ web_console_pg_remote_replica_ssh_dir }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0700'
+
+- name: Create dedicated sender SSH key without rotating existing key
+  ansible.builtin.command:
+    argv:
+      - runuser
+      - -u
+      - postgres
+      - --
+      - ssh-keygen
+      - -q
+      - -t
+      - ed25519
+      - -N
+      - ''
+      - -C
+      - bigtop-postgresql-backup-replica
+      - -f
+      - "{{ web_console_pg_remote_replica_ssh_dir }}/{{ web_console_pg_remote_replica_key_name }}"
+    creates: "{{ web_console_pg_remote_replica_ssh_dir }}/{{ web_console_pg_remote_replica_key_name }}"
+
+- name: Read dedicated sender public key
+  ansible.builtin.slurp:
+    src: "{{ web_console_pg_remote_replica_ssh_dir }}/{{ web_console_pg_remote_replica_key_name }}.pub"
+  register: web_console_pg_remote_replica_sender_public_key
+
+- name: Publish public key for receiver play
+  ansible.builtin.set_fact:
+    web_console_pg_remote_replica_public_key: >-
+      {{ web_console_pg_remote_replica_sender_public_key.content | b64decode | trim }}

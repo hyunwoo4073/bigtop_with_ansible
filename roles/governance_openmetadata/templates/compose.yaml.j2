@@ -1,0 +1,110 @@
+# Managed by Ansible: roles/governance_openmetadata
+# PoC only. Persistent volumes are not deleted by this role.
+# Ingestion/Airflow intentionally deferred to step 42 on the 8 GB VM.
+name: bigtop-openmetadata
+
+x-openmetadata-environment: &openmetadata-environment
+  OPENMETADATA_CLUSTER_NAME: bigtop-governance
+  SERVER_PORT: '8585'
+  SERVER_ADMIN_PORT: '8586'
+  LOG_LEVEL: INFO
+  DB_DRIVER_CLASS: com.mysql.cj.jdbc.Driver
+  DB_SCHEME: mysql
+  DB_PARAMS: 'allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=UTC'
+  DB_USER: openmetadata_user
+  DB_USER_PASSWORD: ${OM_DB_PASSWORD:?Set OM_DB_PASSWORD in protected .env}
+  DB_HOST: mysql
+  DB_PORT: '3306'
+  OM_DATABASE: openmetadata_db
+  ELASTICSEARCH_HOST: elasticsearch
+  ELASTICSEARCH_PORT: '9200'
+  ELASTICSEARCH_SCHEME: http
+  SEARCH_TYPE: elasticsearch
+  OPENMETADATA_HEAP_OPTS: '-Xms768m -Xmx1536m'
+  MASK_PASSWORDS_API: 'true'
+  AUTHENTICATION_PROVIDER: basic
+  AUTHENTICATION_ENABLE_SELF_SIGNUP: 'false'
+  SERVER_HOST_API_URL: 'http://openmetadata-server:8585/api'
+
+services:
+  mysql:
+    image: '{{ governance_openmetadata_mysql_image }}'
+    restart: unless-stopped
+    command: ['--sort_buffer_size=10M']
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Missing root password}
+      MYSQL_DATABASE: openmetadata_db
+      MYSQL_USER: openmetadata_user
+      MYSQL_PASSWORD: ${OM_DB_PASSWORD:?Missing database password}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    mem_limit: 1g
+    healthcheck:
+      test: ['CMD-SHELL', 'mysql -h 127.0.0.1 -u"$$MYSQL_USER" -p"$$MYSQL_PASSWORD" -e "SELECT 1" "$$MYSQL_DATABASE" >/dev/null 2>&1']
+      interval: 20s
+      timeout: 10s
+      retries: 15
+      start_period: 40s
+    networks: [governance_net]
+
+  elasticsearch:
+    image: '{{ governance_openmetadata_es_image }}'
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: 'false'
+      xpack.security.autoconfiguration.enabled: 'false'
+      ES_JAVA_OPTS: '-Xms768m -Xmx768m'
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    mem_limit: 2g
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fsS http://127.0.0.1:9200/_cluster/health | grep -qE "green|yellow"']
+      interval: 20s
+      timeout: 10s
+      retries: 25
+      start_period: 80s
+    networks: [governance_net]
+
+  execute-migrate-all:
+    image: '{{ governance_openmetadata_server_image }}'
+    command: ['./bootstrap/openmetadata-ops.sh', 'migrate']
+    environment: *openmetadata-environment
+    mem_limit: 2500m
+    depends_on:
+      mysql:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    networks: [governance_net]
+
+  openmetadata-server:
+    image: '{{ governance_openmetadata_server_image }}'
+    restart: unless-stopped
+    environment: *openmetadata-environment
+    mem_limit: 2500m
+    ports:
+      - '{{ governance_openmetadata_bind_ip }}:{{ governance_openmetadata_ui_port }}:8585'
+      - '127.0.0.1:{{ governance_openmetadata_admin_port }}:8586'
+    depends_on:
+      mysql:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      execute-migrate-all:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q --spider http://localhost:8586/healthcheck']
+      interval: 30s
+      timeout: 10s
+      retries: 18
+      start_period: 120s
+    networks: [governance_net]
+
+networks:
+  governance_net:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  es-data:

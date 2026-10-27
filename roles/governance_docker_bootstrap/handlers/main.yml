@@ -1,0 +1,8 @@
+---
+- name: Apply governance Docker mmap setting
+  ansible.builtin.command:
+    argv:
+      - sysctl
+      - -p
+      - '{{ governance_docker_bootstrap_sysctl_file }}'
+  changed_when: true

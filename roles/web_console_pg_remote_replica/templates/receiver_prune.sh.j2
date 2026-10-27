@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Ansible-managed receiver retention; never remove the last usable batch.
+set -Eeuo pipefail
+umask 077
+
+DB={{ web_console_pg_remote_replica_database | quote }}
+DEST={{ web_console_pg_remote_replica_dest_dir | quote }}
+EXPECTED_USER={{ web_console_pg_remote_replica_dest_user | quote }}
+RETENTION_DAYS={{ web_console_pg_remote_replica_retention_days | int }}
+[[ "$(id -un)" == "$EXPECTED_USER" ]] || { echo 'ERROR: wrong receiver account' >&2; exit 1; }
+[[ -d "$DEST" ]] || { echo 'ERROR: missing receiver backup directory' >&2; exit 1; }
+
+# Never delete any archive if there is no fresh backup within the retention window.
+recent="$(find "$DEST" -maxdepth 1 -type f -name "${DB}_*.dump" \
+  -mmin "-$((RETENTION_DAYS * 1440))" -print -quit)"
+if [[ -z "$recent" ]]; then
+  echo 'PRUNE SKIP: no recent verified-off-node archive; keep older copies'
+  exit 0
+fi
+find "$DEST" -maxdepth 1 -type f -name "${DB}_*.dump" \
+  -mmin "+$((RETENTION_DAYS * 1440))" -delete
+echo 'PRUNE OK: expired receiver archives removed; source untouched'

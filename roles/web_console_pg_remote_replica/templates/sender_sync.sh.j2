@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Ansible-managed: replicate only existing, validated custom-format archives.
+set -Eeuo pipefail
+umask 077
+
+DB={{ web_console_pg_remote_replica_database | quote }}
+SOURCE={{ web_console_pg_remote_replica_source_dir | quote }}
+DEST={{ web_console_pg_remote_replica_dest_dir | quote }}
+TARGET={{ (web_console_pg_remote_replica_dest_user ~ '@' ~ web_console_pg_remote_replica_receiver_address) | quote }}
+KEY={{ (web_console_pg_remote_replica_ssh_dir ~ '/' ~ web_console_pg_remote_replica_key_name) | quote }}
+KNOWN_HOSTS={{ (web_console_pg_remote_replica_ssh_dir ~ '/pg_replica_known_hosts') | quote }}
+
+[[ "$(id -un)" == postgres ]] || { echo 'ERROR: must run as postgres' >&2; exit 1; }
+[[ -d "$SOURCE" && -r "$SOURCE" ]] || { echo 'ERROR: source backup directory unavailable' >&2; exit 1; }
+SSH_OPTS=(-i "$KEY" -o BatchMode=yes -o StrictHostKeyChecking=yes
+  -o "UserKnownHostsFile=$KNOWN_HOSTS" -o ConnectTimeout=15)
+printf -v SSH_TRANSPORT 'ssh -i %q -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=%q -o ConnectTimeout=15' "$KEY" "$KNOWN_HOSTS"
+
+mapfile -d '' -t archives < <(
+  find "$SOURCE" -maxdepth 1 -type f -name "${DB}_*.dump" -print0 | sort -z
+)
+[[ -n "${archives[0]:-}" ]] || { echo 'ERROR: no backup files to replicate' >&2; exit 1; }
+
+count=0
+for archive in "${archives[@]}"; do
+  [[ -s "$archive" ]] || { echo "ERROR: empty backup $archive" >&2; exit 1; }
+  pg_restore --list "$archive" >/dev/null || { echo "ERROR: invalid archive $archive" >&2; exit 1; }
+
+  filename="${archive##*/}"
+  # Server path is restricted to validated characters by Ansible, and the
+  # source basename must match the managed archive pattern.
+  [[ "$filename" =~ ^[a-z][a-z0-9_]*_[0-9]{8}T[0-9]{6}Z_[0-9]+\.dump$ ]] || {
+    echo "ERROR: unexpected backup file name: $filename" >&2; exit 1;
+  }
+  # rsync stages a temporary file and atomically renames it after completion.
+  rsync -a --chmod=F600 --timeout=600 -e "$SSH_TRANSPORT" -- \
+    "$archive" "$TARGET:$DEST/"
+
+  expected="$(sha256sum -- "$archive")"
+  expected="${expected%% *}"
+  actual="$(ssh "${SSH_OPTS[@]}" "$TARGET" "sha256sum -- '$DEST/$filename'" | awk '{print $1}')"
+  [[ "$expected" == "$actual" ]] || {
+    echo "ERROR: SHA-256 mismatch for replicated backup: $filename" >&2
+    exit 1
+  }
+  ((count+=1))
+done
+printf 'REPLICA OK target=%s files_verified=%s\n' "$TARGET" "$count"

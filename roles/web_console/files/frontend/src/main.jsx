@@ -7,6 +7,7 @@ import ActionHistoryView from './ActionHistoryView.jsx'
 import RunbooksView from './RunbooksView.jsx'
 import InventoryView from './InventoryView.jsx'
 import SelfCheckPanel from './SelfCheckPanel.jsx'
+import ServiceUiLinksPanel, { useServiceUiLinks, getServiceUiLink, openServiceUi } from './ServiceUiLinks.jsx'
 import BackupHealthPanel from './BackupHealthPanel.jsx'
 import FunctionalHealthPanel from './FunctionalHealthPanel.jsx'
 import './incident-runbook.css'
@@ -88,6 +89,7 @@ function shortService(service) {
 
 function App() {
   const [view, setView] = useState('home')
+  const { links: uiLinks, loading: uiLinksLoading, error: uiLinksError, reload: reloadUiLinks } = useServiceUiLinks()
   const [status, setStatus] = useState(null)
   const [selected, setSelected] = useState(null)
   const [detailTab, setDetailTab] = useState('Overview')
@@ -312,6 +314,10 @@ function App() {
     }
   }
 
+  function openServiceUI(component) {
+    openServiceUi(getServiceUiLink(uiLinks, component))
+  }
+
   function selectComponent(component, tab = 'Overview') {
     if (selected?.id === component.id && detailVisible) {
       setDetailVisible(false)
@@ -423,6 +429,10 @@ function App() {
                 onViewServices={() => navigateView('services')}
                 onViewIncidents={() => navigateView('incidents')}
                 onIssueClick={openIssue}
+                uiLinks={uiLinks}
+                uiLinksLoading={uiLinksLoading}
+                uiLinksError={uiLinksError}
+                onReloadUiLinks={reloadUiLinks}
               />
             )}
 
@@ -442,6 +452,8 @@ function App() {
                 onStart={start}
                 onStop={stop}
                 onRestart={restart}
+                uiLinks={uiLinks}
+                onOpenUI={openServiceUI}
               />
             )}
 
@@ -538,7 +550,7 @@ function viewTitle(view) {
   return 'Home'
 }
 
-function HomeView({ status, metrics, issues, summary, components, onViewServices, onViewIncidents, onIssueClick }) {
+function HomeView({ status, metrics, issues, summary, components, onViewServices, onViewIncidents, onIssueClick, uiLinks, uiLinksLoading, uiLinksError, onReloadUiLinks }) {
   return (
     <>
       <section className="home-hero">
@@ -566,6 +578,8 @@ function HomeView({ status, metrics, issues, summary, components, onViewServices
           <Stat label="Issues" value={metrics.issue_count} tone={metrics.issue_count > 0 ? 'danger' : 'success'} />
         </div>
       </section>
+
+      <ServiceUiLinksPanel links={uiLinks} loading={uiLinksLoading} error={uiLinksError} onReload={onReloadUiLinks} components={components} />
 
       <section className="card">
         <CardHeader title="Quick Links" description="운영자가 자주 들어가는 상태 필터와 조치 진입점입니다." />
@@ -623,7 +637,7 @@ function HomeView({ status, metrics, issues, summary, components, onViewServices
   )
 }
 
-function ServicesView({ components, query, setQuery, filter, setFilter, groupFilter, setGroupFilter, groups, selected, onSelect, onLogs, onStart, onStop, onRestart }) {
+function ServicesView({ components, query, setQuery, filter, setFilter, groupFilter, setGroupFilter, groups, selected, onSelect, onLogs, onStart, onStop, onRestart, uiLinks, onOpenUI }) {
   return (
     <section className="card no-padding">
       <div className="list-header">
@@ -676,6 +690,9 @@ function ServicesView({ components, query, setQuery, filter, setFilter, groupFil
             <div>{component.pid}</div>
             <div>{component.checked_at}</div>
             <div className="row-actions" onClick={(event) => event.stopPropagation()}>
+              {getServiceUiLink(uiLinks, component) && (
+                <button className="btn tiny" onClick={() => onOpenUI(component)}>Open UI ↗</button>
+              )}
               <button className="btn tiny" onClick={() => onLogs(component)}>Logs</button>
               {component.status === 'UP' ? (
                 <button className="btn tiny warning" onClick={() => onStop(component)}>Stop</button>

@@ -1,0 +1,134 @@
+---
+- name: Confirm correct host, OS, and allocated VM resources before installation
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == governance_docker_bootstrap_expected_hostname
+      - ansible_facts.hostname == governance_docker_bootstrap_expected_hostname
+      - ansible_facts.distribution == 'Ubuntu'
+      - ansible_facts.distribution_major_version == '24'
+      - ansible_facts.architecture in ['x86_64', 'aarch64']
+      - ansible_facts.memtotal_mb | int >= governance_docker_bootstrap_min_memory_mb
+      - ansible_facts.processor_vcpus | int >= governance_docker_bootstrap_min_vcpus
+    fail_msg: >-
+      Expected the standalone metadata Ubuntu 24.04 VM with >= 4 vCPU and
+      >= 6 GiB memory. Verify hostname, target inventory, CPU/RAM allocation.
+      No change has been made on this node.
+
+- name: Map CPU architecture to Docker package architecture
+  ansible.builtin.set_fact:
+    governance_docker_bootstrap_apt_arch: >-
+      {{ 'amd64' if ansible_facts.architecture == 'x86_64' else 'arm64' }}
+
+- name: Check for distribution Docker or container packages that could conflict
+  ansible.builtin.command:
+    argv:
+      - dpkg-query
+      - -W
+      - '-f=${db:Status-Abbrev}'
+      - '{{ item }}'
+  register: governance_docker_bootstrap_existing_packages
+  changed_when: false
+  failed_when: false
+  loop: '{{ governance_docker_bootstrap_conflicting_packages }}'
+  loop_control:
+    label: '{{ item }}'
+
+- name: Refuse to replace previously installed container runtimes automatically
+  ansible.builtin.assert:
+    that:
+      - >-
+        governance_docker_bootstrap_existing_packages.results
+        | selectattr('stdout', 'match', '^ii') | list | length == 0
+    fail_msg: >-
+      Conflicting container packages are installed. Inspect the list above.
+      This role never removes packages, containers, images, or volumes.
+
+- name: Install packages needed for the official Docker APT repository
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      - python3-apt
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create directory for restricted APT repository keys
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install Docker repository signing key
+  ansible.builtin.get_url:
+    url: '{{ governance_docker_bootstrap_repo_base }}/gpg'
+    dest: '{{ governance_docker_bootstrap_repo_key }}'
+    owner: root
+    group: root
+    mode: '0644'
+    force: false
+
+- name: Configure official Docker APT repository for Ubuntu
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch={{ governance_docker_bootstrap_apt_arch }}
+      signed-by={{ governance_docker_bootstrap_repo_key }}]
+      {{ governance_docker_bootstrap_repo_base }}
+      {{ ansible_facts.distribution_release }} stable
+    filename: docker
+    state: present
+    update_cache: true
+
+- name: Install Docker Engine and Docker Compose plugin
+  ansible.builtin.apt:
+    name: '{{ governance_docker_bootstrap_packages }}'
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure Docker Engine starts on reboot
+  ansible.builtin.systemd_service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Manage memory mappings recommended for Elasticsearch on metadata VM
+  ansible.builtin.copy:
+    dest: '{{ governance_docker_bootstrap_sysctl_file }}'
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      vm.max_map_count={{ governance_docker_bootstrap_max_map_count }}
+  notify: Apply governance Docker mmap setting
+
+- name: Apply kernel setting before checking the runtime
+  ansible.builtin.meta: flush_handlers
+
+- name: Check installed Docker Engine version
+  ansible.builtin.command: docker --version
+  register: governance_docker_bootstrap_docker_version
+  changed_when: false
+
+- name: Check installed Compose plugin version
+  ansible.builtin.command: docker compose version
+  register: governance_docker_bootstrap_compose_version
+  changed_when: false
+
+- name: Verify active Elasticsearch mmap configuration
+  ansible.builtin.command: sysctl -n vm.max_map_count
+  register: governance_docker_bootstrap_map_count
+  changed_when: false
+
+- name: Assert final runtime prerequisites
+  ansible.builtin.assert:
+    that:
+      - governance_docker_bootstrap_map_count.stdout | int >= governance_docker_bootstrap_max_map_count
+      - "'Docker' in governance_docker_bootstrap_docker_version.stdout"
+      - "'Docker Compose' in governance_docker_bootstrap_compose_version.stdout"
+    success_msg: >-
+      Docker and Compose installed on metadata only; Elasticsearch mmap ready.
+      OpenMetadata services have NOT been deployed yet.

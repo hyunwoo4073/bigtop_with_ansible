@@ -1,0 +1,54 @@
+---
+- name: Validate service Web UI link configuration
+  ansible.builtin.assert:
+    that:
+      - web_console_service_ui_links_items is sequence
+      - web_console_service_ui_links_items is not string
+      - web_console_service_ui_links_items | length > 0
+      - web_console_service_ui_links_config_path == '/etc/bigtop-web-console/service-ui-links.json'
+    fail_msg: >-
+      Define at least one service link. The backend reads the fixed
+      configuration path /etc/bigtop-web-console/service-ui-links.json.
+
+- name: Check every service UI shortcut definition
+  ansible.builtin.assert:
+    that:
+      - item.title is defined
+      - item.group is defined
+      - item.host is defined
+      - item.service is defined
+      - item.url is defined
+      - item.title | string | length > 0
+      - item.host | string | length > 0
+      - item.service | string | length > 0
+      - item.url is match('^https?://[^ ]+$')
+      - "'@' not in item.url"
+    fail_msg: >-
+      A service link is missing title, host, service, group, or a valid
+      HTTP(S) URL. Credentials in URLs are not permitted.
+  loop: "{{ web_console_service_ui_links_items }}"
+  loop_control:
+    label: "{{ item.host | default('?') }} / {{ item.service | default('?') }}"
+
+- name: Ensure service link configuration directory is available
+  ansible.builtin.file:
+    path: /etc/bigtop-web-console
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Publish declarative service UI shortcuts
+  ansible.builtin.copy:
+    dest: "{{ web_console_service_ui_links_config_path }}"
+    content: "{{ {'links': web_console_service_ui_links_items} | to_nice_json }}\n"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Verify installed UI shortcut configuration is parseable JSON
+  ansible.builtin.command:
+    cmd: >-
+      python3 -m json.tool
+      {{ web_console_service_ui_links_config_path }}
+  changed_when: false

@@ -9,17 +9,18 @@ Apache Bigtop과 Ansible을 사용해 Hadoop 기반 미니 데이터 플랫폼�
 ## 구성
 
 <!-- BEGIN BIGTOP README OCT2026 OVERVIEW -->
-> **2026년 10월 운영 확장:** Web Console 조치 이력 PostgreSQL 영속화, 메타데이터/Inventory, 백업·복원 검증(34), 백업 관측(35), Prometheus 백업 장애 알림(36)을 추가했습니다. **37번 Admin 백업 대시보드는 현장 배포 완료 여부를 확인해야 합니다.** 상세 내용은 아래 「Web Console 운영 확장」 절을 참조하세요.
+> **2026-10-27 현재:** Web Console·PostgreSQL/백업/모니터링(31~37), 중앙 관리 UI(39), 신규 `metadata` VM의 Docker/OpenMetadata Core(40~41)까지 구축했습니다. 38번 원격 백업 복제는 실배포·전송 결과 확인이 남아 있습니다. 상세 내용은 아래 운영 확장 및 최신 구축 현황 절을 참고하세요.
 <!-- END BIGTOP README OCT2026 OVERVIEW -->
 
 
-현재 클러스터는 4대 VM 기준입니다.
+현재 구성은 Hadoop/운영 노드 4대와 데이터 거버넌스 전용 노드 1대, 총 **5대 VM** 기준입니다.
 
 ```text
 master   - HDFS NameNode / YARN ResourceManager / Spark History Server
 worker1  - HDFS DataNode / YARN NodeManager
 worker2  - HDFS DataNode / YARN NodeManager
 worker3  - Ansible Control Node / Ops Node / Prometheus / Grafana / Alertmanager / Bigtop Web Console
+metadata - OpenMetadata Core / MySQL / Elasticsearch (governance_nodes)
 ```
 
 HA 구성은 적용하지 않았습니다.
@@ -219,6 +220,9 @@ worker2 ansible_host=192.168.56.103
 
 [ops]
 worker3 ansible_host=192.168.56.104
+
+[governance_nodes]
+metadata ansible_host=192.168.56.105
 
 [hadoop_cluster:children]
 master
@@ -3455,7 +3459,7 @@ ansible ops -b -m command -a "systemctl is-active nginx"
 
 > **문서 범위:** 기존 HDFS/YARN/Spark/모니터링 설명을 유지하면서, 2026년 10월까지 추가한 운영 기능을 정리합니다. 실제 재배포는 저장소의 Ansible Playbook/Role을 기준으로 수행합니다. ZIP·임시 적용 스크립트는 배포 소스가 아닙니다.
 >
-> **적용 상태:** 31~36번 단계는 이전 작업 및 점검 결과에 기반해 정리했습니다. **37번 PostgreSQL Backup Admin 패널은 패키지를 제작·전달했으나 이 문서 작성 시점에 worker3 실제 배포 완료 여부가 확인되지 않았습니다.** 아래 기능 설명은 구현 범위이며 모든 엔드포인트의 실운영 상태를 보장하지 않습니다.
+> **적용 상태:** 31~36번 단계는 이전 작업 및 점검 결과에 기반해 정리했습니다. **37번 PostgreSQL Backup Admin 패널은 이후 배포 완료를 확인했습니다.** 아래 기능 설명은 구현 범위이며 모든 엔드포인트의 실운영 상태를 보장하지 않습니다.
 
 ### 운영 아키텍처 및 책임 경계
 
@@ -3496,7 +3500,7 @@ ansible ops -b -m command -a "systemctl is-active nginx"
 | 34 | `playbooks/34-web-console-postgres-backup.yml` | `pg_dump` 정기 백업 및 격리된 복원 검증 | 데이터 변경 없음 |
 | 35 | `playbooks/35-web-console-pg-backup-observability.yml` | Node Exporter textfile 백업 메트릭 | 34번 Role 재사용 |
 | 36 | `playbooks/36-web-console-pg-backup-alerts.yml` | 백업 실패/지연 등 7개 Prometheus 알림 | 기존 Alertmanager 사용 |
-| 37 | `playbooks/37-web-console-pg-backup-dashboard.yml` | Admin 백업 상태 및 Alert Rule 읽기 전용 패널 | **실배포 확인 필요** |
+| 37 | `playbooks/37-web-console-pg-backup-dashboard.yml` | Admin 백업 상태 및 Alert Rule 읽기 전용 패널 | **배포 완료(2026-10-27 확인)** |
 
 `32`는 `31`을, `33`은 `32`를 순서대로 호출합니다. `35`는 `34`의 백업 Role을 재사용합니다. `36`은 규칙만 배포하며 PostgreSQL 서버/백업 스크립트를 재설치하지 않습니다. `37`은 기존 `web_console` Role을 재배포합니다.
 
@@ -3535,7 +3539,7 @@ docs/web_console_pg_backup_alerts.md
 | Incidents 테스트 모드 | `?incident_demo=1`로 브라우저 로컬 테스트 데이터 표시; Hadoop 서비스 변경 없음 |
 | HDFS/YARN Functional Health | NameNode JMX, YARN REST 기반 읽기 전용 진단(`HEALTHY/DEGRADED/UNKNOWN`) |
 | Inventory | 동기화된 호스트/서비스 메타데이터 조회. `IN INVENTORY`는 서버 생존 상태를 뜻하지 않음 |
-| PostgreSQL Backup (37) | Admin 백업/알림/Alertmanager 상태 조회; 실배포 확인 필요 |
+| PostgreSQL Backup (37) | Admin 백업/알림/Alertmanager 상태 조회; 적용 완료 |
 
 주요 API:
 
@@ -3621,12 +3625,12 @@ curl -fsS http://127.0.0.1:9090/api/v1/alertmanagers | python3 -m json.tool
 
 알림 규칙이 Prometheus에 *로드*되는 것과 Alertmanager를 통한 Slack/이메일 등 *외부 전달*은 별개의 단계입니다. 실제 전송 채널·라우팅 설정은 기존 Alertmanager 구성에 따릅니다.
 
-### Admin PostgreSQL Backup 패널 (37 — 배포 확인 필요)
+### Admin PostgreSQL Backup 패널 (37 — 적용 완료)
 
 37번 소스는 FastAPI `GET /api/ops/postgresql-backup`에서 Prometheus의 백업 메트릭·7개 Rule·Alertmanager 연결을 읽고, Admin에서 `HEALTHY`, `DEGRADED`, `UNKNOWN`으로 보여줍니다. React는 60초마다 조회하며 Refresh 버튼을 제공합니다. 상태를 평가할 수 없으면 **`UNKNOWN`으로 표시**합니다. 브라우저에서 Prometheus로 직접 요청하지 않습니다.
 
 ```bash
-# 37번 소스와 플레이북을 적용한 뒤에만 사용
+# 37번 배포 완료 환경에서 확인
 .venv/bin/ansible-playbook playbooks/37-web-console-pg-backup-dashboard.yml \
   -e ansible_connection=local
 curl -fsS http://127.0.0.1:18090/api/ops/postgresql-backup | python3 -m json.tool
@@ -3649,7 +3653,7 @@ make lint
 .venv/bin/ansible-playbook playbooks/34-web-console-postgres-backup.yml -e ansible_connection=local
 .venv/bin/ansible-playbook playbooks/35-web-console-pg-backup-observability.yml -e ansible_connection=local
 .venv/bin/ansible-playbook playbooks/36-web-console-pg-backup-alerts.yml -e ansible_connection=local
-# 37번은 소스 실제 적용 이후에만 실행
+# 37번은 배포 완료; 재적용이 필요한 경우 기존 Ansible Playbook 실행
 ```
 
 ```bash
@@ -3665,11 +3669,153 @@ sudo systemctl is-active postgresql bigtop-web-console prometheus prometheus-ale
 ### 안전 수칙 및 남은 과제
 
 - **DB 비밀번호·DSN·`.env` 금지:** 실제 `/etc/bigtop-web-console/db.env`, `/etc/bigtop-web-console/postgres.password`, SQL 덤프·실백업 파일은 Git에 추가하지 않습니다.
-- **단일 worker3 백업의 한계:** 백업 파일과 PostgreSQL 데이터가 같은 VM에 있으므로 VM 전체 손상/유실에는 취약합니다. 외부 노드로 암호화된 백업 복제 및 별도 복구 테스트가 필요합니다.
+- **로컬 백업의 한계:** 38번에서 worker2 원격 복제를 구현했으나 실제 전송 완료 여부는 별도 확인이 필요합니다. 원격 복제뿐 아니라 격리된 복원 테스트도 수행해야 합니다.
 - **Metadata의 의미:** PostgreSQL 메타데이터는 조회용 스냅샷이며 Ansible inventory·서비스 선언의 기준 정보가 아닙니다. DB에서 호스트나 서비스를 직접 추가해 배포하는 구조가 아닙니다.
 - **Web Console 권한:** 현재 Basic Auth는 인증 진입점일 뿐 API별 RBAC 또는 개별 조치 주체 식별을 제공하는 것으로 간주해서는 안 됩니다.
-- **향후 개선 우선순위:** 37번 현장 배포 검증 → off-host 백업 복제/재해복구 → 주기적인 임시 DB 복원 검증 및 알림 → DB 스키마 마이그레이션 → RBAC/감사 주체 고도화.
+- **향후 개선 우선순위:** 38번 원격 복제 실검증 → OpenMetadata 데이터 자산 수집(42) → 중앙 콘솔 연동 → 스키마 마이그레이션 및 RBAC 강화.
 <!-- END BIGTOP WEB CONSOLE OPERATIONS 2026-10 -->
+
+
+<!-- BEGIN BIGTOP README 20261027 CURRENT -->
+## 최신 구축 현황: 백업 원격 복제 · 관리 UI · OpenMetadata (2026-10-27)
+
+> **범위:** 기존 Hadoop/YARN/Spark 및 Web Console 문서를 유지하고, 38~41번 확장을 정리합니다. 37번 Admin 백업 대시보드는 배포 완료를 확인했습니다. **38번 원격 백업 복제는 수정 패키지를 제공했으나 실제 배포·최초 전송 성공 여부는 이 대화에서 확인되지 않았습니다.** 39·40·41번은 사용자 확인을 기준으로 적용 완료입니다.
+
+### 시스템 구성 및 책임 구분
+
+```text
+[기존 Hadoop/운영 노드]
+master   : NameNode / ResourceManager / Spark History Server
+worker1  : DataNode / NodeManager
+worker2  : DataNode / NodeManager / PostgreSQL 원격 백업 수신 대상(38)
+worker3  : Ansible Controller / Web Console / PostgreSQL / Prometheus / Grafana / Alertmanager
+
+[신규 데이터 거버넌스 노드]
+metadata : Docker Engine + Compose / OpenMetadata Core / MySQL / Elasticsearch
+```
+
+- **운영 메타데이터(32~33)**: 기존 Web Console이 Ansible Inventory와 서비스 배포 정보를 PostgreSQL로 동기화한 결과. 데이터 카탈로그와는 별개입니다.
+- **데이터 거버넌스(41~)**: `metadata` 서버의 OpenMetadata가 데이터셋·스키마·용어집·소유자·계보를 관리하는 영역. 아직 PostgreSQL/HDFS/Spark의 실제 데이터 자산 수집은 연결하지 않았습니다.
+- **Ansible 제어 흐름**: worker3에서 `metadata`에 SSH로 접속해 40~41번을 실행합니다. `metadata`를 기존 `hadoop_cluster` 또는 `workers` 그룹에 포함하지 않습니다.
+
+### Playbook별 구축 현황
+
+| 단계 | Playbook | 역할 / 상태 |
+|---|---|---|
+| 30~33 | `30-web-console.yml` ~ `33-web-console-inventory.yml` | 중앙 콘솔, Action History, 운영 메타데이터·Inventory (구축됨) |
+| 34~36 | `34-web-console-postgres-backup.yml` ~ `36-web-console-pg-backup-alerts.yml` | DB 백업, Observer 메트릭, Prometheus/Alertmanager 규칙 (구축됨) |
+| **37** | `playbooks/37-web-console-pg-backup-dashboard.yml` | Admin 백업 상태·알림 패널 (**적용 완료 확인**) |
+| **38** | `playbooks/38-web-console-pg-remote-replica.yml` | worker3 → worker2 SSH+rsync 및 SHA-256 백업 복제 (**실배포/전송 확인 필요**) |
+| **39** | `playbooks/39-web-console-service-ui-links.yml` | 중앙 콘솔의 서비스 Web UI 바로가기 (**적용 완료**) |
+| **40** | `playbooks/40-governance-docker-bootstrap.yml` | metadata VM Docker Engine/Compose 설치 (**적용 완료**) |
+| **41** | `playbooks/41-governance-openmetadata.yml` | metadata VM OpenMetadata Core 설치 (**UI 로그인 확인 완료**) |
+
+38번은 초기 패키지의 `tasks_from` 진입점 오류 및 Role 변수 접두사 Lint 오류를 수정한 버전을 기준으로 합니다. 실제 복제 성공을 확인하기 전에는 원격 백업이 확보됐다고 가정하지 않습니다.
+
+### 38. PostgreSQL 백업 원격 복제 (worker3 → worker2)
+
+- 기존 로컬 백업: worker3 `/var/backups/bigtop-web-console/postgresql/`, 기본 14일 보관.
+- 원격 보관 경로: worker2 `/var/backups/bigtop-web-console-replica/postgresql/`.
+- 복제 타이머: 기본 매시간, 원격 보관: 기본 30일.
+- 전송 방식: 전용 비특권 계정/SSH 키, `rsync`, SHA-256 무결성 확인. 검증 실패 시 성공으로 간주하지 않습니다.
+- **중요:** worker2는 DataNode 역할도 수행하므로 디스크 여유와 HDFS 사용량에 대한 영향을 확인해야 합니다.
+
+```bash
+# worker3: 38번 수정 패키지를 적용한 환경에서 실행 (metadata 노드와 무관)
+make lint
+.venv/bin/ansible-playbook playbooks/38-web-console-pg-remote-replica.yml
+sudo systemctl start bigtop-web-console-pg-replica.service
+sudo journalctl -u bigtop-web-console-pg-replica.service -n 40 --no-pager
+
+# worker2: 복제 파일 목록 확인
+sudo ls -lah /var/backups/bigtop-web-console-replica/postgresql/
+```
+
+이 Playbook은 worker2에 원격 SSH로 연결해야 하므로 **`-e ansible_connection=local`을 사용하지 않습니다.** 복제본도 실제 복원 테스트를 통해 검증해야 하며, 단순 전송 성공이 복구 성공을 보장하지는 않습니다. 상세 문서: `docs/web_console_pg_remote_replica.md`.
+
+### 39. 중앙 Web Console 서비스 UI 바로가기
+
+Home의 `Service Web UIs` 카드와 Services 화면의 `Open UI` 버튼으로 다음 관리 UI를 **새 탭에서** 엽니다.
+
+| 서비스 | 기본 URL (실제 서비스/포트포워딩 주소와 구분) |
+|---|---|
+| HDFS NameNode | `http://master:9870` |
+| YARN ResourceManager | `http://master:18088` |
+| Spark History Server | `http://master:18080` |
+| Prometheus | `http://worker3:9090` |
+| Grafana | `http://worker3:23000` |
+| Alertmanager | `http://worker3:19093` |
+
+**DataNode와 NodeManager(worker1/worker2)는 기본 바로가기에서 제외했습니다.** URL은 `roles/web_console_service_ui_links/defaults/main.yml`의 `web_console_service_ui_links_items`가 기본값이며, `inventory/group_vars/all.yml` 등에서 재정의했다면 사용자 설정이 우선합니다. 브라우저에서 `master` 또는 `worker3`를 해석하지 못한다면, 사용 중인 접근 가능한 주소/포트로 Ansible 변수를 변경합니다. 바로가기는 실제 서비스 포트를 수정하지 않습니다.
+
+```bash
+# worker3: 링크 설정을 Ansible로 재반영
+.venv/bin/ansible-playbook playbooks/39-web-console-service-ui-links.yml \
+  -e ansible_connection=local
+curl -fsS http://127.0.0.1:18090/api/service-ui-links | python3 -m json.tool
+```
+
+상세 문서: `docs/web_console_service_ui_links.md`.
+
+### 40. `metadata` VM 기본 Docker 환경
+
+- 대상 Inventory 그룹: `[governance_nodes]`, 대상 호스트 `metadata`.
+- OS: Ubuntu Server 24.04; PoC VM 리소스: 4 vCPU / 8GB RAM.
+- Docker Engine과 Docker Compose Plugin을 Ansible로 관리합니다.
+- 검색 엔진을 위한 `vm.max_map_count=1048576` 적용; Docker 설치에 따른 자동 서비스 기동.
+- metadata 서버는 **Hadoop 클러스터 설치 그룹이 아닙니다.**
+
+```bash
+# worker3: 인벤토리 연결 및 배포 확인
+.venv/bin/ansible -i inventory/hosts.ini governance_nodes -m ansible.builtin.ping
+.venv/bin/ansible-playbook -i inventory/hosts.ini \
+  playbooks/40-governance-docker-bootstrap.yml
+
+# metadata VM
+sudo systemctl is-active docker
+sudo docker compose version
+sysctl vm.max_map_count
+```
+
+상세 문서: `docs/40-governance-bootstrap.md`.
+
+### 41. OpenMetadata Core — 설치 및 운영
+
+| 항목 | 설정 |
+|---|---|
+| 전용 서버 | `metadata` VM |
+| OpenMetadata | **2.0.6** (Ansible에서 이미지 태그 고정) |
+| 메타데이터 DB | MySQL **8.0**, 외부 DB 포트 미공개 |
+| 검색 엔진 | Elasticsearch **9.3.0**, 외부 검색 포트 미공개 |
+| UI | `http://<metadata-접근주소>:8585` |
+| Admin healthcheck | metadata VM 내부 `http://127.0.0.1:8586/healthcheck` |
+| 실행/영속성 | Docker Compose, systemd, Docker named volumes |
+| 비밀정보 | metadata VM의 `/opt/bigtop-governance/openmetadata/.env` (Git 추적 금지) |
+
+**OpenMetadata 웹 UI 접속 및 초기 로그인까지 확인했습니다.** 데이터 카탈로그 자동 수집/워크플로 서비스(Airflow/Ingestion)는 아직 도입하지 않았습니다. `metadata` VM의 8GB 메모리 제한을 고려해 Core만 먼저 기동한 구성입니다.
+
+```bash
+# worker3: 기존 41번 Playbook 재실행/재구성 시 (metadata 원격 SSH 사용)
+.venv/bin/ansible-playbook -i inventory/hosts.ini \
+  playbooks/41-governance-openmetadata.yml
+
+# metadata VM: 서비스 점검
+sudo systemctl is-active bigtop-governance-openmetadata.service
+sudo docker compose -p bigtop-openmetadata \
+  -f /opt/bigtop-governance/openmetadata/compose.yaml \
+  --env-file /opt/bigtop-governance/openmetadata/.env ps
+curl -fsS http://127.0.0.1:8586/healthcheck
+sudo docker stats --no-stream
+```
+
+**주의:** `docker compose down -v`, `docker volume rm`, `docker system prune --volumes`는 DB/검색 엔진의 영속 데이터를 삭제할 수 있으므로 금지합니다. `.env`의 DB 비밀번호를 임의로 바꾸면 저장된 DB 자격 증명과 불일치할 수 있습니다. PoC 환경에서 관리자 초기 자격 증명은 변경하고, 실제 계정/비밀번호를 Git에 추가하지 않습니다. 상세 문서: `docs/41-governance-openmetadata.md`.
+
+### 저장소 관리 / 다음 단계
+
+- Git에는 **Playbook, Role, 템플릿, 테스트, 문서, 공개 가능한 설정 예시**를 포함합니다.
+- Git에서 제외: `inventory/hosts.ini`, `inventory/group_vars/all.yml`, SSH 개인키, `.env`, DB 덤프, 로컬/원격 백업 파일, 압축 배포본 및 테스트 산출물.
+- 42단계 후보: OpenMetadata의 첫 번째 PostgreSQL 데이터 카탈로그 수집(별도 read-only 계정), 중앙 콘솔에 OpenMetadata UI 바로가기, 자원 사용량 검증. 계보·품질·민감정보 분류는 이후 단계로 확장합니다.
+<!-- END BIGTOP README 20261027 CURRENT -->
 
 ## Git에 포함하지 않는 파일
 
@@ -3734,7 +3880,7 @@ inventory/group_vars/all.yml.example
 ## 현재 완료 상태
 
 <!-- BEGIN BIGTOP README OCT2026 COMPLETED NOTE -->
-> 아래 기존 완료 목록은 초기 구축 이력이며, 추가된 31~36번 기능의 구성과 확인 방법은 「Web Console 운영 확장」 절을 참조하세요. 37번은 별도 현장 배포 확인이 필요합니다.
+> 기존 완료 목록은 초기 구축 이력입니다. 31~41번 이후 단계별 최신 상태는 「최신 구축 현황: 백업 원격 복제 · 관리 UI · OpenMetadata (2026-10-27)」 절을 기준으로 합니다. 37번은 완료됐고, 38번은 현장 복제 결과 확인이 필요합니다.
 <!-- END BIGTOP README OCT2026 COMPLETED NOTE -->
 
 
@@ -3802,7 +3948,7 @@ Bigtop Web Console
 ## 향후 계획
 
 <!-- BEGIN BIGTOP README OCT2026 ROADMAP NOTE -->
-> 아래 목록은 당시 작성된 초기 개선 계획입니다. CI 의존성 오류 해결 및 PostgreSQL 백업·관측·알림은 이후 수행했습니다. 현재 우선순위는 37번 현장 검증, 백업의 외부 노드 복제, DB 복원 정기 검증, 스키마 마이그레이션 및 권한 관리입니다.
+> 아래는 작성 당시의 기존 계획이며 일부 항목은 이미 완료됐습니다. 현재 우선순위는 38번 원격 백업 복제 검증, 42번 OpenMetadata 데이터 카탈로그 수집, 관리 콘솔 연동, 메타데이터 백업/복구·인증 강화입니다.
 <!-- END BIGTOP README OCT2026 ROADMAP NOTE -->
 
 
@@ -3848,3 +3994,22 @@ Bigtop Web Console
 11. Web Console API 단위 테스트 추가
 12. CI에서 make lint / make validate / template syntax check 자동 실행
 ```
+
+<!-- BEGIN BIGTOP SERVICE UI SHORTCUTS 39 -->
+## Web Console 서비스 UI 바로가기 (39)
+
+Home의 **Service Web UIs** 카드와 Services의 **Open UI** 버튼에서
+HDFS NameNode, YARN ResourceManager, Spark History Server,
+Prometheus, Grafana, Alertmanager UI를 새 탭으로 엽니다.
+DataNode/NodeManager는 기본 바로가기에서 제외했습니다.
+
+기본 링크: NameNode `master:9870`, YARN `master:18088`,
+Spark `master:18080`, Prometheus `worker3:9090`,
+Grafana `worker3:23000`, Alertmanager `worker3:19093`.
+
+URL은 Ansible의 `web_console_service_ui_links_items`가 관리합니다.
+현재 설정은 `roles/web_console_service_ui_links/defaults/main.yml`을 참조하고,
+`inventory/group_vars/all.yml`에 동일 변수가 있으면 그 정의가 우선합니다.
+브라우저에서 실제 접속 가능한 주소로 조정하세요.
+자세한 내용은 `docs/web_console_service_ui_links.md`를 참조하세요.
+<!-- END BIGTOP SERVICE UI SHORTCUTS 39 -->

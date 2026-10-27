@@ -1,0 +1,25 @@
+---
+# Guardrails are intentionally strict for the user's separate metadata VM.
+governance_docker_bootstrap_expected_hostname: metadata
+governance_docker_bootstrap_min_memory_mb: 6000
+governance_docker_bootstrap_min_vcpus: 4
+governance_docker_bootstrap_repo_base: https://download.docker.com/linux/ubuntu
+governance_docker_bootstrap_repo_key: /etc/apt/keyrings/docker.asc
+governance_docker_bootstrap_sysctl_file: /etc/sysctl.d/99-openmetadata.conf
+# Elasticsearch 8.16+/9.x recommends at least 1048576 mmap areas.
+governance_docker_bootstrap_max_map_count: 1048576
+governance_docker_bootstrap_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+governance_docker_bootstrap_conflicting_packages:
+  - docker.io
+  - docker-compose
+  - docker-compose-v2
+  - docker-doc
+  - podman-docker
+  - docker-buildx
+  - containerd
+  - runc
