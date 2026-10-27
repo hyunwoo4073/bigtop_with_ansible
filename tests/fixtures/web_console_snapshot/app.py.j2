@@ -1,0 +1,10 @@
+from pathlib import Path
+import json
+from fastapi import FastAPI
+app = FastAPI()
+FRONTEND_DIST_DIR = '/tmp'
+
+frontend_path = Path(FRONTEND_DIST_DIR)
+
+if frontend_path.exists():
+    app.mount('/', None)

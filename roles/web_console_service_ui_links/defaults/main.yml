@@ -1,0 +1,33 @@
+---
+web_console_service_ui_links_config_path: /etc/bigtop-web-console/service-ui-links.json
+web_console_service_ui_links_items:
+  - title: HDFS NameNode
+    group: HDFS
+    host: master
+    service: hadoop-hdfs-namenode
+    url: http://master:9870
+  - title: YARN ResourceManager
+    group: YARN
+    host: master
+    service: hadoop-yarn-resourcemanager
+    url: http://master:18088
+  - title: Spark History Server
+    group: Spark
+    host: master
+    service: spark-history-server
+    url: http://master:18080
+  - title: Prometheus
+    group: Monitoring
+    host: worker3
+    service: prometheus
+    url: http://worker3:9090
+  - title: Grafana
+    group: Monitoring
+    host: worker3
+    service: grafana-server
+    url: http://worker3:23000
+  - title: Alertmanager
+    group: Monitoring
+    host: worker3
+    service: prometheus-alertmanager
+    url: http://worker3:19093

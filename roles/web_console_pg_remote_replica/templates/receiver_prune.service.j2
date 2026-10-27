@@ -1,0 +1,12 @@
+[Unit]
+Description=Prune aged off-node Bigtop PostgreSQL backups safely
+
+[Service]
+Type=oneshot
+User={{ web_console_pg_remote_replica_dest_user }}
+Group={{ web_console_pg_remote_replica_dest_user }}
+UMask=0077
+ExecStart=/usr/local/bin/bigtop-pg-replica-prune.sh
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true

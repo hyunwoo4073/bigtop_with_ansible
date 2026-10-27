@@ -1,0 +1,9 @@
+---
+- name: Reload systemd for OpenMetadata
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Restart OpenMetadata stack after managed config changes
+  ansible.builtin.systemd_service:
+    name: '{{ governance_openmetadata_service_name }}'
+    state: restarted

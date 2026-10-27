@@ -1,0 +1,146 @@
+---
+- name: Verify dedicated governance host and resources
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == governance_openmetadata_expected_host
+      - ansible_facts.hostname == governance_openmetadata_expected_host
+      - ansible_facts.distribution == 'Ubuntu'
+      - ansible_facts.distribution_major_version == '24'
+      - ansible_facts.memtotal_mb | int >= governance_openmetadata_min_memory_mb
+      - ansible_facts.processor_vcpus | int >= governance_openmetadata_min_vcpus
+      - governance_openmetadata_bind_ip | length > 0
+    fail_msg: >-
+      Only deploy on the standalone metadata Ubuntu 24.04 VM with at
+      least 4 vCPUs and 6.5 GB RAM. Existing Hadoop nodes are not targets.
+
+- name: Check Docker Compose availability
+  ansible.builtin.command:
+    argv: [docker, compose, version]
+  changed_when: false
+
+- name: Check Elasticsearch mmap prerequisite
+  ansible.builtin.command:
+    argv: [sysctl, -n, vm.max_map_count]
+  register: governance_openmetadata_map_count
+  changed_when: false
+
+- name: Require mmap setting from step 40
+  ansible.builtin.assert:
+    that:
+      - governance_openmetadata_map_count.stdout | int >= 1048576
+    fail_msg: Rerun the step 40 Docker bootstrap playbook first.
+
+- name: Create protected OpenMetadata deployment directory
+  ansible.builtin.file:
+    path: '{{ governance_openmetadata_root }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Check free disk space before pulling container images
+  ansible.builtin.command:
+    argv: [df, -Pm, '{{ governance_openmetadata_root }}']
+  register: governance_openmetadata_disk
+  changed_when: false
+
+- name: Refuse deployment when free disk space is too low
+  ansible.builtin.assert:
+    that:
+      - governance_openmetadata_disk.stdout_lines[-1].split()[3] | int >= governance_openmetadata_min_disk_mb
+    fail_msg: >-
+      Less than 15 GB of free disk remains on metadata.
+      Increase the VM disk before deploying images and persistent data.
+
+- name: Install protected first-run secret generator
+  ansible.builtin.copy:
+    src: init_env.py
+    dest: '{{ governance_openmetadata_root }}/init_env.py'
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Create random database credentials once on metadata only
+  ansible.builtin.command:
+    argv:
+      - python3
+      - '{{ governance_openmetadata_root }}/init_env.py'
+      - '{{ governance_openmetadata_root }}/.env'
+  register: governance_openmetadata_env_init
+  changed_when: "governance_openmetadata_env_init.stdout == 'CREATED'"
+  no_log: true
+
+- name: Install managed OpenMetadata core Compose configuration
+  ansible.builtin.template:
+    src: compose.yaml.j2
+    dest: '{{ governance_openmetadata_root }}/compose.yaml'
+    owner: root
+    group: root
+    mode: '0600'
+  notify: Restart OpenMetadata stack after managed config changes
+
+- name: Validate rendered Compose syntax and interpolation
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --project-name
+      - bigtop-openmetadata
+      - --file
+      - '{{ governance_openmetadata_root }}/compose.yaml'
+      - --env-file
+      - '{{ governance_openmetadata_root }}/.env'
+      - config
+      - --quiet
+  changed_when: false
+  no_log: true
+
+- name: Install systemd-managed OpenMetadata stack
+  ansible.builtin.template:
+    src: openmetadata.service.j2
+    dest: /etc/systemd/system/{{ governance_openmetadata_service_name }}
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Reload systemd for OpenMetadata
+    - Restart OpenMetadata stack after managed config changes
+
+- name: Apply configuration changes before initial activation
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start the OpenMetadata stack
+  ansible.builtin.systemd_service:
+    name: '{{ governance_openmetadata_service_name }}'
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Confirm OpenMetadata administrative health endpoint
+  ansible.builtin.uri:
+    url: 'http://127.0.0.1:{{ governance_openmetadata_admin_port }}/healthcheck'
+    return_content: false
+    status_code: 200
+    timeout: 10
+  register: governance_openmetadata_health
+  retries: 24
+  delay: 10
+  until: governance_openmetadata_health.status | default(0) == 200
+
+- name: Confirm OpenMetadata UI is responding on the configured network interface
+  ansible.builtin.uri:
+    url: 'http://{{ governance_openmetadata_bind_ip }}:{{ governance_openmetadata_ui_port }}/'
+    return_content: false
+    status_code: [200, 302, 303]
+    timeout: 10
+  register: governance_openmetadata_ui
+  retries: 6
+  delay: 5
+  until: governance_openmetadata_ui.status | default(0) in [200, 302, 303]
+
+- name: Report deployment target without revealing secrets
+  ansible.builtin.debug:
+    msg: >-
+      OpenMetadata {{ governance_openmetadata_version }} is running on
+      http://{{ governance_openmetadata_bind_ip }}:{{ governance_openmetadata_ui_port }}.
+      Ingestion is deferred to step 42. Database and search ports are not published.

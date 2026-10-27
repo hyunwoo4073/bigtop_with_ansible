@@ -1,0 +1,15 @@
+[Unit]
+Description=Replicate Bigtop Web Console PostgreSQL backups to {{ web_console_pg_remote_replica_target_host }}
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+UMask=0077
+ExecStart={{ web_console_pg_remote_replica_script_dir }}/pg_replica_sync.sh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+Nice=10

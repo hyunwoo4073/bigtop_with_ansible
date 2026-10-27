@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily retention for off-node PostgreSQL replicas
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+AccuracySec=15min
+Unit={{ web_console_pg_remote_replica_prune_service }}
+
+[Install]
+WantedBy=timers.target

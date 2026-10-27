@@ -1,0 +1,49 @@
+---
+- name: Deploy Web Console service UI shortcuts
+  hosts: ops
+  become: true
+  gather_facts: true
+  pre_tasks:
+    - name: Ensure Web Console deployment targets only the ops node
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname in groups['ops']
+          - ansible_facts['hostname'] == inventory_hostname
+        fail_msg: >-
+          Incorrect target for Web Console shortcuts. The ops host must
+          match the actual system hostname.
+  tasks:
+    - name: Redeploy Web Console including frontend shortcut panel
+      ansible.builtin.import_role:
+        name: web_console
+
+    - name: Publish service UI shortcut configuration
+      ansible.builtin.import_role:
+        name: web_console_service_ui_links
+
+    - name: Apply Web Console restart handlers before API verification
+      ansible.builtin.meta: flush_handlers
+
+    - name: Verify read-only shortcut API from the running console
+      ansible.builtin.uri:
+        url: http://127.0.0.1:18090/api/service-ui-links
+        method: GET
+        return_content: true
+        status_code: 200
+        timeout: 15
+      register: web_console_service_ui_links_http
+      until: web_console_service_ui_links_http.status == 200
+      retries: 5
+      delay: 2
+      changed_when: false
+
+    - name: Require a populated read-only shortcut list
+      ansible.builtin.assert:
+        that:
+          - web_console_service_ui_links_http.json.ok | bool
+          - web_console_service_ui_links_http.json.read_only | bool
+          - web_console_service_ui_links_http.json.links | length > 0
+          - web_console_service_ui_links_http.json.source == 'ansible-config'
+        fail_msg: >-
+          The Web Console API is not serving the Ansible-managed UI links.
+          Check its service logs and the JSON config file.

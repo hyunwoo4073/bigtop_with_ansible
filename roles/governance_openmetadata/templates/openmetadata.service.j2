@@ -1,0 +1,18 @@
+[Unit]
+Description=Bigtop Governance OpenMetadata core (Docker Compose)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory={{ governance_openmetadata_root }}
+ExecStartPre=/usr/bin/docker compose --project-name bigtop-openmetadata --file {{ governance_openmetadata_root }}/compose.yaml --env-file {{ governance_openmetadata_root }}/.env config --quiet
+ExecStart=/usr/bin/docker compose --project-name bigtop-openmetadata --file {{ governance_openmetadata_root }}/compose.yaml --env-file {{ governance_openmetadata_root }}/.env up --detach
+ExecStop=/usr/bin/docker compose --project-name bigtop-openmetadata --file {{ governance_openmetadata_root }}/compose.yaml --env-file {{ governance_openmetadata_root }}/.env stop
+TimeoutStartSec=1200
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

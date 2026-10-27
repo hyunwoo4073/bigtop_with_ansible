@@ -1,0 +1,14 @@
+---
+governance_openmetadata_expected_host: metadata
+governance_openmetadata_version: '2.0.6'
+governance_openmetadata_root: /opt/bigtop-governance/openmetadata
+governance_openmetadata_bind_ip: "{{ ansible_host }}"
+governance_openmetadata_ui_port: 8585
+governance_openmetadata_admin_port: 8586
+governance_openmetadata_min_memory_mb: 6500
+governance_openmetadata_min_vcpus: 4
+governance_openmetadata_min_disk_mb: 15000
+governance_openmetadata_es_image: docker.elastic.co/elasticsearch/elasticsearch:9.3.0
+governance_openmetadata_mysql_image: mysql:8.0
+governance_openmetadata_server_image: "openmetadata/server:{{ governance_openmetadata_version }}"
+governance_openmetadata_service_name: bigtop-governance-openmetadata.service

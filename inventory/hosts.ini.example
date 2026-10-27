@@ -8,6 +8,9 @@ worker2 ansible_host=192.168.56.103
 [ops]
 worker3 ansible_host=192.168.56.104
 
+[governance_nodes]
+metadata ansible_host=192.168.56.105
+
 [hadoop_cluster:children]
 master
 workers

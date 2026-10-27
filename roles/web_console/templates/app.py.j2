@@ -1245,6 +1245,69 @@ def api_postgresql_backup_dashboard():
 # END BIGTOP POSTGRES BACKUP DASHBOARD API V1
 
 
+# BEGIN BIGTOP SERVICE UI SHORTCUTS API V1
+# Browser-facing links are maintained in Ansible and read on each request.
+# Do not derive URLs from worker3's DNS resolution: the browser may use
+# a different network and VirtualBox port forwarding.
+@app.get('/api/service-ui-links')
+def api_service_ui_links():
+    from urllib.parse import urlsplit
+
+    config_path = Path('/etc/bigtop-web-console/service-ui-links.json')
+    try:
+        payload = json.loads(config_path.read_text(encoding='utf-8'))
+    except (OSError, ValueError) as exc:
+        return {
+            'ok': False,
+            'read_only': True,
+            'source': 'ansible-config',
+            'links': [],
+            'error': 'UI shortcut configuration is unavailable or invalid',
+        }
+
+    candidates = payload.get('links', []) if isinstance(payload, dict) else []
+    if not isinstance(candidates, list):
+        candidates = []
+
+    links = []
+    seen = set()
+    for item in candidates:
+        if not isinstance(item, dict):
+            continue
+        title = item.get('title')
+        group = item.get('group')
+        host = item.get('host')
+        service = item.get('service')
+        url = item.get('url')
+        if not all(isinstance(v, str) and v.strip() for v in (title, group, host, service, url)):
+            continue
+        try:
+            parsed = urlsplit(url)
+            if (parsed.scheme not in ('http', 'https') or not parsed.hostname
+                    or parsed.username is not None or parsed.password is not None
+                    or any(c.isspace() for c in url)):
+                continue
+            _ = parsed.port  # Reject malformed port values.
+        except ValueError:
+            continue
+        key = (host, service)
+        if key in seen:
+            continue
+        seen.add(key)
+        links.append({
+            'title': title, 'group': group, 'host': host,
+            'service': service, 'url': url,
+        })
+
+    return {
+        'ok': True,
+        'read_only': True,
+        'source': 'ansible-config',
+        'links': links,
+    }
+# END BIGTOP SERVICE UI SHORTCUTS API V1
+
+
 frontend_path = Path(FRONTEND_DIST_DIR)
 
 if frontend_path.exists():

@@ -1,0 +1,16 @@
+---
+web_console_pg_remote_replica_target_host: worker2
+web_console_pg_remote_replica_database: "{{ web_console_pg_backup_database | default('bigtop_console') }}"
+web_console_pg_remote_replica_source_dir: /var/backups/bigtop-web-console/postgresql
+web_console_pg_remote_replica_dest_dir: /var/backups/bigtop-web-console-replica/postgresql
+web_console_pg_remote_replica_dest_user: bigtop_pg_replica
+web_console_pg_remote_replica_dest_home: /var/lib/bigtop-pg-replica
+web_console_pg_remote_replica_script_dir: /usr/local/lib/bigtop-web-console
+web_console_pg_remote_replica_ssh_dir: /var/lib/postgresql/.ssh
+web_console_pg_remote_replica_key_name: bigtop_pg_backup_replica_ed25519
+web_console_pg_remote_replica_timer_calendar: hourly
+web_console_pg_remote_replica_retention_days: 30
+web_console_pg_remote_replica_service: bigtop-web-console-pg-replica.service
+web_console_pg_remote_replica_timer: bigtop-web-console-pg-replica.timer
+web_console_pg_remote_replica_prune_service: bigtop-web-console-pg-replica-prune.service
+web_console_pg_remote_replica_prune_timer: bigtop-web-console-pg-replica-prune.timer

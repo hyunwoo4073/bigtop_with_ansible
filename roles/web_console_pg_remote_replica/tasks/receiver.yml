@@ -1,0 +1,121 @@
+---
+- name: Validate replica receiver configuration
+  ansible.builtin.assert:
+    that:
+      - web_console_pg_remote_replica_dest_dir is match('^/var/backups/[a-zA-Z0-9_./-]+$')
+      - "'..' not in web_console_pg_remote_replica_dest_dir.split('/')"
+      - web_console_pg_remote_replica_dest_home is match('^/var/lib/[a-zA-Z0-9_./-]+$')
+      - web_console_pg_remote_replica_dest_user is match('^[a-z_][a-z0-9_-]*$')
+      - web_console_pg_remote_replica_database is match('^[a-z][a-z0-9_]*$')
+      - web_console_pg_remote_replica_retention_days | int >= 15
+      - web_console_pg_remote_replica_retention_days | int <= 365
+
+- name: Ensure rsync exists on replica receiver
+  ansible.builtin.apt:
+    name: rsync
+    state: present
+    update_cache: false
+
+- name: Create isolated replica receiver group
+  ansible.builtin.group:
+    name: "{{ web_console_pg_remote_replica_dest_user }}"
+    system: true
+    state: present
+
+- name: Create unprivileged replica receiver without a usable password
+  ansible.builtin.user:
+    name: "{{ web_console_pg_remote_replica_dest_user }}"
+    home: "{{ web_console_pg_remote_replica_dest_home }}"
+    group: "{{ web_console_pg_remote_replica_dest_user }}"
+    shell: /bin/sh
+    system: true
+    create_home: true
+    password: '*'
+    state: present
+
+- name: Secure the replica receiver home directory
+  ansible.builtin.file:
+    path: "{{ web_console_pg_remote_replica_dest_home }}"
+    state: directory
+    owner: "{{ web_console_pg_remote_replica_dest_user }}"
+    group: "{{ web_console_pg_remote_replica_dest_user }}"
+    mode: '0700'
+
+- name: Create restricted receiver SSH directory
+  ansible.builtin.file:
+    path: "{{ web_console_pg_remote_replica_dest_home }}/.ssh"
+    state: directory
+    owner: "{{ web_console_pg_remote_replica_dest_user }}"
+    group: "{{ web_console_pg_remote_replica_dest_user }}"
+    mode: '0700'
+
+- name: Install only the dedicated restricted replication public key
+  ansible.builtin.copy:
+    content: >-
+      restrict {{ hostvars[groups['ops'][0]].web_console_pg_remote_replica_public_key }}
+    dest: "{{ web_console_pg_remote_replica_dest_home }}/.ssh/authorized_keys"
+    owner: "{{ web_console_pg_remote_replica_dest_user }}"
+    group: "{{ web_console_pg_remote_replica_dest_user }}"
+    mode: '0600'
+
+- name: Create restricted receiver backup parent directory
+  ansible.builtin.file:
+    path: "{{ web_console_pg_remote_replica_dest_dir | dirname }}"
+    state: directory
+    owner: "{{ web_console_pg_remote_replica_dest_user }}"
+    group: "{{ web_console_pg_remote_replica_dest_user }}"
+    mode: '0700'
+
+- name: Create restricted receiver backup directory
+  ansible.builtin.file:
+    path: "{{ web_console_pg_remote_replica_dest_dir }}"
+    state: directory
+    owner: "{{ web_console_pg_remote_replica_dest_user }}"
+    group: "{{ web_console_pg_remote_replica_dest_user }}"
+    mode: '0700'
+
+- name: Read SSH server host identity for strict host key pinning
+  ansible.builtin.slurp:
+    src: /etc/ssh/ssh_host_ed25519_key.pub
+  register: web_console_pg_remote_replica_receiver_host_key
+
+- name: Install receiver backup pruning utility
+  ansible.builtin.template:
+    src: receiver_prune.sh.j2
+    dest: /usr/local/bin/bigtop-pg-replica-prune.sh
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Validate receiver pruning Bash script
+  ansible.builtin.command:
+    argv:
+      - bash
+      - -n
+      - /usr/local/bin/bigtop-pg-replica-prune.sh
+  changed_when: false
+
+- name: Configure independent receiver retention service
+  ansible.builtin.template:
+    src: receiver_prune.service.j2
+    dest: "/etc/systemd/system/{{ web_console_pg_remote_replica_prune_service }}"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart receiver replica prune timer
+
+- name: Configure independent receiver retention timer
+  ansible.builtin.template:
+    src: receiver_prune.timer.j2
+    dest: "/etc/systemd/system/{{ web_console_pg_remote_replica_prune_timer }}"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart receiver replica prune timer
+
+- name: Start receiver retention timer
+  ansible.builtin.systemd_service:
+    name: "{{ web_console_pg_remote_replica_prune_timer }}"
+    daemon_reload: true
+    enabled: true
+    state: started

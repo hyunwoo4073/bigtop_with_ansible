@@ -1,0 +1,12 @@
+[Unit]
+Description=Hourly off-node PostgreSQL backup replication
+
+[Timer]
+OnCalendar={{ web_console_pg_remote_replica_timer_calendar }}
+Persistent=true
+AccuracySec=5min
+RandomizedDelaySec=10min
+Unit={{ web_console_pg_remote_replica_service }}
+
+[Install]
+WantedBy=timers.target
