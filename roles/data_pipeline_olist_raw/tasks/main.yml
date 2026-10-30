@@ -1,0 +1,108 @@
+---
+- name: Validate Olist source CSV on Ansible controller
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ role_path }}/files/olist_raw.py"
+      - scan
+      - --source
+      - "{{ data_pipeline_olist_raw_local_dir }}"
+  delegate_to: localhost
+  become: false
+  register: data_pipeline_olist_raw_controller_manifest
+  changed_when: false
+
+- name: Confirm source CSV validation returned a complete manifest
+  ansible.builtin.assert:
+    that:
+      - (data_pipeline_olist_raw_controller_manifest.stdout | from_json).files | length == 9
+      - data_pipeline_olist_raw_replication | int in [1, 2]
+      - data_pipeline_olist_raw_hdfs_root is match('^/data/olist/raw(/.*)?$')
+    fail_msg: Verify all nine Olist CSV files, HDFS root and replication setting.
+
+- name: Check HDFS client on master
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -ls, /]
+  become: true
+  become_user: "{{ data_pipeline_olist_raw_hdfs_user }}"
+  changed_when: false
+
+- name: Install immutable HDFS raw loader on master
+  ansible.builtin.file:
+    path: "{{ data_pipeline_olist_raw_script_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install Olist upload and validation script on master
+  ansible.builtin.copy:
+    src: olist_raw.py
+    dest: "{{ data_pipeline_olist_raw_script_dir }}/olist_raw.py"
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Transfer and validate source files without persistent local copies
+  block:
+    - name: Create staging directory readable only by HDFS service account
+      ansible.builtin.file:
+        path: "{{ data_pipeline_olist_raw_stage_dir }}"
+        state: directory
+        owner: "{{ data_pipeline_olist_raw_hdfs_user }}"
+        mode: '0700'
+
+    - name: Copy validated Olist CSV to master temporary staging directory
+      ansible.builtin.copy:
+        src: "{{ data_pipeline_olist_raw_local_dir }}/{{ item }}"
+        dest: "{{ data_pipeline_olist_raw_stage_dir }}/{{ item }}"
+        owner: "{{ data_pipeline_olist_raw_hdfs_user }}"
+        mode: '0600'
+      loop:
+        - olist_orders_dataset.csv
+        - olist_order_items_dataset.csv
+        - olist_customers_dataset.csv
+        - olist_products_dataset.csv
+        - olist_order_payments_dataset.csv
+        - olist_order_reviews_dataset.csv
+        - olist_sellers_dataset.csv
+        - olist_geolocation_dataset.csv
+        - product_category_name_translation.csv
+
+    - name: Store controller-validated manifest in protected temporary directory
+      ansible.builtin.copy:
+        content: "{{ data_pipeline_olist_raw_controller_manifest.stdout }}\n"
+        dest: "{{ data_pipeline_olist_raw_stage_dir }}/expected.json"
+        owner: "{{ data_pipeline_olist_raw_hdfs_user }}"
+        mode: '0600'
+
+    - name: Upload immutable HDFS Raw snapshot and verify SHA-256 digests
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ data_pipeline_olist_raw_script_dir }}/olist_raw.py"
+          - ingest
+          - --source
+          - "{{ data_pipeline_olist_raw_stage_dir }}"
+          - --expected
+          - "{{ data_pipeline_olist_raw_stage_dir }}/expected.json"
+          - --root
+          - "{{ data_pipeline_olist_raw_hdfs_root }}"
+          - --version
+          - "{{ data_pipeline_olist_raw_version }}"
+          - --replication
+          - "{{ data_pipeline_olist_raw_replication | string }}"
+      become: true
+      become_user: "{{ data_pipeline_olist_raw_hdfs_user }}"
+      register: data_pipeline_olist_raw_ingestion
+      changed_when: "'PUT ' in data_pipeline_olist_raw_ingestion.stdout"
+
+    - name: Report verified HDFS Raw snapshot
+      ansible.builtin.debug:
+        msg: "{{ data_pipeline_olist_raw_ingestion.stdout_lines }}"
+
+  always:
+    - name: Remove temporary CSV and manifest copies on master
+      ansible.builtin.file:
+        path: "{{ data_pipeline_olist_raw_stage_dir }}"
+        state: absent

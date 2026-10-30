@@ -43,4 +43,10 @@ venv/
 .vscode/
 
 # Runtime diagnostics
-artifacts/
+artifacts//olist/
+/olist/
+/*.zip
+/artifacts/
+/*.tar.gz
+/*.bak
+/web_console_*_feature/

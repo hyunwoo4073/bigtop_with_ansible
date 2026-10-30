@@ -1,0 +1,19 @@
+---
+# Step 45 currently provides nine immutable CSV datasets under raw/v1.
+# Step 46 consumes four datasets in the initial transformation and preserves all raw files.
+data_pipeline_olist_etl_raw_root: /data/olist/raw
+data_pipeline_olist_etl_raw_version: v1
+data_pipeline_olist_etl_warehouse_root: /data/olist/warehouse
+data_pipeline_olist_etl_output_version: v1
+
+data_pipeline_olist_etl_hdfs_admin_user: hdfs
+data_pipeline_olist_etl_submit_user: hadoop
+data_pipeline_olist_etl_script_dir: /usr/local/lib/bigtop-olist/etl
+
+data_pipeline_olist_etl_queue: batch
+data_pipeline_olist_etl_driver_memory: 512m
+data_pipeline_olist_etl_executor_memory: 512m
+data_pipeline_olist_etl_executor_cores: 1
+data_pipeline_olist_etl_num_executors: 1
+data_pipeline_olist_etl_shuffle_partitions: 4
+data_pipeline_olist_etl_output_partitions: 2
