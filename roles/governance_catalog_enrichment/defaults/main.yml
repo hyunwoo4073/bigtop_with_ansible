@@ -1,0 +1,8 @@
+---
+governance_catalog_enrichment_expected_host: worker3
+governance_catalog_enrichment_api_url: "http://{{ hostvars['metadata'].ansible_host }}:8585/api"
+governance_catalog_enrichment_secret_file: /etc/bigtop-governance/pg-catalog/bot.token
+governance_catalog_enrichment_config_dir: /etc/bigtop-governance/catalog-enrichment
+governance_catalog_enrichment_install_dir: /usr/local/lib/bigtop-governance/catalog-enrichment
+governance_catalog_enrichment_policy_file: /etc/bigtop-governance/catalog-enrichment/policy.yaml
+governance_catalog_enrichment_unit: bigtop-governance-catalog-enrichment.service

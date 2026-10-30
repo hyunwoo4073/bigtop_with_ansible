@@ -1,0 +1,71 @@
+---
+- name: Assert Step 43 targets the existing worker3 Ansible controller only
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == governance_catalog_enrichment_expected_host
+      - ansible_facts.hostname == governance_catalog_enrichment_expected_host
+      - governance_catalog_enrichment_api_url is match('^https?://[^/]+/api$')
+    fail_msg: Step 43 only runs on worker3 with a valid OpenMetadata API URL.
+
+- name: Check the Step 42 bot token exists
+  ansible.builtin.stat:
+    path: '{{ governance_catalog_enrichment_secret_file }}'
+  register: governance_catalog_enrichment_token_stat
+  no_log: true
+
+- name: Require the existing protected Step 42 token
+  ansible.builtin.assert:
+    that:
+      - governance_catalog_enrichment_token_stat.stat.exists | default(false)
+      - governance_catalog_enrichment_token_stat.stat.isreg | default(false)
+      - not (governance_catalog_enrichment_token_stat.stat.islnk | default(false))
+      - governance_catalog_enrichment_token_stat.stat.mode == '0600'
+    fail_msg: Step 42 JWT token is missing or unsafe; keep it out of Ansible variables.
+
+- name: Install system Python YAML support for the governance runner
+  ansible.builtin.apt:
+    name: python3-yaml
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure private configuration directory exists
+  ansible.builtin.file:
+    path: '{{ governance_catalog_enrichment_config_dir }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Ensure governance program directory exists
+  ansible.builtin.file:
+    path: '{{ governance_catalog_enrichment_install_dir }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install declarative nonsecret classification and glossary policy
+  ansible.builtin.copy:
+    src: governance_policy.yaml
+    dest: '{{ governance_catalog_enrichment_policy_file }}'
+    owner: root
+    group: root
+    mode: '0640'
+
+- name: Install idempotent OpenMetadata API enrichment runner
+  ansible.builtin.copy:
+    src: enrich_catalog.py
+    dest: '{{ governance_catalog_enrichment_install_dir }}/enrich_catalog.py'
+    owner: root
+    group: root
+    mode: '0750'
+
+- name: Install manual-only OpenMetadata governance apply unit
+  ansible.builtin.template:
+    src: catalog-enrichment.service.j2
+    dest: '/etc/systemd/system/{{ governance_catalog_enrichment_unit }}'
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload governance systemd

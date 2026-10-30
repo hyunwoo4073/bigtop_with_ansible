@@ -1,0 +1,12 @@
+---
+governance_lineage_expected_host: worker3
+governance_lineage_database: bigtop_console
+governance_lineage_reader: bigtop_catalog_reader
+governance_lineage_view: v_bigtop_service_inventory_lineage
+governance_lineage_view_marker: 'bigtop-governance-lineage:step44:v1'
+governance_lineage_api_url: "http://{{ hostvars['metadata'].ansible_host }}:8585/api"
+governance_lineage_token_file: /etc/bigtop-governance/pg-catalog/bot.token
+governance_lineage_config_dir: /etc/bigtop-governance/lineage
+governance_lineage_install_dir: /usr/local/lib/bigtop-governance/lineage
+governance_lineage_policy_file: /etc/bigtop-governance/lineage/policy.yaml
+governance_lineage_unit: bigtop-governance-lineage.service

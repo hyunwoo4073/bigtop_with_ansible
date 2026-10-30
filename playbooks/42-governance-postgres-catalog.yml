@@ -1,0 +1,8 @@
+---
+- name: Prepare external OpenMetadata PostgreSQL catalog ingestion on worker3
+  hosts: ops
+  gather_facts: true
+  become: true
+  serial: 1
+  roles:
+    - role: governance_postgres_catalog

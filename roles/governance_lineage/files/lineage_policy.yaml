@@ -1,0 +1,23 @@
+---
+version: 1
+# The SQL VIEW in create_view.sql genuinely derives these fields from the sources.
+# Do not add FK-only relationships as data lineage.
+target: bigtop_worker3_postgresql.bigtop_console.public.v_bigtop_service_inventory_lineage
+sources:
+  - fqn: bigtop_worker3_postgresql.bigtop_console.public.platform_hosts
+    columns:
+      inventory_address: inventory_address
+  - fqn: bigtop_worker3_postgresql.bigtop_console.public.platform_service_instances
+    columns:
+      cluster_slug: cluster_slug
+      host_name: host_name
+      service_name: service_name
+      component_name: component_name
+      group_name: group_name
+sqlQuery: >-
+  SELECT s.cluster_slug, s.host_name, h.inventory_address,
+  s.service_name, s.component_name, s.group_name
+  FROM public.platform_service_instances AS s
+  INNER JOIN public.platform_hosts AS h
+  ON h.cluster_slug = s.cluster_slug AND h.host_name = s.host_name
+  WHERE s.is_present = TRUE AND h.is_present = TRUE

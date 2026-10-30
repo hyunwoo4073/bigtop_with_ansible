@@ -1,0 +1,18 @@
+[Unit]
+Description=Bigtop OpenMetadata verified PostgreSQL view lineage registration (manual only)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/bin/python3 {{ governance_lineage_install_dir }}/manage_lineage.py --apply --url {{ governance_lineage_api_url }} --token-file {{ governance_lineage_token_file }} --policy {{ governance_lineage_policy_file }}
+TimeoutStartSec=180
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

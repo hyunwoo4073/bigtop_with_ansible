@@ -1,0 +1,23 @@
+---
+# Deliberately runs only on worker3, beside its loopback-only PostgreSQL.
+governance_postgres_catalog_expected_host: worker3
+governance_postgres_catalog_database: bigtop_console
+governance_postgres_catalog_db_owner: bigtop_console_app
+governance_postgres_catalog_db_host: 127.0.0.1
+governance_postgres_catalog_db_port: 5432
+governance_postgres_catalog_reader: bigtop_catalog_reader
+governance_postgres_catalog_service: bigtop_worker3_postgresql
+governance_postgres_catalog_schema: public
+governance_postgres_catalog_openmetadata_url: "http://{{ hostvars['metadata'].ansible_host }}:8585/api"
+governance_postgres_catalog_ingestion_version: 2.0.6.0
+governance_postgres_catalog_venv: /opt/bigtop-governance/pg-catalog/.venv
+governance_postgres_catalog_install_dir: /usr/local/lib/bigtop-governance/pg-catalog
+governance_postgres_catalog_config_dir: /etc/bigtop-governance/pg-catalog
+governance_postgres_catalog_reader_password_file: /etc/bigtop-governance/pg-catalog/reader.password
+governance_postgres_catalog_bot_token_file: /etc/bigtop-governance/pg-catalog/bot.token
+governance_postgres_catalog_workflow_file: /etc/bigtop-governance/pg-catalog/workflow.yaml
+governance_postgres_catalog_unit: bigtop-governance-pg-catalog.service
+governance_postgres_catalog_timer: bigtop-governance-pg-catalog.timer
+# First ingestion remains manual. Turn on only after confirming successful catalog sync.
+governance_postgres_catalog_enable_timer: false
+governance_postgres_catalog_timer_calendar: '*-*-* 04:30:00'
