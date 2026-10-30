@@ -1,0 +1,21 @@
+[Unit]
+Description=Bigtop OpenMetadata PostgreSQL catalog ingestion (worker3 local DB)
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory={{ governance_postgres_catalog_config_dir }}
+ExecStart={{ governance_postgres_catalog_venv }}/bin/python {{ governance_postgres_catalog_install_dir }}/run_ingestion.py --workflow {{ governance_postgres_catalog_workflow_file }} --token {{ governance_postgres_catalog_bot_token_file }} --password {{ governance_postgres_catalog_reader_password_file }} --cli {{ governance_postgres_catalog_venv }}/bin/metadata
+TimeoutStartSec=1800
+UMask=0077
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/run
+StandardOutput=journal
+StandardError=journal

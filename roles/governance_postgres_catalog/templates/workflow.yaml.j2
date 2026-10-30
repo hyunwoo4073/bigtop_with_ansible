@@ -1,0 +1,40 @@
+# Managed by Ansible. Credential fields are injected only at runtime on worker3.
+# This is a metadata-only workflow: no profiler, sample data, query usage or lineage.
+source:
+  type: postgres
+  serviceName: '{{ governance_postgres_catalog_service }}'
+  serviceConnection:
+    config:
+      type: Postgres
+      username: '{{ governance_postgres_catalog_reader }}'
+      hostPort: '{{ governance_postgres_catalog_db_host }}:{{ governance_postgres_catalog_db_port }}'
+      database: '{{ governance_postgres_catalog_database }}'
+      ingestAllDatabases: false
+      authType:
+        password: ''
+  sourceConfig:
+    config:
+      type: DatabaseMetadata
+      includeTables: true
+      includeViews: true
+      markDeletedTables: false
+      markDeletedSchemas: false
+      markDeletedDatabases: false
+      threads: 1
+      databaseFilterPattern:
+        includes:
+          - '^{{ governance_postgres_catalog_database }}$'
+      schemaFilterPattern:
+        includes:
+          - '^{{ governance_postgres_catalog_schema }}$'
+sink:
+  type: metadata-rest
+  config: {}
+workflowConfig:
+  loggerLevel: INFO
+  openMetadataServerConfig:
+    hostPort: '{{ governance_postgres_catalog_openmetadata_url }}'
+    authProvider: openmetadata
+    storeServiceConnection: false
+    securityConfig:
+      jwtToken: ''

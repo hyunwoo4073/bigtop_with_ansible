@@ -1,0 +1,10 @@
+[Unit]
+Description=Optional daily OpenMetadata PostgreSQL metadata ingestion
+
+[Timer]
+OnCalendar={{ governance_postgres_catalog_timer_calendar }}
+Persistent=true
+Unit={{ governance_postgres_catalog_unit }}
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,281 @@
+---
+- name: Require the existing worker3 PostgreSQL host
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == governance_postgres_catalog_expected_host
+      - ansible_facts.hostname == governance_postgres_catalog_expected_host
+      - ansible_facts.distribution == 'Ubuntu'
+      - governance_postgres_catalog_database is match('^[a-z_][a-z0-9_]*$')
+      - governance_postgres_catalog_db_owner is match('^[a-z_][a-z0-9_]*$')
+      - governance_postgres_catalog_reader is match('^[a-z_][a-z0-9_]*$')
+      - governance_postgres_catalog_schema is match('^[a-z_][a-z0-9_]*$')
+      - governance_postgres_catalog_service is match('^[a-zA-Z0-9_]+$')
+      - governance_postgres_catalog_openmetadata_url is match('^https?://[^/]+/api$')
+    fail_msg: >-
+      Step 42 must run on worker3 only, with valid PostgreSQL identifiers
+      and an OpenMetadata API URL. It never opens PostgreSQL to the network.
+
+- name: Require the existing PostgreSQL database
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/psql
+      - -X
+      - -w
+      - -d
+      - '{{ governance_postgres_catalog_database }}'
+      - -tAc
+      - SELECT 1
+  become: true
+  become_user: postgres
+  register: governance_postgres_catalog_db_check
+  changed_when: false
+  failed_when: governance_postgres_catalog_db_check.stdout | trim != '1'
+
+- name: Ensure the OpenMetadata UI is reachable from worker3
+  ansible.builtin.uri:
+    url: '{{ governance_postgres_catalog_openmetadata_url | regex_replace("/api$", "/") }}'
+    status_code: [200, 301, 302, 303]
+    timeout: 10
+    follow_redirects: none
+  register: governance_postgres_catalog_openmetadata_check
+  changed_when: false
+
+- name: Install isolated ingestion framework dependencies
+  ansible.builtin.apt:
+    name:
+      - python3-venv
+      - python3-pip
+      - python3-psycopg2
+      - postgresql-client
+      - acl
+      - openssl
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create protected catalog configuration directory
+  ansible.builtin.file:
+    path: '{{ governance_postgres_catalog_config_dir }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Create isolated ingestion application directory
+  ansible.builtin.file:
+    path: '{{ governance_postgres_catalog_venv | dirname }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Create installed ingestion wrapper directory
+  ansible.builtin.file:
+    path: '{{ governance_postgres_catalog_install_dir }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Check if catalog reader credentials already exist
+  ansible.builtin.stat:
+    path: '{{ governance_postgres_catalog_reader_password_file }}'
+  register: governance_postgres_catalog_reader_password_stat
+  no_log: true
+
+- name: Create catalog reader password only on first install
+  ansible.builtin.command:
+    argv: [openssl, rand, -hex, '32']
+  register: governance_postgres_catalog_reader_password_new
+  when: not governance_postgres_catalog_reader_password_stat.stat.exists
+  changed_when: true
+  no_log: true
+
+- name: Save generated password only on worker3
+  ansible.builtin.copy:
+    content: '{{ governance_postgres_catalog_reader_password_new.stdout }}{{ "\n" }}'
+    dest: '{{ governance_postgres_catalog_reader_password_file }}'
+    owner: root
+    group: root
+    mode: '0600'
+  when: not governance_postgres_catalog_reader_password_stat.stat.exists
+  no_log: true
+
+- name: Protect existing reader password file
+  ansible.builtin.file:
+    path: '{{ governance_postgres_catalog_reader_password_file }}'
+    state: file
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+
+- name: Read catalog reader password without logging it
+  ansible.builtin.slurp:
+    src: '{{ governance_postgres_catalog_reader_password_file }}'
+  register: governance_postgres_catalog_reader_secret
+  no_log: true
+
+- name: Derive catalog reader credential for this play
+  ansible.builtin.set_fact:
+    governance_postgres_catalog_reader_password: >-
+      {{ governance_postgres_catalog_reader_secret.content | b64decode | trim }}
+  no_log: true
+
+- name: Create restricted catalog reader role without modifying application account
+  community.postgresql.postgresql_user:
+    name: '{{ governance_postgres_catalog_reader }}'
+    password: '{{ governance_postgres_catalog_reader_password }}'
+    role_attr_flags: LOGIN,NOSUPERUSER,NOCREATEDB,NOCREATEROLE,NOREPLICATION
+    login_unix_socket: /var/run/postgresql
+    state: present
+  become: true
+  become_user: postgres
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  no_log: true
+
+- name: Grant catalog reader CONNECT to the existing database
+  community.postgresql.postgresql_privs:
+    login_db: '{{ governance_postgres_catalog_database }}'
+    type: database
+    objs: '{{ governance_postgres_catalog_database }}'
+    roles: '{{ governance_postgres_catalog_reader }}'
+    privs: CONNECT
+    login_unix_socket: /var/run/postgresql
+  become: true
+  become_user: postgres
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+- name: Grant catalog reader USAGE to the public schema
+  community.postgresql.postgresql_privs:
+    login_db: '{{ governance_postgres_catalog_database }}'
+    type: schema
+    objs: '{{ governance_postgres_catalog_schema }}'
+    roles: '{{ governance_postgres_catalog_reader }}'
+    privs: USAGE
+    login_unix_socket: /var/run/postgresql
+  become: true
+  become_user: postgres
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+- name: Grant SELECT on existing public schema tables
+  community.postgresql.postgresql_privs:
+    login_db: '{{ governance_postgres_catalog_database }}'
+    type: table
+    schema: '{{ governance_postgres_catalog_schema }}'
+    objs: ALL_IN_SCHEMA
+    roles: '{{ governance_postgres_catalog_reader }}'
+    privs: SELECT
+    login_unix_socket: /var/run/postgresql
+  become: true
+  become_user: postgres
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+- name: Grant SELECT on new tables created by the application DB owner
+  community.postgresql.postgresql_privs:
+    login_db: '{{ governance_postgres_catalog_database }}'
+    type: default_privs
+    schema: '{{ governance_postgres_catalog_schema }}'
+    objs: TABLES
+    target_roles: '{{ governance_postgres_catalog_db_owner }}'
+    roles: '{{ governance_postgres_catalog_reader }}'
+    privs: SELECT
+    login_unix_socket: /var/run/postgresql
+  become: true
+  become_user: postgres
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+- name: Verify catalog reader is read-only on the existing database
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/psql
+      - -X
+      - -w
+      - -h
+      - '{{ governance_postgres_catalog_db_host }}'
+      - -p
+      - '{{ governance_postgres_catalog_db_port | string }}'
+      - -U
+      - '{{ governance_postgres_catalog_reader }}'
+      - -d
+      - '{{ governance_postgres_catalog_database }}'
+      - -tAc
+      - SELECT has_database_privilege(current_user, current_database(), 'CREATE')
+  environment:
+    PGPASSWORD: '{{ governance_postgres_catalog_reader_password }}'
+  register: governance_postgres_catalog_reader_check
+  changed_when: false
+  failed_when: governance_postgres_catalog_reader_check.stdout | trim != 'f'
+  no_log: true
+
+- name: Install version-matched official PostgreSQL ingestion CLI in isolated venv
+  ansible.builtin.pip:
+    name: >-
+      openmetadata-ingestion[postgres]=={{ governance_postgres_catalog_ingestion_version }}
+    virtualenv: '{{ governance_postgres_catalog_venv }}'
+    virtualenv_command: /usr/bin/python3 -m venv
+    state: present
+
+- name: Deploy safe token installer (no token in Ansible or Git)
+  ansible.builtin.copy:
+    src: install_token.py
+    dest: '{{ governance_postgres_catalog_install_dir }}/install_token.py'
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Deploy catalog ingestion execution wrapper
+  ansible.builtin.copy:
+    src: run_ingestion.py
+    dest: '{{ governance_postgres_catalog_install_dir }}/run_ingestion.py'
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Write metadata-only ingestion workflow without storing secrets
+  ansible.builtin.template:
+    src: workflow.yaml.j2
+    dest: '{{ governance_postgres_catalog_workflow_file }}'
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Install manual catalog ingestion service
+  ansible.builtin.template:
+    src: pg-catalog.service.j2
+    dest: '/etc/systemd/system/{{ governance_postgres_catalog_unit }}'
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Install optional daily ingestion timer
+  ansible.builtin.template:
+    src: pg-catalog.timer.j2
+    dest: '/etc/systemd/system/{{ governance_postgres_catalog_timer }}'
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Reload systemd units
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Keep the ingestion timer disabled until first successful manual run
+  ansible.builtin.systemd_service:
+    name: '{{ governance_postgres_catalog_timer }}'
+    enabled: '{{ governance_postgres_catalog_enable_timer | bool }}'
+    state: "{{ (governance_postgres_catalog_enable_timer | bool) | ternary('started', 'stopped') }}"
+
+- name: Announce secure first-run token setup without logging secrets
+  ansible.builtin.debug:
+    msg: >-
+      Step 42 installed on worker3. First generate an ingestion-bot token
+      in OpenMetadata Settings > Bots. On worker3 run:
+      sudo python3 {{ governance_postgres_catalog_install_dir }}/install_token.py
+      and then sudo systemctl start {{ governance_postgres_catalog_unit }}.
+      The daily timer is disabled until verified.

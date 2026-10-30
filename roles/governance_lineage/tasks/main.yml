@@ -1,0 +1,153 @@
+---
+- name: Assert deployment runs on the existing worker3 PostgreSQL host
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == governance_lineage_expected_host
+      - ansible_facts.hostname == governance_lineage_expected_host
+      - governance_lineage_database == 'bigtop_console'
+      - governance_lineage_view == 'v_bigtop_service_inventory_lineage'
+      - governance_lineage_api_url is match('^https?://[^/]+/api$')
+    fail_msg: Step 44 must run only on worker3 against the existing catalog database.
+
+- name: Check prerequisite PostgreSQL tables and restricted catalog reader
+  community.postgresql.postgresql_query:
+    login_db: '{{ governance_lineage_database }}'
+    login_unix_socket: /var/run/postgresql
+    query: >-
+      SELECT to_regclass('public.platform_hosts') IS NOT NULL AS hosts_ok,
+             to_regclass('public.platform_service_instances') IS NOT NULL AS services_ok,
+             EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{{ governance_lineage_reader }}') AS reader_ok
+  become: true
+  become_user: postgres
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  register: governance_lineage_prerequisites
+  changed_when: false
+
+- name: Refuse to create a view without Step 32 and Step 42 prerequisites
+  ansible.builtin.assert:
+    that:
+      - governance_lineage_prerequisites.query_result[0].hosts_ok | bool
+      - governance_lineage_prerequisites.query_result[0].services_ok | bool
+      - governance_lineage_prerequisites.query_result[0].reader_ok | bool
+    fail_msg: Missing inventory metadata tables or Step 42 catalog reader role.
+
+- name: Examine existing view before attempting any DDL
+  community.postgresql.postgresql_query:
+    login_db: '{{ governance_lineage_database }}'
+    login_unix_socket: /var/run/postgresql
+    query: >-
+      SELECT c.relkind::text AS kind,
+             obj_description(c.oid, 'pg_class') AS marker,
+             pg_get_viewdef(c.oid, true) AS definition
+      FROM pg_class AS c
+      JOIN pg_namespace AS n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relname = '{{ governance_lineage_view }}'
+  become: true
+  become_user: postgres
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  register: governance_lineage_existing_view
+  changed_when: false
+
+- name: Refuse to modify an unrelated existing object or view
+  ansible.builtin.assert:
+    that:
+      - governance_lineage_existing_view.query_result[0].kind == 'v'
+      - governance_lineage_existing_view.query_result[0].marker == governance_lineage_view_marker
+      - "'platform_hosts' in governance_lineage_existing_view.query_result[0].definition"
+      - "'platform_service_instances' in governance_lineage_existing_view.query_result[0].definition"
+    fail_msg: View name already exists without the expected Step 44 marker or sources; manual review required.
+  when: governance_lineage_existing_view.query_result | length > 0
+
+- name: Create the derived readonly view with its ownership marker in one transaction
+  community.postgresql.postgresql_query:
+    login_db: '{{ governance_lineage_database }}'
+    login_unix_socket: /var/run/postgresql
+    query: "{{ lookup('ansible.builtin.file', role_path ~ '/files/create_view.sql') }}"
+  become: true
+  become_user: postgres
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  when: governance_lineage_existing_view.query_result | length == 0
+
+- name: Grant existing metadata-only reader SELECT on the new view
+  community.postgresql.postgresql_privs:
+    login_db: '{{ governance_lineage_database }}'
+    login_unix_socket: /var/run/postgresql
+    type: table
+    schema: public
+    objs: '{{ governance_lineage_view }}'
+    roles: '{{ governance_lineage_reader }}'
+    privs: SELECT
+    state: present
+  become: true
+  become_user: postgres
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+- name: Check existing Step 42 Bot JWT without reading its contents
+  ansible.builtin.stat:
+    path: '{{ governance_lineage_token_file }}'
+  register: governance_lineage_token_stat
+  no_log: true
+
+- name: Require a safe existing JWT file before installing the lineage runner
+  ansible.builtin.assert:
+    that:
+      - governance_lineage_token_stat.stat.exists | default(false)
+      - governance_lineage_token_stat.stat.isreg | default(false)
+      - not (governance_lineage_token_stat.stat.islnk | default(false))
+      - governance_lineage_token_stat.stat.mode == '0600'
+    fail_msg: Protected Step 42 ingestion Bot token is missing or has unsafe permissions.
+
+- name: Install PyYAML support for lineage runner
+  ansible.builtin.apt:
+    name: python3-yaml
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create private lineage policy directory
+  ansible.builtin.file:
+    path: '{{ governance_lineage_config_dir }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Create installed lineage runner directory
+  ansible.builtin.file:
+    path: '{{ governance_lineage_install_dir }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install declarative lineage policy without credentials
+  ansible.builtin.copy:
+    src: lineage_policy.yaml
+    dest: '{{ governance_lineage_policy_file }}'
+    owner: root
+    group: root
+    mode: '0640'
+
+- name: Install idempotent API lineage runner
+  ansible.builtin.copy:
+    src: manage_lineage.py
+    dest: '{{ governance_lineage_install_dir }}/manage_lineage.py'
+    owner: root
+    group: root
+    mode: '0750'
+
+- name: Install manual-only lineage registration unit
+  ansible.builtin.template:
+    src: lineage.service.j2
+    dest: '/etc/systemd/system/{{ governance_lineage_unit }}'
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload governance lineage systemd
+
+- name: Flush handler so manual systemd starts use current unit
+  ansible.builtin.meta: flush_handlers

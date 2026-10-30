@@ -1,0 +1,8 @@
+---
+- name: Deploy verified PostgreSQL view lineage for OpenMetadata on worker3
+  hosts: ops
+  gather_facts: true
+  become: true
+  serial: 1
+  roles:
+    - role: governance_lineage
