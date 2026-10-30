@@ -1,0 +1,7 @@
+---
+- name: Stage public Olist CSV and publish an immutable HDFS Raw snapshot
+  hosts: master
+  gather_facts: false
+  become: true
+  roles:
+    - data_pipeline_olist_raw

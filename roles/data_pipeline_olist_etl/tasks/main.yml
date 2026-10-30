@@ -1,0 +1,211 @@
+---
+- name: Validate Olist Spark ETL paths and small-cluster resource profile
+  ansible.builtin.assert:
+    that:
+      - data_pipeline_olist_etl_raw_root == '/data/olist/raw'
+      - data_pipeline_olist_etl_warehouse_root == '/data/olist/warehouse'
+      - data_pipeline_olist_etl_raw_version is match('^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$')
+      - data_pipeline_olist_etl_output_version is match('^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$')
+      - data_pipeline_olist_etl_num_executors | int >= 1
+      - data_pipeline_olist_etl_executor_cores | int >= 1
+      - data_pipeline_olist_etl_shuffle_partitions | int >= 1
+      - data_pipeline_olist_etl_output_partitions | int >= 1
+    fail_msg: Invalid immutable snapshot/version/resource parameters.
+
+- name: Verify raw snapshot manifest exists before submitting Spark
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -test
+      - -e
+      - "{{ data_pipeline_olist_etl_raw_root }}/{{ data_pipeline_olist_etl_raw_version }}/_MANIFEST.json"
+  become: true
+  become_user: "{{ data_pipeline_olist_etl_hdfs_admin_user }}"
+  changed_when: false
+
+- name: Install Spark ETL script directory
+  ansible.builtin.file:
+    path: "{{ data_pipeline_olist_etl_script_dir }}"
+    owner: root
+    group: root
+    state: directory
+    mode: '0755'
+
+- name: Install Olist Spark ETL PySpark application
+  ansible.builtin.copy:
+    src: olist_etl.py
+    dest: "{{ data_pipeline_olist_etl_script_dir }}/olist_etl.py"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Check whether HDFS warehouse directory already exists
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -test
+      - -d
+      - "{{ data_pipeline_olist_etl_warehouse_root }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_etl_hdfs_admin_user }}"
+  register: data_pipeline_olist_etl_warehouse_check
+  changed_when: false
+  failed_when: data_pipeline_olist_etl_warehouse_check.rc not in [0, 1]
+
+- name: Create HDFS warehouse directory without touching Raw Zone
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -mkdir
+      - -p
+      - "{{ data_pipeline_olist_etl_warehouse_root }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_etl_hdfs_admin_user }}"
+  when: data_pipeline_olist_etl_warehouse_check.rc == 1
+  changed_when: true
+
+- name: Give Spark submit user ownership of warehouse root only
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -chown
+      - "{{ data_pipeline_olist_etl_submit_user }}"
+      - "{{ data_pipeline_olist_etl_warehouse_root }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_etl_hdfs_admin_user }}"
+  changed_when: false
+
+- name: Restrict warehouse directory access
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -chmod
+      - '750'
+      - "{{ data_pipeline_olist_etl_warehouse_root }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_etl_hdfs_admin_user }}"
+  changed_when: false
+
+- name: Check whether immutable ETL manifest existed before submission
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -test
+      - -e
+      - "{{ data_pipeline_olist_etl_warehouse_root }}/{{ data_pipeline_olist_etl_output_version }}/_ETL_MANIFEST.json"
+  become: true
+  become_user: "{{ data_pipeline_olist_etl_hdfs_admin_user }}"
+  register: data_pipeline_olist_etl_manifest_before
+  changed_when: false
+  failed_when: data_pipeline_olist_etl_manifest_before.rc not in [0, 1]
+
+- name: Run Olist batch ETL on Spark YARN in cluster mode
+  ansible.builtin.command:
+    argv:
+      - spark-submit
+      - --master
+      - yarn
+      - --deploy-mode
+      - cluster
+      - --name
+      - "olist-etl-{{ data_pipeline_olist_etl_output_version }}"
+      - --queue
+      - "{{ data_pipeline_olist_etl_queue }}"
+      - --driver-memory
+      - "{{ data_pipeline_olist_etl_driver_memory }}"
+      - --executor-memory
+      - "{{ data_pipeline_olist_etl_executor_memory }}"
+      - --executor-cores
+      - "{{ data_pipeline_olist_etl_executor_cores | string }}"
+      - --num-executors
+      - "{{ data_pipeline_olist_etl_num_executors | string }}"
+      - --conf
+      - "spark.sql.shuffle.partitions={{ data_pipeline_olist_etl_shuffle_partitions }}"
+      - --conf
+      - spark.sql.adaptive.enabled=true
+      - --conf
+      - spark.sql.session.timeZone=UTC
+      - --conf
+      - spark.yarn.submit.waitAppCompletion=true
+      - --conf
+      - spark.pyspark.python=/usr/bin/python3
+      - "{{ data_pipeline_olist_etl_script_dir }}/olist_etl.py"
+      - --raw-root
+      - "{{ data_pipeline_olist_etl_raw_root }}"
+      - --raw-version
+      - "{{ data_pipeline_olist_etl_raw_version }}"
+      - --warehouse-root
+      - "{{ data_pipeline_olist_etl_warehouse_root }}"
+      - --output-version
+      - "{{ data_pipeline_olist_etl_output_version }}"
+      - --output-partitions
+      - "{{ data_pipeline_olist_etl_output_partitions | string }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_etl_submit_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+    SPARK_CONF_DIR: /etc/spark/conf
+    PYSPARK_PYTHON: /usr/bin/python3
+  register: data_pipeline_olist_etl_run
+  changed_when: data_pipeline_olist_etl_manifest_before.rc == 1
+  failed_when: data_pipeline_olist_etl_run.rc != 0
+
+# In cluster mode the PySpark Driver prints to YARN container logs, not the
+# submit host stdout. A successful spark-submit exit and published HDFS state
+# are the reliable deployment postconditions, not driver log markers.
+- name: Verify immutable ETL manifest has been published
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -test
+      - -e
+      - "{{ data_pipeline_olist_etl_warehouse_root }}/{{ data_pipeline_olist_etl_output_version }}/_ETL_MANIFEST.json"
+  become: true
+  become_user: "{{ data_pipeline_olist_etl_hdfs_admin_user }}"
+  changed_when: false
+
+- name: Verify all seven Parquet outputs have Spark completion markers
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -test
+      - -e
+      - "{{ data_pipeline_olist_etl_warehouse_root }}/{{ data_pipeline_olist_etl_output_version }}/{{ item }}/_SUCCESS"
+  loop:
+    - curated/orders
+    - curated/order_items
+    - curated/customers
+    - curated/products
+    - curated/order_item_fact
+    - quarantine/rows
+    - mart/daily_category_sales
+  become: true
+  become_user: "{{ data_pipeline_olist_etl_hdfs_admin_user }}"
+  changed_when: false
+
+- name: Read published immutable ETL manifest
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -cat
+      - "{{ data_pipeline_olist_etl_warehouse_root }}/{{ data_pipeline_olist_etl_output_version }}/_ETL_MANIFEST.json"
+  become: true
+  become_user: "{{ data_pipeline_olist_etl_hdfs_admin_user }}"
+  changed_when: false
+  register: data_pipeline_olist_etl_published_manifest
+
+- name: Report ETL publish status and published metrics
+  ansible.builtin.debug:
+    msg:
+      status: "{{ 'PUBLISHED' if data_pipeline_olist_etl_manifest_before.rc == 1 else 'EXISTING_VERIFIED' }}"
+      output: "{{ data_pipeline_olist_etl_warehouse_root }}/{{ data_pipeline_olist_etl_output_version }}"
+      metrics: "{{ (data_pipeline_olist_etl_published_manifest.stdout | from_json).metrics }}"

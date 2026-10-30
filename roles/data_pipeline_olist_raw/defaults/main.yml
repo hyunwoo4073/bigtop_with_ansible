@@ -1,0 +1,11 @@
+---
+# Path is resolved on the Ansible controller (worker3), not on master.
+# Override via: -e data_pipeline_olist_raw_local_dir=/home/bae/bigtop-cluster-ansible/olist/source
+# Default assumes nine CSV files extracted into project-root/olist/source.
+data_pipeline_olist_raw_local_dir: "{{ playbook_dir }}/../olist/source"
+data_pipeline_olist_raw_hdfs_root: /data/olist/raw
+data_pipeline_olist_raw_version: v1
+data_pipeline_olist_raw_replication: 2
+data_pipeline_olist_raw_hdfs_user: hdfs
+data_pipeline_olist_raw_stage_dir: /var/tmp/bigtop-olist-raw-stage
+data_pipeline_olist_raw_script_dir: /usr/local/lib/bigtop-olist

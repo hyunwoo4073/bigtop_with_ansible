@@ -85,8 +85,138 @@
 | **38–39** | DB 원격 백업 복제, 서비스 Web UI 바로가기 | 38번 실제 전송 확인 필요 / 39번 적용 확인 |
 | **40–42** | metadata VM Docker, OpenMetadata Core, PostgreSQL 카탈로그 수집 | 설치·수집 성공 확인 |
 | **43–44** | 분류/용어집/설명 정책, SQL View 기반 Lineage PoC | 43번 실제 적용 로그 미제공 / **44번 미배포·미확인** |
+| **45** | Olist CSV 9개 원본 HDFS Raw 적재, Manifest/SHA-256, 재실행 불변성 | **실제 적재 성공 확인**, 단위 테스트 14개·Lint 통과 |
+| **46** | Spark on YARN **Cluster Mode** 주문 배치 ETL, Curated/Quarantine/Mart Parquet | **실제 실행 성공(사용자 확인)**, 출력·재실행 상세값 별도 점검 |
 
 > 번호 **28·29는 현재 확인한 Playbook 목록에 없다.** 44번은 패키지 제공 단계까지 진행했으며 DB View 및 OpenMetadata 계보가 실제 생성됐다는 근거는 없다.
+
+<!-- BEGIN OLIST PIPELINE 45-46 -->
+## Olist 실데이터 파이프라인 (45~46, 2026-10-30)
+
+**상태:** 45번 HDFS Raw 적재 완료, 46번 Spark on YARN **Cluster 모드 실행 성공(사용자 확인)**. 자동 정기 실행·OpenMetadata 계보 연동·재실행 SKIP 검증은 별도 후속 작업이다. 실제 배치 처리 건수는 이 문서에 임의로 기재하지 않는다. 로그와 매니페스트를 기준으로 점검한다.
+
+### 데이터 흐름
+
+```text
+Kaggle — Brazilian E-Commerce Public Dataset by Olist (9 CSV)
+    │  원본 ZIP/CSV는 worker3 로컬에 보관 (Git 제외)
+    ▼
+[45] Ansible → master(hdfs CLI) → HDFS Raw (CSV / immutable snapshot)
+    /data/olist/raw/v1/     9 CSV + _MANIFEST.json
+    │
+    ▼
+[46] Spark on YARN — cluster deploy mode / batch queue
+    master에서 spark-submit; Driver(AM)와 Executor는 YARN 컨테이너
+    ├── 입력 4개: orders, order_items, customers, products
+    ├── 명시적 스키마·행 수 검사·필수값 검증·중복키/참조 검사
+    ├── Curated: 정제 테이블 및 주문상품 단위 Fact
+    ├── Quarantine: 오류 행과 사유 분리
+    └── Mart: 배송 완료 주문의 일자/카테고리/고객 주별 매출 집계
+    ▼
+HDFS Warehouse (Parquet / immutable snapshot)
+    /data/olist/warehouse/v1/    _ETL_MANIFEST.json + 7개 _SUCCESS
+```
+
+**데이터 원본:** [Kaggle Olist Brazilian E-Commerce Public Dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce). Olist 원본은 9개의 CSV이며, `olist/source/`에 압축 해제했다. **9개 전부 Raw에 저장**하고, 46번 첫 ETL은 4개만 읽는다. 나머지 결제·리뷰·판매자·지역·카테고리 번역은 Raw에 보존하여 후속 변환에 사용한다.
+
+| Raw 데이터셋 | 파일명 | 로컬 CSV 레코드 수 (헤더 제외) |
+|---|---|---:|
+| customers | `olist_customers_dataset.csv` | 99,441 |
+| geolocation | `olist_geolocation_dataset.csv` | 1,000,163 |
+| order_items | `olist_order_items_dataset.csv` | 112,650 |
+| payments | `olist_order_payments_dataset.csv` | 103,886 |
+| reviews | `olist_order_reviews_dataset.csv` | 99,224 |
+| orders | `olist_orders_dataset.csv` | 99,441 |
+| products | `olist_products_dataset.csv` | 32,951 |
+| sellers | `olist_sellers_dataset.csv` | 3,095 |
+| category_translation | `product_category_name_translation.csv` | 71 |
+| **합계** | **9개 CSV** | **1,550,922** |
+
+> 9개 CSV의 원본 총 바이트 수는 **126,186,995 bytes**. 위 카운트는 45번 로컬 `scan` 결과이며, 서로 다른 테이블의 행 수를 합산한 값이지 중복을 제거한 주문 수가 아니다. SHA-256은 HDFS Raw의 `_MANIFEST.json`으로 검증한다.
+
+### 45. HDFS Raw Zone 적재
+
+- Playbook: `playbooks/45-olist-hdfs-raw.yml`
+- Role: `roles/data_pipeline_olist_raw/`
+- 문서: [`docs/45-olist-hdfs-raw.md`](docs/45-olist-hdfs-raw.md)
+- 소스 기본값: worker3의 `olist/source/` (Git 제외)
+- 결과: `/data/olist/raw/v1/` 아래 9개 CSV와 `_MANIFEST.json`
+- 무결성: 레코드 수, 파일 크기, SHA-256. **같은 버전·같은 내용 재실행 시 건너뛰고**, 내용 변경 시 덮어쓰지 않고 실패하도록 구현.
+- 검증: **Python 단위 테스트 14개 통과**, `make lint` 통과, 실 HDFS 적재 성공(사용자 확인).
+
+```bash
+cd ~/bigtop-cluster-ansible
+python3 -m unittest discover -s tests -p 'test_olist_raw.py' -v
+python3 roles/data_pipeline_olist_raw/files/olist_raw.py scan --source "$PWD/olist/source"
+.venv/bin/ansible-playbook -i inventory/hosts.ini playbooks/45-olist-hdfs-raw.yml
+
+# HDFS 확인 (worker3 → master SSH)
+.venv/bin/ansible master -b --become-user hdfs -m shell \
+  -a 'hdfs dfs -ls -R /data/olist/raw/v1'
+.venv/bin/ansible master -b --become-user hdfs -m shell \
+  -a 'hdfs dfs -cat /data/olist/raw/v1/_MANIFEST.json'
+```
+
+**주의:** `v1`은 Raw 입력 스냅샷 버전이며 날짜 파티션이 아니다. 이미 게시한 데이터를 변경해야 한다면 기존 `v1`을 지우지 말고 새 버전을 사용한다.
+
+### 46. Spark Batch ETL — YARN Cluster Mode
+
+- Playbook: `playbooks/46-olist-spark-etl.yml`
+- Role: `roles/data_pipeline_olist_etl/`
+- 애플리케이션: `roles/data_pipeline_olist_etl/files/olist_etl.py` → master의 `/usr/local/lib/bigtop-olist/etl/olist_etl.py`
+- 실행: master에서 `hadoop` 계정으로 `spark-submit --master yarn --deploy-mode cluster --queue batch`.
+- 기본 리소스: Driver 512 MiB, Executor **1개** × 512 MiB/1 core, shuffle partitions 4, 출력 partitions 2. YARN 컨테이너 오버헤드를 포함한 실제 필요 메모리는 별도 확인.
+- 입력: `/data/olist/raw/v1/`의 `orders`, `order_items`, `customers`, `products`. Raw Manifest도 함께 확인.
+- 결과: `/data/olist/warehouse/v1/`에 **Curated 5개 + Quarantine 1개 + Mart 1개** Parquet 경로.
+- 정합성: 명시적 스키마, CSV 행 수 비교, 잘못된 키·타임스탬프·금액 격리, 중복 비즈니스 키 검증, 미참조 데이터 격리, 집계 시 주문상품 단위 기준 적용.
+- 스냅샷: 실행별 `_staging/`에 작성한 뒤 최종 경로로 게시. 이미 완료된 동일 버전은 SKIP, 불일치/불완전한 버전은 ERROR 처리. **동일 출력 버전 동시 실행은 지원하지 않음.**
+- 검증: 수정본 **Cluster 모드 실행 성공(사용자 확인)**. 정적·단위 테스트는 실행 로그와 별개이며, 정확한 처리 건수와 재실행 SKIP 증빙은 추후 확인.
+
+```text
+/data/olist/warehouse/v1/
+├── _ETL_MANIFEST.json
+├── curated/
+│   ├── orders/
+│   ├── order_items/
+│   ├── customers/
+│   ├── products/
+│   └── order_item_fact/
+├── quarantine/
+│   └── rows/
+└── mart/
+    └── daily_category_sales/
+```
+
+```bash
+cd ~/bigtop-cluster-ansible
+python3 -m unittest discover -s tests -p 'test_olist_etl.py' -v
+make lint
+.venv/bin/ansible-playbook -i inventory/hosts.ini playbooks/46-olist-spark-etl.yml
+
+# 게시 결과 확인 (Manifest 및 Parquet _SUCCESS)
+.venv/bin/ansible master -b --become-user hdfs -m shell \
+  -a 'hdfs dfs -cat /data/olist/warehouse/v1/_ETL_MANIFEST.json'
+.venv/bin/ansible master -b --become-user hdfs -m shell \
+  -a 'hdfs dfs -ls -R /data/olist/warehouse/v1'
+
+# Driver 로그는 spark-submit 표준출력 대신 YARN에서 조회
+# master에서 실행: yarn application -list -appStates ALL
+# ID 확인 후: yarn logs -applicationId application_XXXXXXXXXXXXX_XXXX
+```
+
+**집계 해석:** `daily_category_sales`는 배송 완료 주문 중 *주문상품 가격*을 합산한 값이며, 실제 결제 정산/세금/환불이 반영된 매출을 의미하지 않는다. 결제 데이터와 단순 1:N JOIN하면 중복 집계 위험이 있으므로 후속 별도 모델로 처리한다.
+
+**운영 원칙:** cluster 모드에서는 Driver가 YARN 컨테이너에서 실행된다. Playbook은 제출 종료 코드와 `_ETL_MANIFEST.json` 및 **7개** Parquet `_SUCCESS` 마커를 확인한다. Driver 로그는 `yarn logs` 또는 Spark History Server에서 확인한다. `-e ansible_connection=local`을 사용하지 않는다.
+
+### 향후 작업
+
+1. **47번 후보:** Parquet 정합성·행 수·합계 검증과 품질 지표/기준(중복, null, orphan, quarantine) 대시보드화.
+2. 배치 스케줄링과 실패 재시도/재처리 정책(Airflow 등) 및 idempotent 운영 검증.
+3. OpenMetadata에 HDFS/Spark 결과 자산 등록과 **실제 Spark 처리 계보** 수집. SQL View Lineage(44)와는 별도.
+4. 결제·리뷰·판매자·지역·카테고리 번역 CSV를 단계적으로 정제/모델링.
+5. 기존 **38번 원격 백업 복제**, **43번 정책**, **44번 SQL View 계보**의 실제 적용 상태는 별도로 점검한다.
+
+<!-- END OLIST PIPELINE 45-46 -->
 
 ## 시작하기 / 일상 점검
 
