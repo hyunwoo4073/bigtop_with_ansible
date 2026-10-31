@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# Managed by Ansible (step 48). Never delete an immutable HDFS snapshot.
+set -Eeuo pipefail
+
+PROJECT={{ data_pipeline_olist_scheduler_project_dir | quote }}
+INVENTORY={{ data_pipeline_olist_scheduler_inventory_path | quote }}
+ANSIBLE={{ data_pipeline_olist_scheduler_ansible_bin | quote }}
+RUNNER={{ data_pipeline_olist_scheduler_runner_user | quote }}
+RAW_VERSION={{ data_pipeline_olist_scheduler_raw_version | quote }}
+WAREHOUSE_VERSION={{ data_pipeline_olist_scheduler_warehouse_version | quote }}
+STATE_DIR={{ data_pipeline_olist_scheduler_state_dir | quote }}
+METRICS_FILE={{ (data_pipeline_olist_scheduler_metrics_dir ~ '/' ~ data_pipeline_olist_scheduler_metrics_filename) | quote }}
+
+# Avoid concurrent ETL / Quality even when started outside the systemd unit.
+exec 9>"${STATE_DIR}/pipeline.lock"
+if ! flock -n 9; then
+  echo 'Olist batch already running: refusing a concurrent run' >&2
+  exit 75
+fi
+
+start_epoch="$(date +%s)"
+last_success_epoch="$(cat "${STATE_DIR}/last_success_epoch" 2>/dev/null || echo 0)"
+[[ "$last_success_epoch" =~ ^[0-9]+$ ]] || last_success_epoch=0
+etl_pass=0
+quality_pass=0
+is_running=1
+attempt_success=0
+
+publish_metrics() {
+  local now duration tmp
+  now="$(date +%s)"
+  duration=$((now-start_epoch))
+  tmp="$(mktemp "${METRICS_FILE}.tmp.XXXXXXXX")"
+  cat > "$tmp" <<METRICS
+# HELP olist_pipeline_running A scheduled Olist ETL and quality run is in progress.
+# TYPE olist_pipeline_running gauge
+olist_pipeline_running{warehouse_version="${WAREHOUSE_VERSION}"} ${is_running}
+# HELP olist_pipeline_last_attempt_success Last scheduled pipeline completed successfully.
+# TYPE olist_pipeline_last_attempt_success gauge
+olist_pipeline_last_attempt_success{warehouse_version="${WAREHOUSE_VERSION}"} ${attempt_success}
+# HELP olist_pipeline_last_attempt_timestamp_seconds Timestamp of most recent run start.
+# TYPE olist_pipeline_last_attempt_timestamp_seconds gauge
+olist_pipeline_last_attempt_timestamp_seconds{warehouse_version="${WAREHOUSE_VERSION}"} ${start_epoch}
+# HELP olist_pipeline_last_success_timestamp_seconds Timestamp of most recent successful run, 0 if none.
+# TYPE olist_pipeline_last_success_timestamp_seconds gauge
+olist_pipeline_last_success_timestamp_seconds{warehouse_version="${WAREHOUSE_VERSION}"} ${last_success_epoch}
+# HELP olist_pipeline_last_attempt_duration_seconds Duration of latest attempt, or elapsed time if running.
+# TYPE olist_pipeline_last_attempt_duration_seconds gauge
+olist_pipeline_last_attempt_duration_seconds{warehouse_version="${WAREHOUSE_VERSION}"} ${duration}
+# HELP olist_pipeline_etl_success ETL step passed in the current or latest attempt.
+# TYPE olist_pipeline_etl_success gauge
+olist_pipeline_etl_success{warehouse_version="${WAREHOUSE_VERSION}"} ${etl_pass}
+# HELP olist_pipeline_quality_success Quality step passed in the current or latest attempt.
+# TYPE olist_pipeline_quality_success gauge
+olist_pipeline_quality_success{warehouse_version="${WAREHOUSE_VERSION}"} ${quality_pass}
+METRICS
+  chmod 0644 "$tmp"
+  mv -f -- "$tmp" "$METRICS_FILE"
+}
+
+finish() {
+  local exit_status="$1"
+  trap - EXIT TERM INT
+  is_running=0
+  if [[ "$exit_status" == 0 ]] && [[ "$etl_pass" == 1 ]] && [[ "$quality_pass" == 1 ]]; then
+    attempt_success=1
+    last_success_epoch="$(date +%s)"
+    printf '%s\n' "$last_success_epoch" > "${STATE_DIR}/last_success_epoch.tmp"
+    mv -f "${STATE_DIR}/last_success_epoch.tmp" "${STATE_DIR}/last_success_epoch"
+  else
+    attempt_success=0
+  fi
+  publish_metrics || echo 'ERROR: unable to publish pipeline metrics' >&2
+  exit "$exit_status"
+}
+trap 'finish "$?"' EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+publish_metrics
+
+cd "$PROJECT"
+# Versions are validated by the role before rendering; no arbitrary shell args are allowed.
+extra_vars="$(printf '{\"data_pipeline_olist_etl_raw_version\":\"%s\",\"data_pipeline_olist_etl_output_version\":\"%s\",\"data_pipeline_olist_quality_warehouse_version\":\"%s\"}' "$RAW_VERSION" "$WAREHOUSE_VERSION" "$WAREHOUSE_VERSION")"
+echo "Starting immutable Olist ETL: raw=${RAW_VERSION} warehouse=${WAREHOUSE_VERSION}"
+runuser -u "$RUNNER" -- "$ANSIBLE" -i "$INVENTORY" playbooks/46-olist-spark-etl.yml -e "$extra_vars"
+etl_pass=1
+publish_metrics
+echo "Starting Olist quality: warehouse=${WAREHOUSE_VERSION}"
+runuser -u "$RUNNER" -- "$ANSIBLE" -i "$INVENTORY" playbooks/47-olist-data-quality.yml -e "$extra_vars"
+quality_pass=1
+echo 'OLIST PIPELINE SUCCESS'

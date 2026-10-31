@@ -1,0 +1,13 @@
+---
+# Step 49: reuse the Grafana file provider and Prometheus datasource already deployed.
+# No Grafana or Prometheus reinstallation. 48 owns scheduler/alert rule state.
+data_pipeline_olist_observability_warehouse_version: v1
+# Existing Grafana provisioning settings are inherited from group_vars when available.
+data_pipeline_olist_observability_dashboard_uid: bigtop-olist-pipeline
+data_pipeline_olist_observability_dashboard_file: olist-pipeline-overview.json
+# Override with the browser-reachable OpenMetadata URL for your VM/network.
+data_pipeline_olist_observability_openmetadata_url: http://metadata:8585
+# These are navigation links (not metadata ingestion/lineage integration).
+data_pipeline_olist_observability_console_url: http://worker3:1337
+# true: report whether Prometheus currently has the step 48 metrics; no implicit zero.
+data_pipeline_olist_observability_probe_metrics: true

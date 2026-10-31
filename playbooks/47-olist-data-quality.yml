@@ -1,0 +1,7 @@
+---
+- name: Verify Olist Spark ETL snapshot and publish quality metrics
+  hosts: master
+  gather_facts: false
+  become: true
+  roles:
+    - data_pipeline_olist_quality

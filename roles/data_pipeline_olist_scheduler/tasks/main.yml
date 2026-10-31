@@ -1,0 +1,167 @@
+---
+- name: Validate Olist scheduled pipeline settings
+  ansible.builtin.assert:
+    that:
+      - data_pipeline_olist_scheduler_runner_user is match('^[a-z_][a-z0-9_-]*[$]?$')
+      - data_pipeline_olist_scheduler_runner_user != 'root'
+      - data_pipeline_olist_scheduler_raw_version is match('^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$')
+      - data_pipeline_olist_scheduler_warehouse_version is match('^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$')
+      - data_pipeline_olist_scheduler_freshness_hours | int >= 26
+      - data_pipeline_olist_scheduler_project_dir is match('^/[^\n]+$')
+      - data_pipeline_olist_scheduler_metrics_dir is match('^/[^\n]+$')
+    fail_msg: Invalid schedule project paths, runner, versions or alert freshness threshold.
+
+- name: Validate systemd calendar expression
+  ansible.builtin.command:
+    argv:
+      - systemd-analyze
+      - calendar
+      - "{{ data_pipeline_olist_scheduler_on_calendar }}"
+  changed_when: false
+
+- name: Confirm Ansible runner account is present
+  ansible.builtin.command:
+    argv:
+      - id
+      - -u
+      - "{{ data_pipeline_olist_scheduler_runner_user }}"
+  changed_when: false
+
+- name: Verify required controller files are present
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: data_pipeline_olist_scheduler_prerequisites
+  loop:
+    - "{{ data_pipeline_olist_scheduler_ansible_bin }}"
+    - "{{ data_pipeline_olist_scheduler_inventory_path }}"
+    - "{{ data_pipeline_olist_scheduler_project_dir }}/playbooks/46-olist-spark-etl.yml"
+    - "{{ data_pipeline_olist_scheduler_project_dir }}/playbooks/47-olist-data-quality.yml"
+
+- name: Require installed Ansible and existing playbooks
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+    fail_msg: 'Missing Ansible runner or a required 46/47 playbook: {{ item.item }}'
+  loop: "{{ data_pipeline_olist_scheduler_prerequisites.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Create Olist runner directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ data_pipeline_olist_scheduler_script_dir }}", mode: '0755'}
+    - {path: "{{ data_pipeline_olist_scheduler_state_dir }}", mode: '0700'}
+    - {path: "{{ data_pipeline_olist_scheduler_metrics_dir }}", mode: '0755'}
+
+- name: Deploy root-owned pipeline orchestration runner
+  ansible.builtin.template:
+    src: run-pipeline.sh.j2
+    dest: "{{ data_pipeline_olist_scheduler_script_dir }}/run-pipeline.sh"
+    owner: root
+    group: root
+    mode: '0750'
+
+- name: Deploy Olist oneshot systemd unit
+  ansible.builtin.template:
+    src: bigtop-olist-pipeline.service.j2
+    dest: /etc/systemd/system/bigtop-olist-pipeline.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload systemd after Olist unit changes
+
+- name: Deploy Olist daily systemd timer
+  ansible.builtin.template:
+    src: bigtop-olist-pipeline.timer.j2
+    dest: /etc/systemd/system/bigtop-olist-pipeline.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload systemd after Olist unit changes
+
+- name: Apply systemd units before configuring the timer
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable or disable daily Olist execution explicitly
+  ansible.builtin.systemd_service:
+    name: bigtop-olist-pipeline.timer
+    enabled: "{{ data_pipeline_olist_scheduler_timer_enabled | bool }}"
+    state: "{{ 'started' if data_pipeline_olist_scheduler_timer_enabled | bool else 'stopped' }}"
+
+- name: Install Prometheus alert rules only when enabled
+  when: data_pipeline_olist_scheduler_alerts_enabled | bool
+  block:
+    - name: Create Prometheus rule directory
+      ansible.builtin.file:
+        path: "{{ data_pipeline_olist_scheduler_prometheus_rules_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Deploy Olist pipeline Prometheus alerts
+      ansible.builtin.template:
+        src: olist-pipeline.rules.yml.j2
+        dest: "{{ data_pipeline_olist_scheduler_prometheus_rules_dir }}/olist-pipeline.yml"
+        owner: root
+        group: root
+        mode: '0644'
+      register: data_pipeline_olist_scheduler_rules_changed
+
+    - name: Validate Prometheus alert rules syntax
+      ansible.builtin.command:
+        argv:
+          - promtool
+          - check
+          - rules
+          - "{{ data_pipeline_olist_scheduler_prometheus_rules_dir }}/olist-pipeline.yml"
+      changed_when: false
+
+    - name: Reload Prometheus rules when the rule file changed
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - kill
+          - --kill-who=main
+          - -s
+          - HUP
+          - "{{ data_pipeline_olist_scheduler_prometheus_unit }}"
+      changed_when: true
+      when: data_pipeline_olist_scheduler_rules_changed.changed
+
+- name: Disable previous Olist alert file when alerting is disabled
+  ansible.builtin.file:
+    path: "{{ data_pipeline_olist_scheduler_prometheus_rules_dir }}/olist-pipeline.yml"
+    state: absent
+  register: data_pipeline_olist_scheduler_rules_removed
+  when: not (data_pipeline_olist_scheduler_alerts_enabled | bool)
+
+- name: Reload Prometheus if previously installed Olist rules were removed
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - kill
+      - --kill-who=main
+      - -s
+      - HUP
+      - "{{ data_pipeline_olist_scheduler_prometheus_unit }}"
+  changed_when: true
+  when:
+    - not (data_pipeline_olist_scheduler_alerts_enabled | bool)
+    - data_pipeline_olist_scheduler_rules_removed.changed
+
+- name: Print Olist schedule deployment summary
+  ansible.builtin.debug:
+    msg:
+      timer_enabled: "{{ data_pipeline_olist_scheduler_timer_enabled }}"
+      alerts_enabled: "{{ data_pipeline_olist_scheduler_alerts_enabled }}"
+      schedule: "{{ data_pipeline_olist_scheduler_on_calendar }}"
+      manual_run: sudo systemctl start bigtop-olist-pipeline.service
+      status: sudo systemctl status bigtop-olist-pipeline.service --no-pager
+      logs: sudo journalctl -u bigtop-olist-pipeline.service -n 80 --no-pager

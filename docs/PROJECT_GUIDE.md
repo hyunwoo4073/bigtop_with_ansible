@@ -1,18 +1,19 @@
 # Bigtop Data Platform — 상세 아키텍처·운영·Playbook 가이드
 
-> **문서 범위:** 2026-10-30까지 대화에서 구축하거나 패키지를 제공한 01~44번 단계.  
+> **문서 범위:** 2026-10-31까지의 01~54번 단계. 45~52번 Olist 운영 파이프라인 및 53~54번 Iceberg 별도 실습을 추가했다.  
 > **빠른 개요:** [프로젝트 README](../README.md)  
 > **이 문서의 목적:** 처음 보는 사람이 왜 이 플랫폼을 구축했는지, 각 서버와 컴포넌트가 왜 필요한지, 어떤 Playbook이 무엇을 바꾸는지, 일상 운영·복구·다음 개발을 어떻게 이어갈지 이해하도록 한다.
 
 ## 0. 확인 근거와 현재 상태
 
-이 문서는 *기존 `README.md`(4대 VM 시절), 2026-10-27 README 업데이트 사본, 이전에 생성된 31~44번 ZIP의 Playbook·Role·운영 문서, 대화에서 공유된 실제 성공/실패 로그*를 기반으로 **구조를 새로 작성**했다. 기존 README의 수백 개 작업 일지를 그대로 늘어놓는 방식이 아니다.
+이 문서는 *기존 `README.md`, 기존 31~44번 안내, 45~54번 ZIP의 Playbook·Role·운영 문서, 대화에서 공유된 실제 성공/실패 로그와 사용자 검증 확인*을 기반으로 갱신했다. 기존 README의 수백 개 작업 일지를 그대로 늘어놓는 방식이 아니다.
 
 **제약:** worker3의 현재 Git 작업 트리 전체를 이 문서 작성 환경에서 직접 열람하지는 않았다. 따라서 아래 목록의 파일명·구현 구조는 *확인 가능한 버전의 소스 기준*이고, 실제 노드의 세부 설정/버전/현재 가동 상태와 다를 수 있다. 다음과 같이 분리해서 해석한다.
 
 - **사용자 확인:** Docker 40, OpenMetadata 설치·UI 로그인 41, PostgreSQL 카탈로그 수집 42, UI 바로가기 수정 39, Web Console 백업 대시보드 37 등. 42번은 최종 수정본(v3) 적용 후 실제 수집 성공을 확인했다.
 - **진행되었다고 대화에서 이어간 기능:** 43번 분류·용어집 구성. 단위 테스트와 YAML 형식 문제 수정은 확인되지만, 실제 OpenMetadata에 적용한 systemd 로그/화면 확인은 공유되지 않았다.
 - **별도 검증 필요:** 38번 PostgreSQL 원격 복제는 최초 Ansible 실패 후 수정 패키지를 제공했지만 최종 worker2 수신·SHA-256 검증 성공 로그가 없다. **44번은 배포 패키지를 제공한 상태이며 실제 적용 결과가 없다.**
+- **45~54번의 확인 근거:** Olist Raw, Spark ETL v1/v3, Quality 및 v3 승인, OpenMetadata Container 계보 UI, Iceberg 53번 `status=PASS`와 55,877건 일치, 54번 stage/publish 사용자 확인. 48번 Timer 활성화·Alert 활성화, 51번 Timer 활성화 등은 별도 확인 대상이다.
 - **HA 범위:** 단일 NameNode/ResourceManager 기반의 실습 구성이며 HA를 구축했다고 주장하지 않는다.
 
 ## 1. 프로젝트 목표 및 설계 원칙
@@ -105,7 +106,29 @@ ansible_python_interpreter=/usr/bin/python3
 
 이 구성은 **실습용 비HA** 환경이다. NameNode의 메타데이터 디렉터리를 복수로 만드는 것은 같은 노드 내 저장경로 보호이며 다른 VM에서의 자동 페일오버가 아니다.
 
-### 2.3 관측·운영·백업 흐름
+### 2.3 Olist 배치·품질·계보·승인 흐름 (45~54)
+
+```text
+Kaggle Olist CSV(9개)
+  └─45 HDFS Raw v1 + _MANIFEST.json
+       └─46 Spark YARN Cluster (4개 CSV)
+            └─Warehouse v1/v2/v3 (Curated 5 · Quarantine 1 · Mart 1)
+                 ├─47 Quality 검증 → quality/<version>/runs/<id>/_QUALITY_REPORT.json
+                 ├─50 OpenMetadata Container 및 수동 변환 관계
+                 ├─51 v3 _RUNTIME_LINEAGE.json → 실제 파일 입출력 계보
+                 └─52 v3 최신 PASS + Manifest digest 확인 → published/v3/_APPROVAL.json
+
+48 systemd (46→47) ── worker3 olist_pipeline.prom ─┐
+47 품질 결과 ─────── worker3 olist_quality.prom ────┼─ 49 Prometheus / Grafana
+                                                   └─ 대시보드 기본 버전 v1
+
+53 Iceberg Hadoop Catalog `lab` (기존 v3 Mart 별도 복사)
+ └─54 별도 Iceberg 실습 테이블: UPDATE/DELETE/MERGE, 스키마 진화, audit Branch WAP
+```
+
+**버전은 입력 데이터 도착일이 아니라 출력 스냅샷의 식별자:** Raw는 모두 v1, Warehouse v1은 최초 정상 처리, v2는 실행 계보 없이 게시, v3는 실행 계보 생성·품질 PASS·승인에 사용했다. 48~49번의 기본 버전은 v1이므로 v3의 최신 상태를 자동으로 표시한다고 가정하지 않는다.
+
+### 2.4 관측·운영·백업 흐름
 
 ```text
 Linux/디스크 ──► Node Exporter ────┐
@@ -129,7 +152,7 @@ Web Console DB(worker3) ── pg_dump + 복원 검증 ──► worker3 로컬 
 - **systemd timers**: 백업·메트릭 수집을 지정 시간에 반복 실행. Ansible은 timer 설정을 배포하지만 직접 매 시각 실행하는 것은 systemd다.
 - **Web Console**: 데이터 처리 엔진이나 메트릭 저장소를 대체하지 않는다. 운영자가 상태·로그·작업 내역을 한곳에서 조회하는 UI다.
 
-### 2.4 거버넌스 흐름 — 운영 Inventory와 데이터 카탈로그의 차이
+### 2.5 거버넌스 흐름 — 운영 Inventory와 데이터 카탈로그의 차이
 
 ```text
 Ansible Inventory ──► (32) PostgreSQL platform_hosts / platform_service_instances
@@ -148,7 +171,7 @@ Ansible Inventory ──► (32) PostgreSQL platform_hosts / platform_service_in
 
 **`platform_hosts`는 실제 호스트 인벤토리 기록**이고 **OpenMetadata 카탈로그의 테이블 자산**은 그 기록을 포함한 데이터베이스 객체 자체를 설명한다. 두 메타데이터 시스템은 저장소도 책임도 다르다.
 
-42번의 수집기는 worker3에서 PostgreSQL `127.0.0.1:5432`를 읽고 `metadata:8585/api`로 보낸다. PostgreSQL 원격 포트를 새로 열 필요가 없다. **현재 이 워크플로에는 Airflow DAG나 OpenLineage Spark Listener가 없다.**
+42번의 수집기는 worker3에서 PostgreSQL `127.0.0.1:5432`를 읽고 `metadata:8585/api`로 보낸다. PostgreSQL 원격 포트를 새로 열 필요가 없다. **현재 이 워크플로에는 Airflow DAG나 범용 OpenLineage Spark Listener가 없다.** 51번은 Olist ETL에 내장한 실행 근거 수집이며 둘은 다르다.
 
 ## 3. 컴포넌트 선정 이유 / 설치 위치 / 책임
 
@@ -162,6 +185,7 @@ Ansible Inventory ──► (32) PostgreSQL platform_hosts / platform_service_in
 | 자원 | YARN RM | master | 클러스터 자원 배분, 큐 스케줄링 | 작업을 실제 실행하는 NM과 구분 |
 | 자원 | YARN NM | worker1/2 | 컨테이너 시작, 로컬 디스크·로그 | RM의 스케줄러 역할과 구분 |
 | 처리 | Spark on YARN | 클러스터 | 병렬 데이터 처리 | 자체 독립 클러스터 모드와 다름 |
+| 테이블 포맷 실습 | Apache Iceberg 1.10.1 | JAR master, 실행은 YARN | HDFS Parquet 데이터 파일의 스냅샷·ACID 커밋·Time Travel·Branch WAP 검증 | Spark·YARN 대체 아님, 기존 Olist Warehouse 마이그레이션 아님 |
 | 이력 | Spark History | master | Spark event log 재생·분석 | 실행 중 Spark Driver와 다름 |
 | 모니터링 | Node Exporter | 각 대상 노드 | OS/디스크 상태 수집 | Hadoop JVM 내부 메트릭은 JMX 필요 |
 | 모니터링 | JMX Exporter | Hadoop/JVM 프로세스 | Hadoop/YARN/Spark 내부 지표 | 애플리케이션 로그 자체는 아님 |
@@ -214,7 +238,13 @@ bigtop-cluster-ansible/
 │   ├── web_console_service_ui_links/
 │   ├── governance_docker_bootstrap/, governance_openmetadata/
 │   ├── governance_postgres_catalog/, governance_catalog_enrichment/
-│   └── governance_lineage/          # 44번 제공 패키지 (배포 미확인)
+│   ├── governance_lineage/          # 44번 제공 패키지 (배포 미확인)
+│   ├── data_pipeline_olist_raw/, data_pipeline_olist_etl/
+│   ├── data_pipeline_olist_quality/, data_pipeline_olist_scheduler/
+│   ├── data_pipeline_olist_observability/, data_pipeline_olist_catalog/
+│   ├── data_pipeline_olist_runtime_lineage/, data_pipeline_olist_promotion/
+│   └── iceberg_spark_lab/, iceberg_transactions_lab/
+├── vendor/iceberg/                   # 53 JAR의 로컬 다운로드 위치 (Git 제외)
 ├── collections/requirements.yml     # community.postgresql 등 Collection
 ├── requirements-dev.txt             # 개발 lint·Ansible 패키지
 ├── scripts/, tests/                 # 정적 검사·운영 검사·단위 테스트
@@ -324,8 +354,25 @@ bigtop-cluster-ansible/
 ### 5.7 번호·범위에 관한 주의
 
 - 현재 확인 가능한 자료에는 **28번·29번 Playbook이 없다**. 임의로 이름이나 역할을 만들지 않는다.
-- `01~27`은 초창기 README에 근거한 설명이고, `30~44`는 각 단계의 실제 패키지 Playbook·Role 문서를 함께 검토해 적었다.
+- `01~27`은 초창기 README에 근거한 설명이고, `30~54`는 각 단계의 패키지 Playbook·Role 문서와 사용자 실습 결과를 함께 검토해 적었다.
 - 모든 Playbook이 자동으로 한 번에 실행되는 방식은 아니다. 일부는 서비스 중지·복구·진단이고, 43·44는 수동 적용 의사결정을 요구한다.
+
+### 5.8 실제 Olist 파이프라인과 Iceberg: 45~54
+
+| Playbook | 대상 / 실행 조건 | 하는 일 | 사용자 검증과 경계 |
+|---|---|---|---|
+| `45-olist-hdfs-raw.yml` | worker3 Controller → master HDFS | 원본 CSV 9개를 Raw v1 불변 스냅샷으로 업로드, 파일 SHA-256 Manifest | 실제 Raw 적재 성공 |
+| `46-olist-spark-etl.yml` | master, `spark-submit --deploy-mode cluster` | 4개 CSV → Curated 5/Quarantine 1/Mart 1 Parquet; 신규 출력 버전에서 51번 실행 계보 선택 생성 | v1 처리와 v3 실행 성공, 기존 정상 버전은 제출 전 SKIP |
+| `47-olist-data-quality.yml` | master Spark, 메트릭은 worker3 | 29개 검사 PASS/FAIL, HDFS 실행별 리포트, `olist_quality.prom` | v1 성공, v3 승인 근거 검증 |
+| `48-olist-pipeline-schedule.yml` | worker3 ops systemd | 46 → 47 순차 실행, `olist_pipeline.prom`, 선택적 Timer·Alert | 수동 실행 성공, Timer/Alert 기본 disabled |
+| `49-olist-observability.yml` | worker3 Grafana | 16패널 대시보드 Provisioning, Prometheus 데이터 소스 | API/UI 등록 성공, 날짜 단위 초→밀리초 수정 |
+| `50-olist-openmetadata.yml` | worker3 API + master HDFS 점검 | Storage Service `bigtop_hdfs_olist`, CSV/Parquet Container, ETL 코드에 근거한 계보 | v1 1 service·16 container·13 edge 생성, UI 확인; v3 자산 등록 |
+| `51-olist-spark-runtime-lineage.yml` | worker3 importer, master HDFS 증빙 | Spark `inputFiles()`+출력 경로의 런타임 증빙을 Container에 연결 | v3 `_RUNTIME_LINEAGE.json` 생성 및 계보 등록; 범용 Listener 아님 |
+| `52-olist-quality-promotion.yml` | master HDFS | 최신 PASS, ETL Manifest SHA, 7 `_SUCCESS` 검사 후 승인 증빙 생성 | v3 `_APPROVAL.json` 확인; HDFS ACL 강제 아님 |
+| `53-iceberg-hdfs-lab.yml` | master Spark YARN, Iceberg 1.10.1 JAR | Hadoop Catalog·Snapshot·Time Travel, 승인 v3 Mart 읽어 독립 Iceberg 테이블 생성 | `PASS`: snapshot 2개, Mart 55,877건 일치; 원본 미변경 |
+| `54-iceberg-transactions-wap.yml` | master Spark YARN, `deploy_only`/`stage`/`publish` | 별도 테이블 UPDATE/DELETE/MERGE/ADD COLUMN, audit branch 검증 후 fast-forward | stage·publish 사용자 검증 완료. 운영 Mart 릴리스 아님 |
+
+각 Playbook은 해당 단계의 `docs/NN-*-apply.md`와 Role `defaults/main.yml`을 기준으로 변수·의존성을 확인한다. 단순 배포 성공과 실제 Spark/품질/브랜치 검증 성공은 구분한다. 특히 50/51/52번 기본 plan과 실제 apply, 53번 `run_smoke=false`와 54번 `deploy_only`를 혼동하지 않는다.
 
 ## 6. 배포·재배포 의존성 및 실행 원칙
 
@@ -352,6 +399,11 @@ bigtop-cluster-ansible/
                               42 Ingestion CLI ────────────┘
                               43 Metadata Enrichment
                               44 SQL View Lineage (미확인)
+                              45 Raw CSV 적재 → 46 Spark ETL → 47 Quality
+                                 ├─ 48 systemd / 49 Grafana
+                                 ├─ 50 Catalog / 51 Runtime Lineage
+                                 └─ 52 v3 Approval
+                              53 Iceberg HDFS Lab → 54 Iceberg SQL / WAP
 ```
 
 위는 **이해를 위한 의존도**다. 실제 31번은 Web Console/DB 통합을 포함하고, 32번은 31번을 import한다. 35번은 34번 Role을 사용하며, 33·37·39번은 Web Console 앱을 재배포할 수 있다. 그러므로 각각을 무작정 병렬 실행하거나 전체에 일괄 `local` 연결을 강제해서는 안 된다.
@@ -402,6 +454,51 @@ Ansible의 멱등성은 **변경이 불필요하면 다시 변경하지 않는 �
 - 43번은 사람의 기존 설명·태그·소유자 변경을 보존하는 정책을 우선한다.
 - 44번은 실제 View 객체를 새로 만들 수 있으므로 적용 전 변경 영향 및 View 이름 충돌을 확인한다.
 
+### 6.5 45~54번 실행 의존성 및 재현 명령
+
+**worker3** `~/bigtop-cluster-ansible`에서 실행한다. 기본 원칙은 **출력 버전 일치**, `-e ansible_connection=local`을 master/metadata까지 일괄 적용하지 않기, 데이터 삭제·덮어쓰기 금지다.
+
+```bash
+# v3 Warehouse에 최신 PASS Quality가 있어야 52번 승인이 가능
+.venv/bin/ansible-playbook -i inventory/hosts.ini playbooks/47-olist-data-quality.yml \
+  -e data_pipeline_olist_quality_warehouse_version=v3
+
+# 50번은 v3 Container를 먼저 등록한 뒤, 51번에서 v3 실행 근거를 Import
+.venv/bin/ansible-playbook -i inventory/hosts.ini playbooks/50-olist-openmetadata.yml \
+  -e data_pipeline_olist_catalog_version=v1 \
+  -e data_pipeline_olist_catalog_warehouse_version=v3 \
+  -e data_pipeline_olist_catalog_apply=true
+.venv/bin/ansible-playbook -i inventory/hosts.ini playbooks/51-olist-spark-runtime-lineage.yml \
+  -e data_pipeline_olist_runtime_lineage_warehouse_version=v3 \
+  -e data_pipeline_olist_runtime_lineage_apply=true
+
+# 52 승인 증빙은 독립 단계; 이미 승인됐으면 다시 생성하지 않음
+.venv/bin/ansible-playbook -i inventory/hosts.ini playbooks/52-olist-quality-promotion.yml \
+  -e data_pipeline_olist_promotion_warehouse_version=v3 \
+  -e data_pipeline_olist_promotion_apply=true
+
+# 53 독립 Iceberg 실습: 52 승인된 v3 Mart를 복사해 검증
+.venv/bin/ansible-playbook -i inventory/hosts.ini playbooks/53-iceberg-hdfs-lab.yml \
+  -e iceberg_spark_lab_run_smoke=true
+# 54 독립 WAP 실습: stage 확인 후 publish 별도 opt-in
+.venv/bin/ansible-playbook -i inventory/hosts.ini playbooks/54-iceberg-transactions-wap.yml \
+  -e iceberg_transactions_lab_mode=stage
+.venv/bin/ansible-playbook -i inventory/hosts.ini playbooks/54-iceberg-transactions-wap.yml \
+  -e iceberg_transactions_lab_mode=publish
+```
+
+**53 JAR 관리:** Spark 3.5.6·Scala 2.12.18·Java 11.0.32.1에 Iceberg 1.10.1을 사용한다. worker3 `vendor/iceberg/iceberg-spark-runtime-3.5_2.12-1.10.1.jar`를 master `/opt/bigtop-iceberg/`에 Ansible로 배치하고 `spark-submit --jars`로 YARN 컨테이너에 전달한다. **모든 Worker `/usr/lib/spark/jars`에 복사할 필요 없다.** JAR 바이트코드 호환성 검사는 `scripts/53-check-iceberg-java11.py`로 확인한다. 1.12.0은 Java 17 필요로 해당 환경에서 실패했으므로 재사용하지 않는다.
+
+**상태 조회(재실행 무관):**
+
+```bash
+ssh master 'sudo -u hadoop hdfs dfs -ls /data/olist/warehouse/v3/_RUNTIME_LINEAGE.json'
+ssh master 'sudo -u hadoop hdfs dfs -cat /data/olist/published/v3/_APPROVAL.json' | python3 -m json.tool
+ssh master "sudo -u hadoop hdfs dfs -text '/data/olist/iceberg-validation/step53/part-*'"
+ssh master "sudo -u hadoop hdfs dfs -text '/data/olist/iceberg-validation/step54/stage/part-*'"
+ssh master "sudo -u hadoop hdfs dfs -text '/data/olist/iceberg-validation/step54/publish/part-*'"
+```
+
 ## 7. 주요 API, Web UI와 서비스 점검
 
 ### 7.1 Web Console API/화면
@@ -443,12 +540,12 @@ Nginx는 `:1337`에서 Basic Auth를 요구하고, Backend는 내부 `127.0.0.1:
 | YARN ResourceManager | `http://master:18088` | 사용자 지정 콘솔 링크 |
 | Spark History | `http://master:18080` | Spark 이벤트 이력 UI |
 | Prometheus | `http://worker3:9090` | Prometheus UI/API |
-| Grafana | `http://worker3:23000` | 사용자 지정 콘솔 링크 |
+| Grafana | worker3 내부 `http://127.0.0.1:3000`; 호스트 PC `http://127.0.0.1:23000` | VirtualBox 포트포워딩으로 구분 |
 | Alertmanager | `http://worker3:19093` | 사용자 지정 콘솔 링크 |
 | OpenMetadata | `http://192.158.2.104:8585` | 거버넌스 전용 VM |
 | OpenMetadata health | `http://127.0.0.1:8586/healthcheck` | metadata VM **내부** |
 
-**주의:** 특히 `18088`, `23000`, `19093`은 *39번 Console 바로가기 기본값*으로 확인된 주소다. 실제 데몬 listen 포트, NAT 포트포워딩, 리버스 프록시 방식은 `ss -lntp`, OS 설정, VirtualBox 설정으로 따로 확인해야 한다. `all.yml` 등에서 링크 목록을 override했다면 그 값이 기본값보다 우선한다.
+**주의:** `23000`은 호스트 PC에서 사용하는 VirtualBox 포트포워딩 주소이고 Grafana가 worker3 내부에서 listen하는 포트는 `3000`이다. `18088`, `19093` 등 나머지 링크는 *39번 Console 바로가기 기본값*을 확인한 것이다. 실제 데몬 listen 포트, NAT 포트포워딩, 리버스 프록시 방식은 `ss -lntp`, OS 설정, VirtualBox 설정으로 따로 확인해야 한다. `all.yml` 등에서 링크 목록을 override했다면 그 값이 기본값보다 우선한다.
 
 ## 8. 저장소·보호 정책 및 복구 가능성
 
@@ -587,6 +684,24 @@ sudo python3 /usr/local/lib/bigtop-governance/lineage/manage_lineage.py \
 
 Spark read/write 이벤트의 자동 추적과는 별개의 **SQL View 기반 PoC**다. Spark Lineage를 자동 수집하려면 OpenLineage 연동, 이벤트 전달, 데이터셋 식별, Spark Job 실행 환경 테스트가 후속 과제다.
 
+### 9.4 50~51번 HDFS 데이터셋의 Catalog와 실제 실행 근거 계보
+
+- **50번:** OpenMetadata 서비스 `bigtop_hdfs_olist`의 Container(`raw_v1_*`, `curated_v3_*`, `quarantine_v3_rows`, `mart_v3_daily_category_sales`)를 HDFS Manifest와 7개 `_SUCCESS` 검증 후 등록한다. 최초 v1은 StorageService 1개·Container 16개·수동 계보 13개가 생성됐고, 사용자가 **개별 Container의 Lineage 탭**에서 연결선을 확인했다. *Service 계보 화면*은 조회 대상이 다르다.
+- **51번:** 새 버전 ETL이 `data_pipeline_olist_etl_capture_runtime_lineage=true`로 실행될 때만 `_RUNTIME_LINEAGE.json`을 기록한다. Importer는 동일 버전 OpenMetadata Container 존재를 먼저 검증하고 실제 읽기 파일/쓰기 경로 근거만 추가한다. v2에서는 실행 증빙이 빠져 v3에서 새로 생성했다. **Spark 실행 기반 파일 계보이지, OpenLineage Listener나 컬럼 계보가 아니다.**
+- **인증:** Bot JWT는 worker3 보호 디렉터리에 두며 YARN 컨테이너에 전달하지 않는다. v3 Lineage 등록 시 50번 v3 Container 등록이 선행돼야 한다.
+
+### 9.5 52번 Quality Gate와 53~54번 Iceberg WAP의 차이
+
+| 비교 | Step 52 — Parquet Warehouse 승인 | Step 54 — Iceberg WAP 샘플 |
+|---|---|---|
+| 대상 | 실제 Olist Warehouse v3 | 별도 샘플 Iceberg 테이블 |
+| 검증 기준 | 최신 PASS 29개 검사, ETL Manifest SHA, Parquet `_SUCCESS`, 기본 168h | 합성 데이터의 ID·금액·브랜치 스냅샷 조건 |
+| 결과 | `/data/olist/published/v3/_APPROVAL.json` 기록 | Iceberg audit 브랜치 → 명시적 `fast_forward`로 main 공개 |
+| 소비자 차단 | **미구현** (승인 기록만 발행) | 실습 테이블의 기본 main과 audit 분리; HDFS RBAC 아님 |
+| 실제 운영 승인 자동화 | 별도 소비자 측 정책 필요 | 운영 Olist 품질 정책과 연결하는 작업 미구현 |
+
+Iceberg 스냅샷은 **테이블 단위**다. `main`으로 fast-forward한다고 여러 테이블의 공개가 원자적으로 수행되는 것은 아니며, 운영 SQL 소비자 승인 강제·권한 관리도 별도다. 현재 Catalog는 Spark 실습용 Hadoop Catalog `lab`; Trino 같은 엔진과 공유할 Catalog를 선정·검증해야 한다.
+
 ## 10. 운영 점검 순서 및 장애 시 접근법
 
 ### 10.1 하루 운영 점검 예시
@@ -598,6 +713,8 @@ Spark read/write 이벤트의 자동 추적과는 별개의 **SQL View 기반 Po
 5. PostgreSQL 백업 최신성·검증·Alert 상태 확인.
 6. 별도 노드에 백업이 있는지 확인(38번은 특히 필요).
 7. metadata Docker `compose ps`·OpenMetadata UI·수집 로그 확인.
+8. 48번 Scheduler 서비스/Timer, 49번 Grafana Olist 패널에 실제 메트릭 존재 여부 확인(기본 v1).
+9. 운영에서 필요한 경우 v3 최신 Quality 리포트 및 `_APPROVAL.json`과 Iceberg WAP stage/publish 증빙 확인.
 
 ```bash
 # worker3: 일상
@@ -630,6 +747,13 @@ sudo docker stats --no-stream
 | OpenMetadata 불안정 | metadata RAM/Swap, Docker/Compose 로그, MySQL·Elasticsearch health | `docker compose down -v` |
 | Catalog 수집 실패 | 42번 oneshot journal, Bot 권한, 연결 타입 `Postgres` | JWT를 Git에 기록 / 5432 원격 공개 |
 | Governance 적용 403 | Bot/API 역할·권한, plan, token 유효성 | Admin 토큰을 로그에 출력 |
+| Olist Pipeline Grafana `No data` | 48번 서비스 실행 이력, `olist_pipeline.prom`, Node Exporter 수집, Prometheus 라벨·대시보드 버전 | 누락값을 0/성공으로 간주 |
+| Spark 재실행 `exitCode 13` | 이미 완성된 불변 스냅샷이 SparkContext 생성 전에 종료됐는지, 46번 선제 검증/SKIP 적용 | 동일 버전 HDFS 출력 삭제 |
+| Runtime Lineage 파일 없음 | 46번 실행 시 `capture_runtime_lineage=true`였는지, 신규 버전인지 | 기존 게시 v2 덮어쓰기 |
+| Runtime Lineage 사전 검사 실패 | 50번 동일 Warehouse 버전 Container 등록 여부 | 존재하지 않는 데이터셋의 계보 강제 생성 |
+| Iceberg `UnsupportedClassVersionError: 61.0` | Java 11(55)에 Java 17(61) 컴파일 Iceberg 1.12 사용 여부 | Java 클러스터 전역 업그레이드를 바로 시행 |
+| Iceberg YARN Application failed | `yarn logs -applicationId ...`의 Driver Python/Java Traceback | `spark-submit` 표준 에러만 보고 원인 단정 |
+| WAP Publish 실패 | stage 증빙, main/audit snapshot ID 및 후보 품질 | 테이블 삭제·무조건 fast-forward |
 
 ### 10.3 이 프로젝트에서 실제 겪은 문제와 교훈
 
@@ -672,18 +796,27 @@ sudo docker stats --no-stream
 | PostgreSQL Data Catalog(42) | **수집 성공 확인** | v3 커넥터 타입 수정 후 사용자 성공 보고 |
 | 분류/용어집 정책(43) | **실제 적용 결과 확인 필요** | 단위 테스트·YAML 수정, 실행 완료 로그 미제공 |
 | SQL View Lineage(44) | **배포 미확인** | ZIP 패키지 제공 단계까지 진행 |
-| Spark 자동 Lineage | 미구축 | OpenLineage/JVM Listener 등 별도 설계 필요 |
+| Olist 원본/ETL/품질/실행 관측(45~49) | **구축·검증** | Raw 9개, ETL 7개 Parquet, 29 품질 검사, 수동 48 서비스·49 대시보드 성공 |
+| OpenMetadata Olist Container·계보(50) | **등록 및 UI 확인** | v1 16 Container·13 관계, v3 자산 등록 |
+| Spark 애플리케이션 실행 파일 계보(51) | **v3 성공** | `_RUNTIME_LINEAGE.json` 및 API Import; `inputFiles()` 기반 Olist 전용 구현 |
+| Olist 승인 증빙(52) | **v3 승인 성공** | `_APPROVAL.json` 발행, 소비자 측 강제 접근제어는 없음 |
+| Iceberg HDFS Catalog·Snapshot(53) | **PASS** | 1.10.1/Java 11, Time Travel, v3 Mart 55,877행 일치 |
+| Iceberg DML/Schema/샘플 WAP(54) | **stage·publish 사용자 확인** | 샘플 테이블만 변경, 운영용 릴리스 정책 아님 |
+| 범용 Spark OpenLineage Listener / 컬럼 계보 | **미구축** | 51번 파일 단위 계보와 구분 |
+| Trino/공유 Catalog + 승인 강제 조회 | **미구축** | Iceberg Hadoop Catalog는 현재 단독 Spark Lab 범위 |
+| 48 Scheduler/51 Reconcile Timer 주기 실행 | **상태 별도 확인** | 기본 비활성; 설치·수동 실행과 주기 자동 실행은 다름 |
 | OpenMetadata 전용 백업·복원 | 미구축 | 41번 Docker 볼륨 영속화만 확인 |
 | 실운영 인증·TLS·RBAC | 미구축 또는 보강 필요 | 실습용 Basic Auth·Bot 토큰 중심 |
 
-### 12.2 권장 다음 단계 (기능 추가보다 품질 점검 우선)
+### 12.2 다음 단계 우선순위
 
-1. **44번 적용 여부 확인 및 43번 결과 확인:** 이미 생성된 View/계보가 있다면 재생성하지 말고 실제 API/UI 결과부터 점검.
-2. **38번 원격 복제 실검증:** worker2의 실제 백업 존재, SHA-256, 테스트 복원, 백업 스토리지 용량 모니터링.
-3. **OpenMetadata 데이터 백업:** MySQL/검색 인덱스/Compose 설정/토큰을 포함하는 비밀정보 분리된 복원 설계.
-4. **운영 정책·서비스 카탈로그 정리:** 누가 데이터를 소유하고 누가 운영하는지, 분류 기준과 적용 권한 정의.
-5. **Spark 자동 계보 PoC:** 실제 Spark Job을 재현하고 HDFS→Spark→데이터셋 관계를 OpenLineage 등으로 수집.
-6. **CI와 문서 자동 검증:** Playbook 목록을 실제 저장소에서 추출해 이 문서의 Playbook 표와 비교하고, 예제 명령의 경로 존재 여부 검사.
+1. **Iceberg + 실제 Olist Data Quality 연동:** 54번의 합성 WAP를 47번 29개 검사와 연결하고, 승인 정책/감사 기록/소비자 조회 통제를 설계한다. 53~54번 기존 실습 테이블과 운영 자산을 혼용하지 않는다.
+2. **Spark/Trino 공유 Catalog 선정:** Hadoop Catalog 실습을 그대로 Trino 운영 구성으로 간주하지 않는다. 호환 Catalog, 스키마, 권한·자격증명, 메타데이터 백업을 검토한다.
+3. **48/49 버전·스케줄 정책:** 기본 v1 고정 메트릭과 v3 승인 상태의 불일치를 해소하고, 필요 시 Timer/Alert를 명시적 승인으로 활성화한다.
+4. **실행 계보 고도화:** 51번 Olist 전용 `inputFiles()` 방식의 한계를 문서화하고, 범용 OpenLineage/컬럼 계보는 별도로 검증한다.
+5. **미확인 과제 재검증:** 38번 원격 백업 복제, 43번 거버넌스 정책, 44번 SQL View Lineage 적용 결과를 확인한다.
+6. **OpenMetadata 백업과 보안:** MySQL/검색 인덱스/Compose 설정 복구, HTTPS 및 RBAC 계획.
+7. **CI/문서 자동 검증:** 현재 저장소의 Playbook·Role 경로, 테스트 및 lint를 문서의 안내와 대조한다.
 
 ## 13. 문서 유지보수 규칙
 
@@ -703,8 +836,10 @@ sudo docker stats --no-stream
 - `docs/web_console_postgres.md`, `docs/web_console_metadata.md` — 31·32번.
 - `docs/web_console_pg_backup.md`, `docs/web_console_pg_backup_observability.md`, `docs/web_console_pg_backup_alerts.md` — 34~36번.
 - `docs/web_console_pg_remote_replica.md`, `docs/web_console_service_ui_links.md` — 38·39번.
-- `docs/40-governance-bootstrap.md`, `docs/41-governance-openmetadata.md`, `docs/42-governance-postgresql-catalog.md`, `docs/43-governance-catalog-enrichment.md`, `docs/44-governance-lineage.md` — 거버넌스 관련 개별 구현 문서 (설치 여부·파일 존재 여부는 현재 작업 트리 기준으로 확인).
+- `docs/40-governance-bootstrap.md`, `docs/41-governance-openmetadata.md`, `docs/42-governance-postgresql-catalog.md`, `docs/43-governance-catalog-enrichment.md`, `docs/44-governance-lineage.md` — 기존 거버넌스 개별 문서.
+- `docs/45-olist-*.md` ~ `docs/52-olist-*.md` — 실데이터 적재·ETL·품질·운영·거버넌스·승인 상세 문서.
+- `docs/53-iceberg-apply.md`, `docs/53-iceberg-architecture.md`, `docs/54-iceberg-apply.md`, `docs/54-iceberg-architecture.md` — Iceberg Snapshot/Time Travel/WAP 실습 문서.
 
 ---
 
-**요약:** 이 프로젝트는 `HDFS/YARN/Spark`의 **데이터 처리**, `Prometheus/Alertmanager/Web Console/PostgreSQL`의 **운영**, `OpenMetadata/MySQL/Elasticsearch/수집 CLI`의 **거버넌스**가 맞물린 5대 VM 실습 시스템이다. 각 계층의 책임을 구분하고 Ansible을 단일 배포 원천으로 유지하는 것이 핵심 설계다.
+**요약:** 이 프로젝트는 `HDFS/YARN/Spark`의 **데이터 처리**, `Prometheus/Alertmanager/Web Console/PostgreSQL`의 **운영**, `OpenMetadata/MySQL/Elasticsearch/수집 CLI`의 **거버넌스**, 그리고 Iceberg **테이블 포맷 실습**이 맞물린 5대 VM 실습 시스템이다. 각 계층의 책임을 구분하고 Ansible을 단일 배포 원천으로 유지하는 것이 핵심 설계다.

@@ -1,0 +1,7 @@
+---
+- name: Provision read-only Olist pipeline monitoring dashboard
+  hosts: ops
+  become: true
+  gather_facts: false
+  roles:
+    - data_pipeline_olist_observability

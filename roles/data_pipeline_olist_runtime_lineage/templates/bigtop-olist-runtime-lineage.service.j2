@@ -1,0 +1,11 @@
+[Unit]
+Description=Bigtop Olist Spark execution-derived lineage import into OpenMetadata
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory={{ data_pipeline_olist_runtime_lineage_project_dir }}
+ExecStart=/usr/sbin/runuser -u {{ data_pipeline_olist_runtime_lineage_runner_user }} -- {{ data_pipeline_olist_runtime_lineage_project_dir }}/.venv/bin/ansible-playbook -i {{ data_pipeline_olist_runtime_lineage_project_dir }}/inventory/hosts.ini {{ data_pipeline_olist_runtime_lineage_project_dir }}/playbooks/51-olist-spark-runtime-lineage.yml -e data_pipeline_olist_runtime_lineage_apply=true
+TimeoutStartSec=300

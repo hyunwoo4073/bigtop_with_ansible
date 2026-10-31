@@ -1,0 +1,15 @@
+---
+# Step54 is isolated; it never alters Step53 tables or Step45-52 datasets.
+iceberg_transactions_lab_version: '1.10.1'
+iceberg_transactions_lab_jar_path: /opt/bigtop-iceberg/iceberg-spark-runtime-3.5_2.12-1.10.1.jar
+iceberg_transactions_lab_app_dir: /opt/bigtop-iceberg
+iceberg_transactions_lab_catalog: lab
+iceberg_transactions_lab_hdfs_warehouse: /data/olist/iceberg-lab
+iceberg_transactions_lab_hdfs_address: master:9000
+iceberg_transactions_lab_validation_root: /data/olist/iceberg-validation/step54
+iceberg_transactions_lab_spark_user: hadoop
+iceberg_transactions_lab_queue: batch
+iceberg_transactions_lab_driver_memory: 768m
+iceberg_transactions_lab_executor_memory: 768m
+# deploy_only (default), stage, publish. Publishing is NEVER implicit.
+iceberg_transactions_lab_mode: deploy_only

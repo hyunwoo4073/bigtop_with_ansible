@@ -1,0 +1,123 @@
+---
+- name: Validate Olist observability inputs
+  ansible.builtin.assert:
+    that:
+      - data_pipeline_olist_observability_warehouse_version is match('^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$')
+      - data_pipeline_olist_observability_dashboard_uid == 'bigtop-olist-pipeline'
+      - data_pipeline_olist_observability_dashboard_file == 'olist-pipeline-overview.json'
+      - grafana_dashboard_dir | default('/var/lib/grafana/dashboards') == '/var/lib/grafana/dashboards'
+      - grafana_datasource_uid | default('prometheus') is match('^[A-Za-z0-9_-]{1,128}$')
+      - >-
+        data_pipeline_olist_observability_openmetadata_url is match('^https?://[A-Za-z0-9._:-]+(/[A-Za-z0-9_./?&=%+-]*)?$')
+      - >-
+        data_pipeline_olist_observability_console_url is match('^https?://[A-Za-z0-9._:-]+(/[A-Za-z0-9_./?&=%+-]*)?$')
+    fail_msg: Invalid dashboard settings; URLs must be browser-reachable and contain no credentials.
+
+- name: Inspect existing Grafana file provisioning configuration
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: data_pipeline_olist_observability_prerequisites
+  loop:
+    - /etc/grafana/provisioning/dashboards/platform.yml
+    - /etc/grafana/provisioning/datasources/prometheus.yml
+    - "{{ grafana_dashboard_dir | default('/var/lib/grafana/dashboards') }}"
+
+- name: Refuse to replace absent Grafana infrastructure
+  ansible.builtin.assert:
+    that:
+      - data_pipeline_olist_observability_prerequisites.results[0].stat.isreg | default(false)
+      - data_pipeline_olist_observability_prerequisites.results[1].stat.isreg | default(false)
+      - data_pipeline_olist_observability_prerequisites.results[2].stat.isdir | default(false)
+    fail_msg: >-
+      Step 49 only adds a dashboard. First restore the existing step 15
+      Grafana datasource and file dashboard provider.
+
+- name: Read installed Grafana dashboard provider configuration
+  ansible.builtin.slurp:
+    src: /etc/grafana/provisioning/dashboards/platform.yml
+  register: data_pipeline_olist_observability_provider_raw
+
+- name: Read installed Prometheus datasource configuration
+  ansible.builtin.slurp:
+    src: /etc/grafana/provisioning/datasources/prometheus.yml
+  register: data_pipeline_olist_observability_datasource_raw
+
+- name: Parse existing Grafana provisioning configuration
+  ansible.builtin.set_fact:
+    data_pipeline_olist_observability_provider: >-
+      {{ data_pipeline_olist_observability_provider_raw.content | b64decode | from_yaml }}
+    data_pipeline_olist_observability_datasource: >-
+      {{ data_pipeline_olist_observability_datasource_raw.content | b64decode | from_yaml }}
+
+- name: Verify Grafana file provider and datasource are compatible
+  ansible.builtin.assert:
+    that:
+      - data_pipeline_olist_observability_provider.providers[0].options.path == grafana_dashboard_dir | default('/var/lib/grafana/dashboards')
+      - data_pipeline_olist_observability_datasource.datasources[0].uid == grafana_datasource_uid | default('prometheus')
+    fail_msg: Grafana file provider directory or Prometheus datasource UID does not match step 49.
+
+- name: Verify Grafana health endpoint is responding
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ grafana_port | default(3000) }}/api/health"
+    method: GET
+    status_code: 200
+    timeout: 10
+    return_content: true
+  register: data_pipeline_olist_observability_grafana_health
+  changed_when: false
+
+- name: Install read-only Olist pipeline dashboard JSON
+  ansible.builtin.template:
+    src: olist-pipeline-overview.json.j2
+    dest: >-
+      {{ (grafana_dashboard_dir | default('/var/lib/grafana/dashboards')) ~ '/' ~
+         data_pipeline_olist_observability_dashboard_file }}
+    owner: grafana
+    group: grafana
+    mode: '0644'
+  register: data_pipeline_olist_observability_dashboard_result
+
+- name: Validate rendered Grafana dashboard JSON
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -m
+      - json.tool
+      - >-
+        {{ (grafana_dashboard_dir | default('/var/lib/grafana/dashboards')) ~ '/' ~
+           data_pipeline_olist_observability_dashboard_file }}
+  changed_when: false
+
+# Grafana's existing file dashboard provider polls every 30 seconds.
+# No service restart or modification to the step 15 provider is required.
+- name: Probe existing Prometheus Olist orchestration metrics
+  ansible.builtin.uri:
+    url: >-
+      http://127.0.0.1:{{ prometheus_port | default(9090) }}/api/v1/query?query={{
+      ('olist_pipeline_last_attempt_success{warehouse_version="' ~
+      data_pipeline_olist_observability_warehouse_version ~ '"}') | urlencode }}
+    method: GET
+    return_content: true
+    timeout: 10
+    status_code: 200
+  register: data_pipeline_olist_observability_prometheus_probe
+  changed_when: false
+  when: data_pipeline_olist_observability_probe_metrics | bool
+
+- name: Print monitoring installation and data availability
+  ansible.builtin.debug:
+    msg:
+      dashboard_file: >-
+        {{ (grafana_dashboard_dir | default('/var/lib/grafana/dashboards')) ~ '/' ~
+           data_pipeline_olist_observability_dashboard_file }}
+      dashboard_uid: "{{ data_pipeline_olist_observability_dashboard_uid }}"
+      dashboard_grafana_path: >-
+        /d/{{ data_pipeline_olist_observability_dashboard_uid }}/olist-pipeline-overview
+      grafana_healthy: "{{ data_pipeline_olist_observability_grafana_health.status == 200 }}"
+      prometheus_olist_series_present: >-
+        {{ (data_pipeline_olist_observability_prometheus_probe.json.data.result | default([]) | length > 0)
+           if (data_pipeline_olist_observability_probe_metrics | bool) else 'not checked' }}
+      openmetadata_integration: >-
+        Navigation only. Pipeline and Parquet catalog ingestion are separate future tasks.
+      note: >-
+        Grafana file provider scans dashboard JSON every 30 seconds; no restart performed.

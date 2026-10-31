@@ -105,6 +105,30 @@
   changed_when: false
   failed_when: data_pipeline_olist_etl_manifest_before.rc not in [0, 1]
 
+# In an immutable snapshot workflow, a previously published version is
+# checked using HDFS CLI before creating a new YARN application. This avoids
+# a cluster-mode driver exiting before SparkContext initialization on SKIP.
+- name: Verify existing immutable ETL snapshot before launching YARN
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - "{{ data_pipeline_olist_etl_script_dir }}/olist_etl.py"
+      - --verify-existing
+      - --raw-root
+      - "{{ data_pipeline_olist_etl_raw_root }}"
+      - --raw-version
+      - "{{ data_pipeline_olist_etl_raw_version }}"
+      - --warehouse-root
+      - "{{ data_pipeline_olist_etl_warehouse_root }}"
+      - --output-version
+      - "{{ data_pipeline_olist_etl_output_version }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_etl_submit_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  when: data_pipeline_olist_etl_manifest_before.rc == 0
+  changed_when: false
+
 - name: Run Olist batch ETL on Spark YARN in cluster mode
   ansible.builtin.command:
     argv:
@@ -146,6 +170,7 @@
       - "{{ data_pipeline_olist_etl_output_version }}"
       - --output-partitions
       - "{{ data_pipeline_olist_etl_output_partitions | string }}"
+      - "{{ (data_pipeline_olist_etl_capture_runtime_lineage | default(false) | bool) | ternary('--runtime-lineage', '--no-runtime-lineage') }}"
   become: true
   become_user: "{{ data_pipeline_olist_etl_submit_user }}"
   environment:
@@ -153,6 +178,7 @@
     SPARK_CONF_DIR: /etc/spark/conf
     PYSPARK_PYTHON: /usr/bin/python3
   register: data_pipeline_olist_etl_run
+  when: data_pipeline_olist_etl_manifest_before.rc == 1
   changed_when: data_pipeline_olist_etl_manifest_before.rc == 1
   failed_when: data_pipeline_olist_etl_run.rc != 0
 

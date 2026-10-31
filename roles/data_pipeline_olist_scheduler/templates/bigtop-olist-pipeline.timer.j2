@@ -1,0 +1,11 @@
+[Unit]
+Description=Scheduled Olist ETL and data quality checks
+
+[Timer]
+OnCalendar={{ data_pipeline_olist_scheduler_on_calendar }}
+AccuracySec=1min
+Persistent={{ 'true' if data_pipeline_olist_scheduler_persistent | bool else 'false' }}
+Unit=bigtop-olist-pipeline.service
+
+[Install]
+WantedBy=timers.target
