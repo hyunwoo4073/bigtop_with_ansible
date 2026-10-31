@@ -1,0 +1,239 @@
+---
+- name: Validate 47 Olist quality configuration
+  ansible.builtin.assert:
+    that:
+      - data_pipeline_olist_quality_warehouse_root == '/data/olist/warehouse'
+      - data_pipeline_olist_quality_root == '/data/olist/quality'
+      - data_pipeline_olist_quality_warehouse_version is match('^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$')
+      - data_pipeline_olist_quality_max_quarantine_rate | float >= 0
+      - data_pipeline_olist_quality_max_quarantine_rate | float <= 1
+      - data_pipeline_olist_quality_max_orphans | int >= 0
+      - data_pipeline_olist_quality_num_executors | int >= 1
+      - data_pipeline_olist_quality_executor_cores | int >= 1
+      - groups.get('ops', []) | length == 1 or not (data_pipeline_olist_quality_publish_prometheus | bool)
+    fail_msg: 47 Olist quality parameters invalid or ops inventory group missing.
+
+- name: Verify published ETL manifest exists
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -test
+      - -e
+      - >-
+        {{ data_pipeline_olist_quality_warehouse_root ~ '/' ~
+           data_pipeline_olist_quality_warehouse_version ~ '/_ETL_MANIFEST.json' }}
+  become: true
+  become_user: "{{ data_pipeline_olist_quality_hdfs_admin_user }}"
+  changed_when: false
+
+- name: Install Olist quality script directory on master
+  ansible.builtin.file:
+    path: "{{ data_pipeline_olist_quality_script_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install Olist quality Spark job on master
+  ansible.builtin.copy:
+    src: olist_quality.py
+    dest: "{{ data_pipeline_olist_quality_script_dir }}/olist_quality.py"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Check whether the separate quality output root exists
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -test
+      - -d
+      - "{{ data_pipeline_olist_quality_root }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_quality_hdfs_admin_user }}"
+  register: data_pipeline_olist_quality_root_check
+  changed_when: false
+  failed_when: data_pipeline_olist_quality_root_check.rc not in [0, 1]
+
+- name: Create quality report root without changing warehouse
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -mkdir
+      - -p
+      - "{{ data_pipeline_olist_quality_root }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_quality_hdfs_admin_user }}"
+  when: data_pipeline_olist_quality_root_check.rc == 1
+  changed_when: true
+
+- name: Set owner on quality root only
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -chown
+      - "{{ data_pipeline_olist_quality_submit_user }}"
+      - "{{ data_pipeline_olist_quality_root }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_quality_hdfs_admin_user }}"
+  changed_when: false
+
+- name: Restrict quality report directory permissions
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -chmod
+      - '750'
+      - "{{ data_pipeline_olist_quality_root }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_quality_hdfs_admin_user }}"
+  changed_when: false
+
+- name: Generate a unique immutable quality run ID
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - 'import uuid; print(uuid.uuid4().hex)'
+  register: data_pipeline_olist_quality_run_id
+  changed_when: false
+
+- name: Run Spark quality checks using YARN cluster deploy mode
+  ansible.builtin.command:
+    argv:
+      - spark-submit
+      - --master
+      - yarn
+      - --deploy-mode
+      - cluster
+      - --name
+      - "olist-quality-{{ data_pipeline_olist_quality_warehouse_version }}"
+      - --queue
+      - "{{ data_pipeline_olist_quality_queue }}"
+      - --driver-memory
+      - "{{ data_pipeline_olist_quality_driver_memory }}"
+      - --executor-memory
+      - "{{ data_pipeline_olist_quality_executor_memory }}"
+      - --executor-cores
+      - "{{ data_pipeline_olist_quality_executor_cores | string }}"
+      - --num-executors
+      - "{{ data_pipeline_olist_quality_num_executors | string }}"
+      - --conf
+      - "spark.sql.shuffle.partitions={{ data_pipeline_olist_quality_shuffle_partitions }}"
+      - --conf
+      - spark.sql.adaptive.enabled=true
+      - --conf
+      - spark.sql.session.timeZone=UTC
+      - --conf
+      - spark.yarn.submit.waitAppCompletion=true
+      - --conf
+      - spark.pyspark.python=/usr/bin/python3
+      - "{{ data_pipeline_olist_quality_script_dir }}/olist_quality.py"
+      - --warehouse-root
+      - "{{ data_pipeline_olist_quality_warehouse_root }}"
+      - --warehouse-version
+      - "{{ data_pipeline_olist_quality_warehouse_version }}"
+      - --quality-root
+      - "{{ data_pipeline_olist_quality_root }}"
+      - --run-id
+      - "{{ data_pipeline_olist_quality_run_id.stdout }}"
+      - --max-quarantine-rate
+      - "{{ data_pipeline_olist_quality_max_quarantine_rate | string }}"
+      - --max-orphans
+      - "{{ data_pipeline_olist_quality_max_orphans | string }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_quality_submit_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+    SPARK_CONF_DIR: /etc/spark/conf
+    PYSPARK_PYTHON: /usr/bin/python3
+  register: data_pipeline_olist_quality_submit_result
+  changed_when: true
+  failed_when: false
+
+# Quality gates may intentionally exit 2 after writing a FAIL report.
+# Read and publish the report before surfacing a failed Ansible play.
+- name: Read immutable quality report from HDFS
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -cat
+      - >-
+        {{ data_pipeline_olist_quality_root ~ '/' ~
+           data_pipeline_olist_quality_warehouse_version ~ '/runs/' ~
+           data_pipeline_olist_quality_run_id.stdout ~ '/_QUALITY_REPORT.json' }}
+  become: true
+  become_user: "{{ data_pipeline_olist_quality_hdfs_admin_user }}"
+  register: data_pipeline_olist_quality_report_raw
+  changed_when: false
+  failed_when: false
+
+- name: Ensure Spark published a valid quality report
+  ansible.builtin.assert:
+    that:
+      - data_pipeline_olist_quality_report_raw.rc == 0
+      - data_pipeline_olist_quality_report_raw.stdout | length > 10
+    fail_msg: >-
+      Spark did not publish the expected HDFS quality report.
+      See spark-submit result and YARN Driver logs for the run ID.
+
+- name: Parse published Olist quality report
+  ansible.builtin.set_fact:
+    data_pipeline_olist_quality_report: "{{ data_pipeline_olist_quality_report_raw.stdout | from_json }}"
+
+- name: Validate report identity before publishing monitoring metrics
+  ansible.builtin.assert:
+    that:
+      - data_pipeline_olist_quality_report.pipeline == 'olist_quality_monitor'
+      - data_pipeline_olist_quality_report.run_id == data_pipeline_olist_quality_run_id.stdout
+      - data_pipeline_olist_quality_report.warehouse_version == data_pipeline_olist_quality_warehouse_version
+      - data_pipeline_olist_quality_report.status in ['PASS', 'FAIL', 'ERROR']
+      - data_pipeline_olist_quality_report.schema_version == 1
+
+- name: Create node exporter textfile collector directory on ops node
+  ansible.builtin.file:
+    path: "{{ data_pipeline_olist_quality_metrics_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  delegate_to: "{{ groups['ops'][0] }}"
+  become: true
+  when: data_pipeline_olist_quality_publish_prometheus | bool
+
+- name: Publish Olist quality result as Prometheus textfile metrics on ops node
+  ansible.builtin.template:
+    src: olist_quality.prom.j2
+    dest: "{{ data_pipeline_olist_quality_metrics_dir }}/{{ data_pipeline_olist_quality_metrics_file }}"
+    owner: root
+    group: root
+    mode: '0644'
+  delegate_to: "{{ groups['ops'][0] }}"
+  become: true
+  when: data_pipeline_olist_quality_publish_prometheus | bool
+
+- name: Show Olist quality summary
+  ansible.builtin.debug:
+    msg:
+      run_id: "{{ data_pipeline_olist_quality_run_id.stdout }}"
+      status: "{{ data_pipeline_olist_quality_report.status }}"
+      checks: "{{ data_pipeline_olist_quality_report.summary.checks_total }}"
+      failed_checks: "{{ data_pipeline_olist_quality_report.summary.checks_failed }}"
+      report: >-
+        {{ data_pipeline_olist_quality_root ~ '/' ~
+           data_pipeline_olist_quality_warehouse_version ~ '/runs/' ~
+           data_pipeline_olist_quality_run_id.stdout ~ '/_QUALITY_REPORT.json' }}
+      spark_submit_rc: "{{ data_pipeline_olist_quality_submit_result.rc }}"
+
+- name: Fail deployment if the Spark job or quality checks failed
+  ansible.builtin.assert:
+    that:
+      - data_pipeline_olist_quality_submit_result.rc == 0
+      - data_pipeline_olist_quality_report.status == 'PASS'
+    fail_msg: "47 Olist data quality failed; inspect the immutable report and YARN Driver logs."

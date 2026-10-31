@@ -1,0 +1,10 @@
+---
+# Step 52: only approved immutable snapshots; never mutates warehouse or quality.
+data_pipeline_olist_promotion_warehouse_version: v3
+data_pipeline_olist_promotion_max_report_age_hours: 168
+data_pipeline_olist_promotion_apply: false
+data_pipeline_olist_promotion_master: master
+data_pipeline_olist_promotion_hdfs_admin_user: hdfs
+data_pipeline_olist_promotion_hdfs_submit_user: hadoop
+data_pipeline_olist_promotion_script_dir: /usr/local/lib/bigtop-olist/promotion
+data_pipeline_olist_promotion_root: /data/olist/published

@@ -1,0 +1,53 @@
+---
+groups:
+  - name: olist_pipeline_{{ data_pipeline_olist_scheduler_warehouse_version }}
+    rules:
+      - alert: OlistPipelineExecutionFailed
+        expr: olist_pipeline_last_attempt_success{warehouse_version="{{ data_pipeline_olist_scheduler_warehouse_version }}"} == 0 and on (warehouse_version) (olist_pipeline_running{warehouse_version="{{ data_pipeline_olist_scheduler_warehouse_version }}"} == 0)
+        for: 5m
+        labels:
+          severity: warning
+          component: olist-pipeline
+        annotations:
+          summary: Olist ETL or quality pipeline failed
+          description: Inspect worker3 journalctl -u bigtop-olist-pipeline.service and the YARN application logs.
+      - alert: OlistPipelineExecutionStuck
+        expr: olist_pipeline_running{warehouse_version="{{ data_pipeline_olist_scheduler_warehouse_version }}"} == 1 and on (warehouse_version) (time() - olist_pipeline_last_attempt_timestamp_seconds{warehouse_version="{{ data_pipeline_olist_scheduler_warehouse_version }}"} > 7200)
+        for: 5m
+        labels:
+          severity: warning
+          component: olist-pipeline
+        annotations:
+          summary: Olist pipeline has been running for more than two hours
+      - alert: OlistPipelineNeverExecuted
+        expr: absent(olist_pipeline_last_attempt_timestamp_seconds{warehouse_version="{{ data_pipeline_olist_scheduler_warehouse_version }}"})
+        for: 15m
+        labels:
+          severity: warning
+          component: olist-pipeline
+        annotations:
+          summary: No Olist orchestration metrics are available
+      - alert: OlistPipelineScheduledRunStale
+        expr: time() - olist_pipeline_last_attempt_timestamp_seconds{warehouse_version="{{ data_pipeline_olist_scheduler_warehouse_version }}"} > {{ (data_pipeline_olist_scheduler_freshness_hours | int) * 3600 }}
+        for: 15m
+        labels:
+          severity: warning
+          component: olist-pipeline
+        annotations:
+          summary: Olist pipeline has not started within expected daily window
+      - alert: OlistQualityValidationFailed
+        expr: olist_quality_run_success{warehouse_version="{{ data_pipeline_olist_scheduler_warehouse_version }}"} == 0 or olist_quality_checks_failed{warehouse_version="{{ data_pipeline_olist_scheduler_warehouse_version }}"} > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: olist-pipeline
+        annotations:
+          summary: Olist quality checks failed
+      - alert: OlistQualityReportStale
+        expr: time() - olist_quality_last_run_timestamp_seconds{warehouse_version="{{ data_pipeline_olist_scheduler_warehouse_version }}"} > {{ (data_pipeline_olist_scheduler_freshness_hours | int) * 3600 }}
+        for: 15m
+        labels:
+          severity: warning
+          component: olist-pipeline
+        annotations:
+          summary: Latest Olist quality report is stale

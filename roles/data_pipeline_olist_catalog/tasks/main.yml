@@ -1,0 +1,155 @@
+---
+- name: Verify Olist catalog deployment boundaries
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == data_pipeline_olist_catalog_expected_ops
+      - data_pipeline_olist_catalog_master in groups['master']
+      - data_pipeline_olist_catalog_version is match('^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$')
+      - data_pipeline_olist_catalog_warehouse_version is match('^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$')
+      - data_pipeline_olist_catalog_service is match('^[A-Za-z][A-Za-z0-9_]{2,63}$')
+      - data_pipeline_olist_catalog_api_url is match('^https?://[^/]+/api$')
+      - data_pipeline_olist_catalog_hdfs_address is match('^[A-Za-z0-9_.-]+:[0-9]+$')
+      - data_pipeline_olist_catalog_raw_files | length == 9
+      - data_pipeline_olist_catalog_outputs | length == 7
+    fail_msg: Step 50 requires the existing worker3/metadata/master architecture and immutable Olist snapshots.
+
+- name: Ensure Step 42 OpenMetadata Bot token is present
+  ansible.builtin.stat:
+    path: "{{ data_pipeline_olist_catalog_token_file }}"
+  register: data_pipeline_olist_catalog_token_stat
+  no_log: true
+
+- name: Reject missing or permissive OpenMetadata Bot token
+  ansible.builtin.assert:
+    that:
+      - data_pipeline_olist_catalog_token_stat.stat.isreg | default(false)
+      - not (data_pipeline_olist_catalog_token_stat.stat.islnk | default(false))
+      - data_pipeline_olist_catalog_token_stat.stat.mode == '0600'
+    fail_msg: Step 42 root-only bot.token (0600) is required; do not create or commit credentials.
+
+- name: Read existing HDFS Raw immutable manifest from master
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -cat
+      - "/data/olist/raw/{{ data_pipeline_olist_catalog_version }}/_MANIFEST.json"
+  delegate_to: "{{ data_pipeline_olist_catalog_master }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_catalog_hdfs_user }}"
+  register: data_pipeline_olist_catalog_raw_manifest_result
+  changed_when: false
+
+- name: Read existing HDFS Warehouse immutable manifest from master
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -cat
+      - "/data/olist/warehouse/{{ data_pipeline_olist_catalog_warehouse_version }}/_ETL_MANIFEST.json"
+  delegate_to: "{{ data_pipeline_olist_catalog_master }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_catalog_hdfs_user }}"
+  register: data_pipeline_olist_catalog_warehouse_manifest_result
+  changed_when: false
+
+- name: Verify all nine Raw source CSVs actually exist in HDFS
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -test
+      - -e
+      - "/data/olist/raw/{{ data_pipeline_olist_catalog_version }}/{{ item.name }}/{{ item.filename }}"
+  delegate_to: "{{ data_pipeline_olist_catalog_master }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_catalog_hdfs_user }}"
+  loop: "{{ data_pipeline_olist_catalog_raw_files }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: false
+
+- name: Verify Spark completion marker for each immutable Parquet dataset
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -test
+      - -e
+      - "/data/olist/warehouse/{{ data_pipeline_olist_catalog_warehouse_version }}/{{ item }}/_SUCCESS"
+  delegate_to: "{{ data_pipeline_olist_catalog_master }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_catalog_hdfs_user }}"
+  loop: "{{ data_pipeline_olist_catalog_outputs }}"
+  changed_when: false
+
+- name: Create private catalog snapshot directory
+  ansible.builtin.file:
+    path: "{{ data_pipeline_olist_catalog_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Create catalog executable directory
+  ansible.builtin.file:
+    path: "{{ data_pipeline_olist_catalog_install_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install existing Raw manifest snapshot on worker3
+  ansible.builtin.copy:
+    content: "{{ (data_pipeline_olist_catalog_raw_manifest_result.stdout | from_json) | to_nice_json }}
+"
+    dest: "{{ data_pipeline_olist_catalog_config_dir }}/raw.json"
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Install existing Warehouse manifest snapshot on worker3
+  ansible.builtin.copy:
+    content: "{{ (data_pipeline_olist_catalog_warehouse_manifest_result.stdout | from_json) | to_nice_json }}
+"
+    dest: "{{ data_pipeline_olist_catalog_config_dir }}/warehouse.json"
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Install no-dependency OpenMetadata API catalog client
+  ansible.builtin.copy:
+    src: catalog.py
+    dest: "{{ data_pipeline_olist_catalog_install_dir }}/catalog.py"
+    owner: root
+    group: root
+    mode: '0750'
+
+- name: Plan or apply catalog entities and evidence-based lineage
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - "{{ data_pipeline_olist_catalog_install_dir }}/catalog.py"
+      - "{{ '--apply' if data_pipeline_olist_catalog_apply | bool else '--plan' }}"
+      - --url
+      - "{{ data_pipeline_olist_catalog_api_url }}"
+      - --token-file
+      - "{{ data_pipeline_olist_catalog_token_file }}"
+      - --raw-manifest
+      - "{{ data_pipeline_olist_catalog_config_dir }}/raw.json"
+      - --warehouse-manifest
+      - "{{ data_pipeline_olist_catalog_config_dir }}/warehouse.json"
+      - --raw-version
+      - "{{ data_pipeline_olist_catalog_version }}"
+      - --warehouse-version
+      - "{{ data_pipeline_olist_catalog_warehouse_version }}"
+      - --service
+      - "{{ data_pipeline_olist_catalog_service }}"
+      - --hdfs-address
+      - "{{ data_pipeline_olist_catalog_hdfs_address }}"
+  register: data_pipeline_olist_catalog_run
+  changed_when: "'OLIST CATALOG CHANGED' in data_pipeline_olist_catalog_run.stdout"
+
+- name: Print plan or apply summary
+  ansible.builtin.debug:
+    msg: "{{ data_pipeline_olist_catalog_run.stdout_lines }}"

@@ -1,0 +1,7 @@
+---
+- name: Gate immutable Olist warehouse snapshot on the most recent quality result
+  hosts: master
+  gather_facts: false
+  become: true
+  roles:
+    - data_pipeline_olist_promotion

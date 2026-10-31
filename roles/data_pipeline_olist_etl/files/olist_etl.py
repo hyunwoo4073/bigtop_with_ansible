@@ -306,16 +306,33 @@ def execute(args: argparse.Namespace) -> None:
     validate_raw_manifest(raw_manifest)
     identity = make_run_identity(args.raw_version, raw_manifest_bytes)
     final_path = f"{args.warehouse_root}/{args.output_version}"
-    if check_published(hdfs, final_path, identity):
-        print(f"OLIST ETL SKIP: verified existing immutable {final_path}", flush=True)
+    published = check_published(hdfs, final_path, identity)
+    if args.verify_existing:
+        if not published:
+            raise EtlError(f"No published immutable ETL snapshot to verify: {final_path}")
+        print(f"OLIST ETL EXISTING VERIFIED: {final_path}", flush=True)
         return
 
-    # Spark import deliberately deferred until preflight succeeds.
+    # A cluster-mode driver must initialize SparkContext before it exits,
+    # even if another submit published an identical snapshot just now.
+    # The Ansible role uses --verify-existing to avoid YARN submissions in
+    # the ordinary idempotent re-run case.
     from pyspark.sql import SparkSession
 
     spark = (SparkSession.builder.appName(f"olist-etl-{args.output_version}")
              .config("spark.sql.session.timeZone", "UTC")
              .getOrCreate())
+    if published:
+        try:
+            print(f"OLIST ETL SKIP: verified existing immutable {final_path}", flush=True)
+        finally:
+            spark.stop()
+        return
+    # Step 51 opt-in: execution-derived evidence, not hard-coded table lineage.
+    # Captures each DataFrame's actual file inputs and completed Parquet write.
+    from datetime import datetime, timezone
+    started_at = datetime.now(timezone.utc).isoformat()
+    runtime_writes = []
     staging_path = (f"{args.warehouse_root}/_staging/"
                     f"{args.output_version}-{uuid.uuid4().hex}")
     try:
@@ -338,8 +355,21 @@ def execute(args: argparse.Namespace) -> None:
         hdfs.command("-mkdir", "-p", staging_path)
         for name, df in tables.items():
             metrics["output_rows"][name] = df.count()
+            if args.runtime_lineage:
+                # DataFrame.inputFiles reports filesystem scan leaves from the
+                # executed DataFrame plan. It is not table-level transform lineage.
+                observed_inputs = sorted(set(df.inputFiles()))
+            write_path = f"hdfs://{staging_path}/{name}"
             (df.coalesce(args.output_partitions).write.mode("errorifexists")
-             .parquet(f"hdfs://{staging_path}/{name}"))
+             .parquet(write_path))
+            if args.runtime_lineage:
+                runtime_writes.append({
+                    "output": name,
+                    "input_files": observed_inputs,
+                    "write_path": write_path,
+                    "published_path": f"hdfs://{final_path}/{name}",
+                    "output_rows": metrics["output_rows"][name],
+                })
         # Every valid item is either an accepted fact or a missing-reference orphan.
         # Bad item rows are included in quarantine, so no item silently disappears.
         valid_item_count = metrics["output_rows"]["curated/order_items"]
@@ -355,6 +385,21 @@ def execute(args: argparse.Namespace) -> None:
         metrics["etl_version"] = args.output_version
         run_manifest = dict(identity, metrics=metrics, tables=list(OUTPUT_TABLES))
         hdfs.put_json(staging_path + "/_ETL_MANIFEST.json", run_manifest)
+        if args.runtime_lineage:
+            # Event is committed along with immutable ETL snapshot. Failed or
+            # skipped submissions cannot claim to have produced execution data.
+            evidence = {
+                "schema": "bigtop.olist.spark-runtime-lineage.v1",
+                "status": "COMPLETE",
+                "pipeline": "olist_spark_batch_etl",
+                "run_id": str(uuid.uuid4()),
+                "started_at": started_at,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "raw_version": args.raw_version,
+                "warehouse_version": args.output_version,
+                "writes": runtime_writes,
+            }
+            hdfs.put_json(staging_path + "/_RUNTIME_LINEAGE.json", evidence)
         if hdfs.exists(final_path):
             raise EtlError("Output appeared during Spark execution; refusing concurrent overwrite")
         hdfs.command("-mv", staging_path, final_path)
@@ -372,6 +417,12 @@ def main() -> int:
     parser.add_argument("--warehouse-root", default="/data/olist/warehouse")
     parser.add_argument("--output-version", default="v1")
     parser.add_argument("--output-partitions", type=int, default=2)
+    parser.add_argument("--runtime-lineage", action="store_true",
+                        help="Capture executed Spark dataframe inputFiles/writes with immutable snapshot")
+    parser.add_argument("--no-runtime-lineage", action="store_false", dest="runtime_lineage",
+                        help="Default; do not capture extra runtime lineage")
+    parser.add_argument("--verify-existing", action="store_true",
+                        help="Verify immutable snapshot without importing or starting Spark")
     args = parser.parse_args()
     try:
         execute(args)

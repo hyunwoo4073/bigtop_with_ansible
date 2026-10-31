@@ -1,0 +1,169 @@
+---
+- name: Assert Step 51 immutable snapshot, topology and OpenMetadata boundaries
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == data_pipeline_olist_runtime_lineage_expected_ops
+      - data_pipeline_olist_runtime_lineage_master in groups['master']
+      - data_pipeline_olist_runtime_lineage_raw_version is match('^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$')
+      - data_pipeline_olist_runtime_lineage_warehouse_version is match('^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$')
+      - data_pipeline_olist_runtime_lineage_service is match('^[a-z][a-z0-9_]{2,63}$')
+      - data_pipeline_olist_runtime_lineage_api_url is match('^https?://[^/]+/api$')
+      - data_pipeline_olist_runtime_lineage_hdfs_address is match('^[A-Za-z0-9_.-]+:[0-9]+$')
+    fail_msg: Step 51 refuses unexpected hosts/paths/version combinations.
+
+- name: Check protected OpenMetadata Bot token permissions
+  ansible.builtin.stat:
+    path: "{{ data_pipeline_olist_runtime_lineage_token_file }}"
+  register: data_pipeline_olist_runtime_lineage_token_stat
+  no_log: true
+
+- name: Require existing 42 Bot JWT with mode 0600
+  ansible.builtin.assert:
+    that:
+      - data_pipeline_olist_runtime_lineage_token_stat.stat.isreg | default(false)
+      - not (data_pipeline_olist_runtime_lineage_token_stat.stat.islnk | default(false))
+      - data_pipeline_olist_runtime_lineage_token_stat.stat.mode == '0600'
+    fail_msg: Reuse the existing private Step 42 OpenMetadata token.
+
+- name: Verify an actual Step 46 Spark runtime evidence file was published
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -test
+      - -e
+      - "/data/olist/warehouse/{{ data_pipeline_olist_runtime_lineage_warehouse_version }}/_RUNTIME_LINEAGE.json"
+  delegate_to: "{{ data_pipeline_olist_runtime_lineage_master }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_runtime_lineage_hdfs_user }}"
+  changed_when: false
+
+- name: Read actual Spark file read and Parquet write evidence from HDFS
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -cat
+      - "/data/olist/warehouse/{{ data_pipeline_olist_runtime_lineage_warehouse_version }}/_RUNTIME_LINEAGE.json"
+  delegate_to: "{{ data_pipeline_olist_runtime_lineage_master }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_runtime_lineage_hdfs_user }}"
+  register: data_pipeline_olist_runtime_lineage_event
+  changed_when: false
+
+- name: Read actual immutable ETL manifest from HDFS
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -cat
+      - "/data/olist/warehouse/{{ data_pipeline_olist_runtime_lineage_warehouse_version }}/_ETL_MANIFEST.json"
+  delegate_to: "{{ data_pipeline_olist_runtime_lineage_master }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_runtime_lineage_hdfs_user }}"
+  register: data_pipeline_olist_runtime_lineage_manifest
+  changed_when: false
+
+- name: Create protected local immutable runtime evidence directory
+  ansible.builtin.file:
+    path: "{{ data_pipeline_olist_runtime_lineage_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Create runtime evidence client directory
+  ansible.builtin.file:
+    path: "{{ data_pipeline_olist_runtime_lineage_install_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Stage actual execution evidence without modifying HDFS
+  ansible.builtin.copy:
+    content: "{{ (data_pipeline_olist_runtime_lineage_event.stdout | from_json) | to_nice_json }}\n"
+    dest: "{{ data_pipeline_olist_runtime_lineage_state_dir }}/event.json"
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Stage already-published ETL run manifest
+  ansible.builtin.copy:
+    content: "{{ (data_pipeline_olist_runtime_lineage_manifest.stdout | from_json) | to_nice_json }}\n"
+    dest: "{{ data_pipeline_olist_runtime_lineage_state_dir }}/manifest.json"
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Install runtime evidence to OpenMetadata bridge (stdlib only)
+  ansible.builtin.copy:
+    src: import_runtime_lineage.py
+    dest: "{{ data_pipeline_olist_runtime_lineage_install_dir }}/import_runtime_lineage.py"
+    owner: root
+    group: root
+    mode: '0750'
+
+- name: Preflight existing OpenMetadata assets and plan/apply observed lineage
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - "{{ data_pipeline_olist_runtime_lineage_install_dir }}/import_runtime_lineage.py"
+      - "{{ '--apply' if data_pipeline_olist_runtime_lineage_apply | bool else '--plan' }}"
+      - --event-file
+      - "{{ data_pipeline_olist_runtime_lineage_state_dir }}/event.json"
+      - --manifest-file
+      - "{{ data_pipeline_olist_runtime_lineage_state_dir }}/manifest.json"
+      - --token-file
+      - "{{ data_pipeline_olist_runtime_lineage_token_file }}"
+      - --url
+      - "{{ data_pipeline_olist_runtime_lineage_api_url }}"
+      - --service
+      - "{{ data_pipeline_olist_runtime_lineage_service }}"
+      - --raw-version
+      - "{{ data_pipeline_olist_runtime_lineage_raw_version }}"
+      - --warehouse-version
+      - "{{ data_pipeline_olist_runtime_lineage_warehouse_version }}"
+      - --hdfs-address
+      - "{{ data_pipeline_olist_runtime_lineage_hdfs_address }}"
+  register: data_pipeline_olist_runtime_lineage_result
+  changed_when: "'OLIST RUNTIME LINEAGE CHANGED:' in data_pipeline_olist_runtime_lineage_result.stdout"
+
+- name: Show actual runtime data sources, outputs, and new lineage edge count
+  ansible.builtin.debug:
+    msg: "{{ data_pipeline_olist_runtime_lineage_result.stdout_lines }}"
+
+- name: Verify timer runner workspace path and interval
+  ansible.builtin.assert:
+    that:
+      - data_pipeline_olist_runtime_lineage_project_dir == '/home/bae/bigtop-cluster-ansible'
+      - data_pipeline_olist_runtime_lineage_runner_user == 'bae'
+      - data_pipeline_olist_runtime_lineage_timer_interval == '15min'
+    fail_msg: Step 51 timer only supports the existing worker3 controller workspace.
+
+- name: Install optional reconciliation service
+  ansible.builtin.template:
+    src: bigtop-olist-runtime-lineage.service.j2
+    dest: /etc/systemd/system/bigtop-olist-runtime-lineage.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload systemd after Step 51 unit change
+
+- name: Install optional reconciliation timer
+  ansible.builtin.template:
+    src: bigtop-olist-runtime-lineage.timer.j2
+    dest: /etc/systemd/system/bigtop-olist-runtime-lineage.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload systemd after Step 51 unit change
+
+- name: Flush unit reload before timer state update
+  ansible.builtin.meta: flush_handlers
+
+- name: Keep automatic re-import opt-in and idempotent
+  ansible.builtin.systemd_service:
+    name: bigtop-olist-runtime-lineage.timer
+    enabled: "{{ data_pipeline_olist_runtime_lineage_timer_enabled | bool }}"
+    state: "{{ 'started' if data_pipeline_olist_runtime_lineage_timer_enabled | bool else 'stopped' }}"

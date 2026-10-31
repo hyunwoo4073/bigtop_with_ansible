@@ -1,0 +1,24 @@
+---
+# worker3 runs Ansible; master runs spark-submit with deploy-mode cluster.
+data_pipeline_olist_scheduler_project_dir: "{{ playbook_dir | dirname }}"
+data_pipeline_olist_scheduler_inventory_path: "{{ data_pipeline_olist_scheduler_project_dir }}/inventory/hosts.ini"
+data_pipeline_olist_scheduler_ansible_bin: "{{ data_pipeline_olist_scheduler_project_dir }}/.venv/bin/ansible-playbook"
+data_pipeline_olist_scheduler_runner_user: "{{ lookup('env', 'USER') }}"
+data_pipeline_olist_scheduler_raw_version: v1
+data_pipeline_olist_scheduler_warehouse_version: v1
+
+# Install first and trigger the oneshot manually. Enable only after a successful run.
+data_pipeline_olist_scheduler_timer_enabled: false
+data_pipeline_olist_scheduler_on_calendar: '*-*-* 04:30:00'
+data_pipeline_olist_scheduler_persistent: false
+# Enables only after confirming the Prometheus rule_files glob includes this directory.
+data_pipeline_olist_scheduler_alerts_enabled: false
+data_pipeline_olist_scheduler_freshness_hours: 32
+
+# Paths on worker3, not on master or HDFS.
+data_pipeline_olist_scheduler_script_dir: /usr/local/lib/bigtop-olist/scheduler
+data_pipeline_olist_scheduler_state_dir: /var/lib/bigtop-olist/scheduler
+data_pipeline_olist_scheduler_metrics_dir: /var/lib/prometheus/node-exporter
+data_pipeline_olist_scheduler_metrics_filename: olist_pipeline.prom
+data_pipeline_olist_scheduler_prometheus_rules_dir: /etc/prometheus/rules
+data_pipeline_olist_scheduler_prometheus_unit: prometheus

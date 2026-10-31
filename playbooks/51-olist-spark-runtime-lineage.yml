@@ -1,0 +1,8 @@
+---
+- name: Verify and register Step 46 Spark execution-derived file lineage in OpenMetadata
+  hosts: ops
+  gather_facts: false
+  become: true
+  serial: 1
+  roles:
+    - data_pipeline_olist_runtime_lineage

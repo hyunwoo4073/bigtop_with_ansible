@@ -1,0 +1,21 @@
+---
+# Step 51: existing worker3/master/metadata Olist topology only.
+data_pipeline_olist_runtime_lineage_expected_ops: worker3
+data_pipeline_olist_runtime_lineage_master: master
+data_pipeline_olist_runtime_lineage_hdfs_user: hadoop
+data_pipeline_olist_runtime_lineage_raw_version: v1
+data_pipeline_olist_runtime_lineage_warehouse_version: v2
+data_pipeline_olist_runtime_lineage_service: bigtop_hdfs_olist
+data_pipeline_olist_runtime_lineage_api_url: "http://{{ hostvars['metadata'].ansible_host }}:8585/api"
+data_pipeline_olist_runtime_lineage_token_file: /etc/bigtop-governance/pg-catalog/bot.token
+data_pipeline_olist_runtime_lineage_install_dir: /usr/local/lib/bigtop-governance/olist-runtime-lineage
+data_pipeline_olist_runtime_lineage_state_dir: /etc/bigtop-governance/olist-runtime-lineage
+data_pipeline_olist_runtime_lineage_hdfs_address: master:9000
+# Default is read-only to OpenMetadata. Re-running apply is idempotent.
+data_pipeline_olist_runtime_lineage_apply: false
+# The optional systemd timer only replays a VERIFIED captured event. It never
+# submits Spark and cannot convert an old SKIP into a claimed fresh execution.
+data_pipeline_olist_runtime_lineage_timer_enabled: false
+data_pipeline_olist_runtime_lineage_project_dir: /home/bae/bigtop-cluster-ansible
+data_pipeline_olist_runtime_lineage_runner_user: bae
+data_pipeline_olist_runtime_lineage_timer_interval: 15min

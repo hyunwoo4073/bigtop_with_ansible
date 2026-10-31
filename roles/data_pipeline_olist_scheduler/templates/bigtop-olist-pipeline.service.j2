@@ -1,0 +1,16 @@
+[Unit]
+Description=Bigtop Olist 46 ETL then 47 Quality on YARN
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# root only owns the locking/metrics wrapper; Ansible playbooks run as the controller user.
+User=root
+Group=root
+WorkingDirectory={{ data_pipeline_olist_scheduler_project_dir }}
+ExecStart={{ data_pipeline_olist_scheduler_script_dir }}/run-pipeline.sh
+TimeoutStartSec=7200
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true

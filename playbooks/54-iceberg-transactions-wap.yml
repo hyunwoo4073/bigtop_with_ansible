@@ -1,0 +1,7 @@
+---
+- name: Exercise Iceberg row-level updates, time travel and audited branch publication
+  hosts: master
+  gather_facts: false
+  become: true
+  roles:
+    - iceberg_transactions_lab

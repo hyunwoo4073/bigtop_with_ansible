@@ -1,0 +1,26 @@
+---
+data_pipeline_olist_quality_warehouse_root: /data/olist/warehouse
+data_pipeline_olist_quality_warehouse_version: v1
+data_pipeline_olist_quality_root: /data/olist/quality
+
+data_pipeline_olist_quality_hdfs_admin_user: hdfs
+data_pipeline_olist_quality_submit_user: hadoop
+data_pipeline_olist_quality_script_dir: /usr/local/lib/bigtop-olist/quality
+
+data_pipeline_olist_quality_queue: batch
+data_pipeline_olist_quality_driver_memory: 512m
+data_pipeline_olist_quality_executor_memory: 512m
+data_pipeline_olist_quality_executor_cores: 1
+data_pipeline_olist_quality_num_executors: 1
+data_pipeline_olist_quality_shuffle_partitions: 4
+
+# Hard gates: the initial Olist published snapshot is expected to have no orphan items.
+# A nonzero invalid-source share below 5% is reported but permitted.
+data_pipeline_olist_quality_max_quarantine_rate: 0.05
+data_pipeline_olist_quality_max_orphans: 0
+
+# Write only aggregated, low-cardinality monitoring metrics on worker3 (ops).
+data_pipeline_olist_quality_publish_prometheus: true
+data_pipeline_olist_quality_metrics_dir: >-
+  {{ node_exporter_textfile_dir | default('/var/lib/prometheus/node-exporter') }}
+data_pipeline_olist_quality_metrics_file: olist_quality.prom

@@ -1,0 +1,8 @@
+---
+- name: Register immutable Olist HDFS snapshots and verified batch lineage
+  hosts: ops
+  gather_facts: false
+  become: true
+  serial: 1
+  roles:
+    - role: data_pipeline_olist_catalog

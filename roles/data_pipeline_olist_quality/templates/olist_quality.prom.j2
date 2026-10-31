@@ -1,0 +1,24 @@
+# HELP olist_quality_run_success Last recorded quality run passed all checks (1=PASS, 0=FAIL/ERROR).
+# TYPE olist_quality_run_success gauge
+olist_quality_run_success{warehouse_version="{{ data_pipeline_olist_quality_report.warehouse_version }}"} {{ 1 if data_pipeline_olist_quality_report.status == 'PASS' else 0 }}
+# HELP olist_quality_last_run_timestamp_seconds Unix timestamp of last published quality report.
+# TYPE olist_quality_last_run_timestamp_seconds gauge
+olist_quality_last_run_timestamp_seconds{warehouse_version="{{ data_pipeline_olist_quality_report.warehouse_version }}"} {{ data_pipeline_olist_quality_report.run_timestamp_seconds }}
+# HELP olist_quality_checks_failed Number of failing quality checks in last run.
+# TYPE olist_quality_checks_failed gauge
+olist_quality_checks_failed{warehouse_version="{{ data_pipeline_olist_quality_report.warehouse_version }}"} {{ data_pipeline_olist_quality_report.summary.checks_failed }}
+# HELP olist_quality_checks_total Total evaluated checks in last run.
+# TYPE olist_quality_checks_total gauge
+olist_quality_checks_total{warehouse_version="{{ data_pipeline_olist_quality_report.warehouse_version }}"} {{ data_pipeline_olist_quality_report.summary.checks_total }}
+# HELP olist_quality_fact_rows Published order-item fact count.
+# TYPE olist_quality_fact_rows gauge
+olist_quality_fact_rows{warehouse_version="{{ data_pipeline_olist_quality_report.warehouse_version }}"} {{ data_pipeline_olist_quality_report.summary.fact_rows | default(0) }}
+# HELP olist_quality_quarantine_rows Rows in published quarantine table.
+# TYPE olist_quality_quarantine_rows gauge
+olist_quality_quarantine_rows{warehouse_version="{{ data_pipeline_olist_quality_report.warehouse_version }}"} {{ data_pipeline_olist_quality_report.summary.quarantine_rows | default(0) }}
+# HELP olist_quality_quarantine_rate Invalid-source rows divided by four processed source row counts.
+# TYPE olist_quality_quarantine_rate gauge
+olist_quality_quarantine_rate{warehouse_version="{{ data_pipeline_olist_quality_report.warehouse_version }}"} {{ data_pipeline_olist_quality_report.summary.quarantine_rate | default(0) }}
+# HELP olist_quality_orphan_order_items Rows quarantined for missing parent references.
+# TYPE olist_quality_orphan_order_items gauge
+olist_quality_orphan_order_items{warehouse_version="{{ data_pipeline_olist_quality_report.warehouse_version }}"} {{ data_pipeline_olist_quality_report.summary.orphan_order_items | default(0) }}

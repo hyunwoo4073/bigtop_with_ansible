@@ -1,0 +1,162 @@
+---
+- name: Enforce Step 54 isolated lab boundaries
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == 'master'
+      - iceberg_transactions_lab_version == '1.10.1'
+      - iceberg_transactions_lab_catalog == 'lab'
+      - iceberg_transactions_lab_jar_path == '/opt/bigtop-iceberg/iceberg-spark-runtime-3.5_2.12-1.10.1.jar'
+      - iceberg_transactions_lab_hdfs_warehouse == '/data/olist/iceberg-lab'
+      - iceberg_transactions_lab_hdfs_address == 'master:9000'
+      - iceberg_transactions_lab_validation_root == '/data/olist/iceberg-validation/step54'
+      - iceberg_transactions_lab_spark_user == 'hadoop'
+      - iceberg_transactions_lab_mode in ['deploy_only', 'stage', 'publish']
+    fail_msg: Step 54 only permits the pinned Java 11 Iceberg lab and isolated HDFS table paths.
+
+- name: Verify existing Step 53 Iceberg Java 11 runtime JAR on master
+  ansible.builtin.stat:
+    path: "{{ iceberg_transactions_lab_jar_path }}"
+    get_checksum: false
+  register: iceberg_transactions_lab_jar
+
+- name: Reject missing Step 53 Iceberg runtime
+  ansible.builtin.assert:
+    that:
+      - iceberg_transactions_lab_jar.stat.exists | default(false)
+      - iceberg_transactions_lab_jar.stat.isreg | default(false)
+      - iceberg_transactions_lab_jar.stat.size | default(0) | int > 10000000
+    fail_msg: Step 53 must be successfully deployed with Iceberg 1.10.1 before Step 54.
+
+- name: Verify Step 53 HDFS lab warehouse exists
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -test
+      - -d
+      - "{{ iceberg_transactions_lab_hdfs_warehouse }}"
+  become: true
+  become_user: "{{ iceberg_transactions_lab_spark_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+
+- name: Install isolated Iceberg transactions and WAP Spark application
+  ansible.builtin.copy:
+    src: iceberg_transactions_wap.py
+    dest: "{{ iceberg_transactions_lab_app_dir }}/iceberg_transactions_wap.py"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Verify Step 53 smoke proof before starting Step 54
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -test
+      - -e
+      - /data/olist/iceberg-validation/step53/_SUCCESS
+  become: true
+  become_user: "{{ iceberg_transactions_lab_spark_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+  when: iceberg_transactions_lab_mode != 'deploy_only'
+
+- name: Run only requested Iceberg Step 54 stage or publish job on YARN
+  ansible.builtin.command:
+    argv:
+      - spark-submit
+      - --master
+      - yarn
+      - --deploy-mode
+      - cluster
+      - --name
+      - "iceberg-step54-{{ iceberg_transactions_lab_mode }}"
+      - --queue
+      - "{{ iceberg_transactions_lab_queue }}"
+      - --driver-memory
+      - "{{ iceberg_transactions_lab_driver_memory }}"
+      - --executor-memory
+      - "{{ iceberg_transactions_lab_executor_memory }}"
+      - --executor-cores
+      - '1'
+      - --num-executors
+      - '1'
+      - --jars
+      - "{{ iceberg_transactions_lab_jar_path }}"
+      - --conf
+      - spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+      - --conf
+      - "spark.sql.catalog.{{ iceberg_transactions_lab_catalog }}=org.apache.iceberg.spark.SparkCatalog"
+      - --conf
+      - "spark.sql.catalog.{{ iceberg_transactions_lab_catalog }}.type=hadoop"
+      - --conf
+      - "spark.sql.catalog.{{ iceberg_transactions_lab_catalog }}.warehouse=hdfs://{{ iceberg_transactions_lab_hdfs_address }}{{ iceberg_transactions_lab_hdfs_warehouse }}"
+      - --conf
+      - spark.sql.shuffle.partitions=4
+      - --conf
+      - spark.sql.adaptive.enabled=true
+      - --conf
+      - spark.sql.storeAssignmentPolicy=ANSI
+      - --conf
+      - spark.pyspark.python=/usr/bin/python3
+      - --conf
+      - spark.yarn.submit.waitAppCompletion=true
+      - "{{ iceberg_transactions_lab_app_dir }}/iceberg_transactions_wap.py"
+      - --catalog
+      - "{{ iceberg_transactions_lab_catalog }}"
+      - --mode
+      - "{{ iceberg_transactions_lab_mode }}"
+      - --proof-root
+      - "hdfs://{{ iceberg_transactions_lab_hdfs_address }}{{ iceberg_transactions_lab_validation_root }}"
+  become: true
+  become_user: "{{ iceberg_transactions_lab_spark_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+    SPARK_CONF_DIR: /etc/spark/conf
+    PYSPARK_PYTHON: /usr/bin/python3
+  register: iceberg_transactions_lab_run
+  changed_when: iceberg_transactions_lab_run.rc == 0
+  when: iceberg_transactions_lab_mode != 'deploy_only'
+
+- name: Check that proof exists for requested phase
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -test
+      - -e
+      - "{{ iceberg_transactions_lab_validation_root }}/{{ iceberg_transactions_lab_mode }}/_SUCCESS"
+  become: true
+  become_user: "{{ iceberg_transactions_lab_spark_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+  when: iceberg_transactions_lab_mode != 'deploy_only'
+
+- name: Print exact stage or publish proof
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -text
+      - "{{ iceberg_transactions_lab_validation_root }}/{{ iceberg_transactions_lab_mode }}/part-*"
+  become: true
+  become_user: "{{ iceberg_transactions_lab_spark_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: iceberg_transactions_lab_proof
+  changed_when: false
+  when: iceberg_transactions_lab_mode != 'deploy_only'
+
+- name: Show Step 54 proof
+  ansible.builtin.debug:
+    msg: "{{ iceberg_transactions_lab_proof.stdout_lines }}"
+  when: iceberg_transactions_lab_mode != 'deploy_only'
+
+- name: Confirm deploy-only completed without changing Iceberg tables
+  ansible.builtin.debug:
+    msg: Step 54 deploy-only complete. Run with iceberg_transactions_lab_mode=stage first, then separately mode=publish.
+  when: iceberg_transactions_lab_mode == 'deploy_only'

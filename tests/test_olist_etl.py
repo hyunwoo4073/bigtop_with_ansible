@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from argparse import Namespace
+from unittest.mock import patch
 import tempfile
 import unittest
 from pathlib import Path
@@ -125,6 +127,56 @@ class OlistEtlTests(unittest.TestCase):
     def test_output_inventory_contains_fact_quality_mart(self):
         for path in ("curated/order_item_fact", "quarantine/rows", "mart/daily_category_sales"):
             self.assertIn(path, etl.OUTPUT_TABLES)
+
+    def test_verify_existing_does_not_launch_spark(self):
+        raw_bytes = json.dumps(example_manifest()).encode("utf-8")
+        identity = etl.make_run_identity("v1", raw_bytes)
+        final = "/data/olist/warehouse/v1"
+        paths = {final, final + "/_ETL_MANIFEST.json"} | {
+            final + "/" + table + "/_SUCCESS" for table in etl.OUTPUT_TABLES
+        }
+
+        class SnapshotHdfs:
+            def exists(self, path):
+                return path in paths
+
+            def cat(self, path):
+                if path.endswith("/_MANIFEST.json"):
+                    return raw_bytes
+                if path.endswith("/_ETL_MANIFEST.json"):
+                    return json.dumps(identity).encode("utf-8")
+                raise AssertionError(path)
+
+        args = Namespace(raw_root="/data/olist/raw", raw_version="v1",
+                         warehouse_root="/data/olist/warehouse", output_version="v1",
+                         output_partitions=2, verify_existing=True)
+        with patch.object(etl, "Hdfs", return_value=SnapshotHdfs()):
+            etl.execute(args)  # no PySpark import or JVM startup
+
+    def test_verify_existing_rejects_absent_snapshot(self):
+        raw_bytes = json.dumps(example_manifest()).encode("utf-8")
+
+        class SnapshotHdfs:
+            def exists(self, path):
+                return False
+
+            def cat(self, path):
+                return raw_bytes
+
+        args = Namespace(raw_root="/data/olist/raw", raw_version="v1",
+                         warehouse_root="/data/olist/warehouse", output_version="v1",
+                         output_partitions=2, verify_existing=True)
+        with patch.object(etl, "Hdfs", return_value=SnapshotHdfs()):
+            with self.assertRaisesRegex(etl.EtlError, "No published immutable"):
+                etl.execute(args)
+
+    def test_immutable_version_skips_yarn_submission_in_role(self):
+        tasks_path = (Path(__file__).resolve().parents[1] / "roles" /
+                      "data_pipeline_olist_etl" / "tasks" / "main.yml")
+        tasks = tasks_path.read_text(encoding="utf-8")
+        self.assertIn("--verify-existing", tasks)
+        self.assertIn("when: data_pipeline_olist_etl_manifest_before.rc == 1", tasks)
+        self.assertIn("when: data_pipeline_olist_etl_manifest_before.rc == 0", tasks)
 
     def test_yarn_cluster_deployment_contract(self):
         tasks_path = Path(__file__).resolve().parents[1] / "roles" / "data_pipeline_olist_etl" / "tasks" / "main.yml"

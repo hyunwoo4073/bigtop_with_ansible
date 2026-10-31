@@ -1,0 +1,7 @@
+---
+- name: Install isolated Apache Iceberg Spark runtime and validate HDFS catalog on YARN
+  hosts: master
+  gather_facts: false
+  become: true
+  roles:
+    - iceberg_spark_lab

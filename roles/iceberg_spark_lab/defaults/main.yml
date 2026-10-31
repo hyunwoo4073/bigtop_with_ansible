@@ -1,0 +1,18 @@
+---
+# Step 53: isolated Apache Iceberg sandbox, NOT a migration of Step 46-52.
+iceberg_spark_lab_version: '1.10.1'
+iceberg_spark_lab_jar_name: "iceberg-spark-runtime-3.5_2.12-{{ iceberg_spark_lab_version }}.jar"
+iceberg_spark_lab_jar_local: "{{ playbook_dir }}/../vendor/iceberg/{{ iceberg_spark_lab_jar_name }}"
+iceberg_spark_lab_install_dir: /opt/bigtop-iceberg
+iceberg_spark_lab_hdfs_user: hadoop
+iceberg_spark_lab_spark_user: hadoop
+iceberg_spark_lab_catalog_name: lab
+iceberg_spark_lab_hdfs_address: master:9000
+iceberg_spark_lab_warehouse: /data/olist/iceberg-lab
+iceberg_spark_lab_validation_root: /data/olist/iceberg-validation
+iceberg_spark_lab_olist_version: v3
+iceberg_spark_lab_queue: batch
+iceberg_spark_lab_driver_memory: 768m
+iceberg_spark_lab_executor_memory: 768m
+# Default: only stage jar and smoke script, no Spark job or new Iceberg table.
+iceberg_spark_lab_run_smoke: false

@@ -1,0 +1,134 @@
+---
+- name: Validate Step 52 Olist promotion boundaries
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == data_pipeline_olist_promotion_master
+      - data_pipeline_olist_promotion_warehouse_version is match('^v[1-9][0-9]{0,4}$')
+      - data_pipeline_olist_promotion_max_report_age_hours | int >= 1
+      - data_pipeline_olist_promotion_max_report_age_hours | int <= 8760
+      - data_pipeline_olist_promotion_root == '/data/olist/published'
+      - data_pipeline_olist_promotion_hdfs_submit_user == 'hadoop'
+    fail_msg: Step 52 supports only approved immutable Olist versions on master.
+
+- name: Install promotion client directory on master
+  ansible.builtin.file:
+    path: "{{ data_pipeline_olist_promotion_script_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install quality-gated approval script
+  ansible.builtin.copy:
+    src: approve_olist.py
+    dest: "{{ data_pipeline_olist_promotion_script_dir }}/approve_olist.py"
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Require a successful read-only gate before creating the approval directory
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - "{{ data_pipeline_olist_promotion_script_dir }}/approve_olist.py"
+      - --plan
+      - --warehouse-version
+      - "{{ data_pipeline_olist_promotion_warehouse_version }}"
+      - --max-report-age-hours
+      - "{{ data_pipeline_olist_promotion_max_report_age_hours | string }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_promotion_hdfs_submit_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+  when: data_pipeline_olist_promotion_apply | bool
+
+- name: Check HDFS approval root existence only when apply was requested
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -test
+      - -d
+      - "{{ data_pipeline_olist_promotion_root }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_promotion_hdfs_admin_user }}"
+  register: data_pipeline_olist_promotion_root_check
+  changed_when: false
+  failed_when: data_pipeline_olist_promotion_root_check.rc not in [0, 1]
+  when: data_pipeline_olist_promotion_apply | bool
+
+- name: Create independent HDFS promotion root when absent
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -mkdir
+      - -p
+      - "{{ data_pipeline_olist_promotion_root }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_promotion_hdfs_admin_user }}"
+  changed_when: true
+  when:
+    - data_pipeline_olist_promotion_apply | bool
+    - data_pipeline_olist_promotion_root_check.rc == 1
+
+- name: Allow only the Spark submit user to publish approval manifests
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -chown
+      - "{{ data_pipeline_olist_promotion_hdfs_submit_user }}"
+      - "{{ data_pipeline_olist_promotion_root }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_promotion_hdfs_admin_user }}"
+  changed_when: false
+  when: data_pipeline_olist_promotion_apply | bool
+
+- name: Protect independent approval root from other HDFS users
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -chmod
+      - '750'
+      - "{{ data_pipeline_olist_promotion_root }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_promotion_hdfs_admin_user }}"
+  changed_when: false
+  when: data_pipeline_olist_promotion_apply | bool
+
+- name: Create version-specific HDFS approval directory only when applying
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -mkdir
+      - -p
+      - "{{ data_pipeline_olist_promotion_root }}/{{ data_pipeline_olist_promotion_warehouse_version }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_promotion_hdfs_submit_user }}"
+  changed_when: false
+  when: data_pipeline_olist_promotion_apply | bool
+
+- name: Validate ETL provenance and latest Quality PASS before approving
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - "{{ data_pipeline_olist_promotion_script_dir }}/approve_olist.py"
+      - "{{ '--apply' if data_pipeline_olist_promotion_apply | bool else '--plan' }}"
+      - --warehouse-version
+      - "{{ data_pipeline_olist_promotion_warehouse_version }}"
+      - --max-report-age-hours
+      - "{{ data_pipeline_olist_promotion_max_report_age_hours | string }}"
+  become: true
+  become_user: "{{ data_pipeline_olist_promotion_hdfs_submit_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: data_pipeline_olist_promotion_result
+  changed_when: "'OLIST PROMOTION CHANGED:' in data_pipeline_olist_promotion_result.stdout"
+
+- name: Print immutable Olist approval decision and release mart path
+  ansible.builtin.debug:
+    msg: "{{ data_pipeline_olist_promotion_result.stdout_lines }}"

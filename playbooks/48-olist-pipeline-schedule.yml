@@ -1,0 +1,7 @@
+---
+- name: Configure Olist batch orchestration, monitoring and alerts on ops node
+  hosts: ops
+  gather_facts: false
+  become: true
+  roles:
+    - data_pipeline_olist_scheduler

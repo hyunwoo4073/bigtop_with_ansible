@@ -1,0 +1,10 @@
+[Unit]
+Description=Reconcile Olist executed Spark lineage with OpenMetadata every {{ data_pipeline_olist_runtime_lineage_timer_interval }}
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec={{ data_pipeline_olist_runtime_lineage_timer_interval }}
+Unit=bigtop-olist-runtime-lineage.service
+
+[Install]
+WantedBy=timers.target

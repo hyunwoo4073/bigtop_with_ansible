@@ -1,0 +1,227 @@
+---
+- name: Validate isolated Spark Iceberg lab configuration
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == 'master'
+      - iceberg_spark_lab_version == '1.10.1'
+      - iceberg_spark_lab_catalog_name == 'lab'
+      - iceberg_spark_lab_hdfs_address == 'master:9000'
+      - iceberg_spark_lab_warehouse == '/data/olist/iceberg-lab'
+      - iceberg_spark_lab_validation_root == '/data/olist/iceberg-validation'
+      - iceberg_spark_lab_olist_version == 'v3'
+      - iceberg_spark_lab_spark_user == 'hadoop'
+      - iceberg_spark_lab_hdfs_user == 'hadoop'
+    fail_msg: Step 53 is intentionally scoped to master and isolated lab HDFS paths.
+
+- name: Verify installed Bigtop Spark runtime and Scala version
+  ansible.builtin.command:
+    argv:
+      - spark-submit
+      - --version
+  register: iceberg_spark_lab_spark_version
+  changed_when: false
+  failed_when: >-
+    iceberg_spark_lab_spark_version.rc != 0 or
+    'version 3.5.6' not in
+    (iceberg_spark_lab_spark_version.stdout ~ iceberg_spark_lab_spark_version.stderr) or
+    'Scala version 2.12.' not in
+    (iceberg_spark_lab_spark_version.stdout ~ iceberg_spark_lab_spark_version.stderr)
+
+- name: Check pre-downloaded Iceberg JAR on Ansible controller
+  ansible.builtin.stat:
+    path: "{{ iceberg_spark_lab_jar_local }}"
+    get_checksum: true
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  become: false
+  register: iceberg_spark_lab_local_jar
+
+- name: Require offline-safe pinned Iceberg Spark runtime JAR
+  ansible.builtin.assert:
+    that:
+      - iceberg_spark_lab_local_jar.stat.exists | default(false)
+      - iceberg_spark_lab_local_jar.stat.isreg | default(false)
+      - iceberg_spark_lab_local_jar.stat.size | default(0) | int > 10000000
+    fail_msg: >-
+      Download the official iceberg-spark-runtime-3.5_2.12-1.10.1.jar
+      to vendor/iceberg/ on worker3 first. See docs/53-iceberg-apply.md.
+
+- name: Verify downloaded Iceberg runtime bytecode supports Java 11
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - "{{ playbook_dir }}/../scripts/53-check-iceberg-java11.py"
+      - "{{ iceberg_spark_lab_jar_local }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Create private Iceberg sandbox install directory on master
+  ansible.builtin.file:
+    path: "{{ iceberg_spark_lab_install_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Stage pinned Iceberg runtime JAR on master without changing global Spark jars
+  ansible.builtin.copy:
+    src: "{{ iceberg_spark_lab_jar_local }}"
+    dest: "{{ iceberg_spark_lab_install_dir }}/{{ iceberg_spark_lab_jar_name }}"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Stage HDFS Iceberg catalog and approved Mart smoke application
+  ansible.builtin.copy:
+    src: iceberg_hdfs_smoke.py
+    dest: "{{ iceberg_spark_lab_install_dir }}/iceberg_hdfs_smoke.py"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Verify existing Step 52 v3 approval before copying any Mart data
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -test
+      - -e
+      - "/data/olist/published/{{ iceberg_spark_lab_olist_version }}/_APPROVAL.json"
+  become: true
+  become_user: "{{ iceberg_spark_lab_hdfs_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+  when: iceberg_spark_lab_run_smoke | bool
+
+- name: Verify immutable v3 Mart Parquet _SUCCESS before copying to Iceberg
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -test
+      - -e
+      - "/data/olist/warehouse/{{ iceberg_spark_lab_olist_version }}/mart/daily_category_sales/_SUCCESS"
+  become: true
+  become_user: "{{ iceberg_spark_lab_hdfs_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+  when: iceberg_spark_lab_run_smoke | bool
+
+- name: Test whether isolated Iceberg HDFS warehouse exists
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -test
+      - -d
+      - "{{ iceberg_spark_lab_warehouse }}"
+  become: true
+  become_user: "{{ iceberg_spark_lab_hdfs_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+  failed_when: iceberg_spark_lab_warehouse_check.rc not in [0, 1]
+  register: iceberg_spark_lab_warehouse_check
+  when: iceberg_spark_lab_run_smoke | bool
+
+- name: Create isolated HDFS warehouse (never touch existing Olist raw or Parquet warehouse)
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -mkdir
+      - -p
+      - "{{ iceberg_spark_lab_warehouse }}"
+  become: true
+  become_user: "{{ iceberg_spark_lab_hdfs_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: true
+  when:
+    - iceberg_spark_lab_run_smoke | bool
+    - iceberg_spark_lab_warehouse_check.rc == 1
+
+- name: Run on-demand Spark YARN cluster Iceberg smoke and read-only source Mart copy
+  ansible.builtin.command:
+    argv:
+      - spark-submit
+      - --master
+      - yarn
+      - --deploy-mode
+      - cluster
+      - --name
+      - olist-iceberg-lab-step53
+      - --queue
+      - "{{ iceberg_spark_lab_queue }}"
+      - --driver-memory
+      - "{{ iceberg_spark_lab_driver_memory }}"
+      - --executor-memory
+      - "{{ iceberg_spark_lab_executor_memory }}"
+      - --executor-cores
+      - '1'
+      - --num-executors
+      - '1'
+      - --jars
+      - "{{ iceberg_spark_lab_install_dir }}/{{ iceberg_spark_lab_jar_name }}"
+      - --conf
+      - spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+      - --conf
+      - "spark.sql.catalog.{{ iceberg_spark_lab_catalog_name }}=org.apache.iceberg.spark.SparkCatalog"
+      - --conf
+      - "spark.sql.catalog.{{ iceberg_spark_lab_catalog_name }}.type=hadoop"
+      - --conf
+      - "spark.sql.catalog.{{ iceberg_spark_lab_catalog_name }}.warehouse=hdfs://{{ iceberg_spark_lab_hdfs_address }}{{ iceberg_spark_lab_warehouse }}"
+      - --conf
+      - spark.sql.shuffle.partitions=4
+      - --conf
+      - spark.sql.adaptive.enabled=true
+      - --conf
+      - spark.pyspark.python=/usr/bin/python3
+      - --conf
+      - spark.yarn.submit.waitAppCompletion=true
+      - "{{ iceberg_spark_lab_install_dir }}/iceberg_hdfs_smoke.py"
+      - --catalog
+      - "{{ iceberg_spark_lab_catalog_name }}"
+      - --source
+      - "hdfs://{{ iceberg_spark_lab_hdfs_address }}/data/olist/warehouse/{{ iceberg_spark_lab_olist_version }}/mart/daily_category_sales"
+      - --approval
+      - "hdfs://{{ iceberg_spark_lab_hdfs_address }}/data/olist/published/{{ iceberg_spark_lab_olist_version }}/_APPROVAL.json"
+      - --proof
+      - "hdfs://{{ iceberg_spark_lab_hdfs_address }}{{ iceberg_spark_lab_validation_root }}/step53"
+  become: true
+  become_user: "{{ iceberg_spark_lab_spark_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+    SPARK_CONF_DIR: /etc/spark/conf
+    PYSPARK_PYTHON: /usr/bin/python3
+  register: iceberg_spark_lab_run
+  changed_when: iceberg_spark_lab_run.rc == 0
+  when: iceberg_spark_lab_run_smoke | bool
+
+- name: Read Spark-created HDFS proof after successfully completed YARN job
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -text
+      - "{{ iceberg_spark_lab_validation_root }}/step53/part-*"
+  become: true
+  become_user: "{{ iceberg_spark_lab_hdfs_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: iceberg_spark_lab_proof
+  changed_when: false
+  when: iceberg_spark_lab_run_smoke | bool
+
+- name: Print Iceberg smoke metadata snapshot and Parquet copy evidence
+  ansible.builtin.debug:
+    msg: "{{ iceberg_spark_lab_proof.stdout_lines }}"
+  when: iceberg_spark_lab_run_smoke | bool
+
+- name: Show safe deploy-only mode and next command
+  ansible.builtin.debug:
+    msg: "Step 53 deploy-only OK. Run again with -e iceberg_spark_lab_run_smoke=true to create lab tables. Global Spark jars/config unchanged."
+  when: not (iceberg_spark_lab_run_smoke | bool)
