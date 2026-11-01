@@ -1,0 +1,6 @@
+---
+- name: Restart Iceberg REST server
+  ansible.builtin.systemd_service:
+    name: bigtop-iceberg-rest.service
+    state: restarted
+  when: iceberg_rest_catalog_apply | bool

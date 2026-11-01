@@ -1,0 +1,8 @@
+coordinator=true
+node-scheduler.include-coordinator=true
+http-server.http.port={{ trino_iceberg_rest_port }}
+discovery.uri=http://{{ trino_iceberg_rest_bind_host }}:{{ trino_iceberg_rest_port }}
+query.max-memory={{ trino_iceberg_rest_query_memory }}
+query.max-memory-per-node={{ trino_iceberg_rest_query_memory_per_node }}
+memory.heap-headroom-per-node={{ trino_iceberg_rest_heap_headroom }}
+query.max-execution-time=5m

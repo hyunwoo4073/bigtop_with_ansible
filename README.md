@@ -1,17 +1,18 @@
 # Bigtop Data Platform — Ansible 기반 실습·운영 플랫폼
 
-> **프로젝트 한눈에 보기 · 2026-10-31 기준**  
+> **프로젝트 한눈에 보기 · 2026-11-01 기준**  
 > 상세 아키텍처, 컴포넌트 선정 이유, 모든 Playbook의 역할, 배포 순서 및 운영 방법: **[docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md)**
 
 ## 이 프로젝트는 무엇인가?
 
-**5대 Ubuntu VM에 Hadoop 기반 데이터 처리 플랫폼과 중앙 운영 콘솔, 관측·백업 체계, OpenMetadata 데이터 거버넌스 환경을 Ansible로 구축한 개인 실습 프로젝트**다. 2026-10-31 현재 Kaggle Olist 데이터를 HDFS에 적재하고 Spark on YARN으로 배치 ETL·품질 검사·실행 관측·OpenMetadata 계보·품질 승인까지 연결했다. 별도 Iceberg 실습에서는 Hadoop Catalog, Snapshot/Time Travel, 행 단위 SQL 및 WAP(검증 후 공개)까지 검증했다. Ambari 없이 인프라와 서비스 설정을 코드로 관리하는 것이 핵심이다.
+**5대 Ubuntu VM에서 기업 내부망용 On-Premise 데이터 플랫폼을 재현하는 Ansible 기반 실습 프로젝트**다. Hadoop(HDFS/YARN/Spark), 중앙 운영 및 관측(Prometheus/Grafana), OpenMetadata를 구축하고, Olist CSV 9개 적재부터 데이터 품질·승인·계보를 구현했다. 2026-11-01에는 **Gravitino Iceberg REST Catalog + PostgreSQL + HDFS + Spark + Trino** 간 공유 테이블을 검증하고, 승인된 Olist v3의 **Iceberg Silver/Gold 7개 테이블, 실제 Gold WAP(29개 품질 검사), 수동 릴리스 One-shot 자동화**까지 완료했다. Ambari 없이 역할·설정·실행 증빙을 코드로 관리한다.
 
 목적은 다음 세 가지로 나뉜다.
 
-1. **데이터 플랫폼:** Olist CSV 9개를 HDFS Raw에 보존하고 Spark on YARN으로 Curated/Quarantine/Mart를 생성하며, 47~52번에서 검증·운영·승인·계보를 연결한다. 53~54번은 Iceberg 기반 테이블 운영의 독립 실습이다.
-2. **운영 플랫폼:** Prometheus/Grafana/Alertmanager로 상태를 감시하고, Web Console에서 서비스를 조회·관리하며, 장애 진단과 백업·복원을 자동화한다.
-3. **데이터 거버넌스:** OpenMetadata에 데이터베이스·테이블·컬럼을 수집하고 설명, 분류, 용어집, 데이터 계보를 관리한다.
+1. **데이터 파이프라인:** Olist CSV 9개를 HDFS Raw에 보존하고 Spark on YARN으로 정제(5)·Quarantine(1)·Mart(1) Parquet를 생성, 29개 품질 검사와 v3 승인을 수행한다.
+2. **Lakehouse 및 SQL:** Iceberg REST Catalog에서 승인된 v3 데이터를 Silver/Gold로 물질화하고, Spark와 Trino가 **동일한 Iceberg 테이블**을 사용하도록 한다. Gold 1개 테이블은 품질 검증 후 WAP로 공개한다.
+3. **운영 플랫폼:** Prometheus/Grafana/Alertmanager, Web Console, Ansible/systemd로 상태·로그·장애·백업과 릴리스 작업을 관리한다.
+4. **데이터 거버넌스:** OpenMetadata에서 데이터 카탈로그와 Olist 파일 입출력 계보를 조회한다. 새 Iceberg REST 테이블의 OpenMetadata 연동은 61번 예정으로 구분한다.
 
 ## 시스템 구성
 
@@ -20,8 +21,8 @@
 | `master` | 데이터 플랫폼 제어 | HDFS NameNode, YARN ResourceManager, Spark History Server |
 | `worker1` | 분산 처리 | HDFS DataNode, YARN NodeManager |
 | `worker2` | 분산 처리 및 백업 수신 후보 | DataNode, NodeManager, PostgreSQL 원격 백업 수신(38번 실전송 확인 필요) |
-| `worker3` | 운영·자동화 중심 | Ansible Controller, Web Console(Nginx/FastAPI/React), PostgreSQL, Prometheus, Grafana, Alertmanager |
-| `metadata` | 데이터 거버넌스 전용 | Docker Compose, OpenMetadata, MySQL, Elasticsearch |
+| `worker3` | 운영·자동화 및 Catalog | Ansible Controller, Web Console, PostgreSQL, **Gravitino Iceberg REST Server(Java 17)**, Prometheus, Grafana, Alertmanager |
+| `metadata` | 메타데이터·SQL 분석 | Docker Compose, OpenMetadata, MySQL, Elasticsearch, **Trino 484(Java 25, 단일 노드)** |
 
 - 실습 VM 자원: 기존 노드 각각 **2 vCPU/4GB**, `metadata` **4 vCPU/8GB**; 물리 PC **6코어/12스레드·32GB RAM**.
 - Ansible Inventory: `[hadoop_cluster]` = master + worker1 + worker2, `[ops]` = worker3, `[governance_nodes]` = metadata. **metadata는 Hadoop 설치 대상이 아니다.**
@@ -30,16 +31,19 @@
 ```text
                                  ┌───────────────────────────────────┐
                                  │ worker3: Ansible + Web Console     │
-                                 │ PostgreSQL / Prometheus / Grafana  │
-                                 │ Alertmanager / Ingestion CLI       │
+                                 │ PostgreSQL + Gravitino REST :9001  │
+                                 │ Prometheus / Grafana / Alertmanager│
                                  └───────┬───────────────┬───────────┘
                            SSH/Ansible   │               │ OpenMetadata API
                  ┌───────────────────────┘               ▼
                  ▼                           ┌─────────────────────────┐
  master: NameNode / RM / Spark History / ETL submit       │ metadata: OpenMetadata  │
        ├── worker1: DN / NM                  │ MySQL + Elasticsearch   │
-       └── worker2: DN / NM                  └─────────────────────────┘
-                   HDFS + YARN / Spark
+       └── worker2: DN / NM                  │ Trino 484 :8080         │
+                   HDFS + YARN / Spark       └──────────────┬──────────┘
+                           │                           Iceberg REST API
+                           └──────── Iceberg HDFS ◄─────────┘
+                  (REST metadata registry: worker3 PostgreSQL)
 ```
 
 ## 컴포넌트를 넣은 이유
@@ -60,7 +64,10 @@
 | **Olist CSV + Spark ETL** | 공개 주문 데이터를 HDFS Raw(9 CSV)에 보존하고 4개 핵심 테이블로 정제·오류 격리·상품 단위 Fact·일별 Mart 생성 |
 | **Olist Quality / Scheduler / Metrics** | 독립 품질 검사, systemd 서비스·선택적 타이머, Node Exporter/Prometheus/Grafana 운영 관측 |
 | **Olist Catalog / Runtime Lineage / Approval** | OpenMetadata Container·계보, 실제 Spark 파일 I/O 근거, 품질 합격 스냅샷 승인 기록(접근제어 자체는 미구현) |
-| **Apache Iceberg 1.10.1** | Spark 3.5.6/Scala 2.12/Java 11과 HDFS Hadoop Catalog 기반 Snapshot·Time Travel·변경 SQL·Branch WAP 실습 |
+| **Apache Iceberg 1.10.1** | Spark 3.5.6/Scala 2.12/Java 11과 HDFS 기반 Snapshot·Time Travel·DML·Branch WAP, Olist Silver/Gold 테이블 포맷 |
+| **Gravitino Iceberg REST Server 1.3.1** | worker3 `:9001`, 전용 Java 17. Spark/Trino 공통 테이블 등록·조회·커밋 API; PostgreSQL `iceberg_rest56`을 내부 Catalog 저장소로 사용 |
+| **Trino 484** | metadata `:8080`, 전용 Java 25. Iceberg REST Connector와 HDFS 클라이언트로 실제 Parquet SQL 조회; 현재 Coordinator+Worker 단일 노드 |
+| **Olist Iceberg 물질화·Gold WAP·릴리스 자동화(58~60)** | 승인된 v3 → Iceberg 테이블 7개(정확한 다중집합 비교) → 29 DQ 검사 → Gold 단일 테이블 `audit_v3` → `main` 공개 → Trino 검증, 수동 one-shot 운영 |
 
 ## 주요 사용자 화면
 
@@ -74,6 +81,8 @@
 | Grafana | **worker3 내부** `http://127.0.0.1:3000` / **VirtualBox 포트포워딩 PC 브라우저** `http://127.0.0.1:23000` |
 | Alertmanager | `http://worker3:19093` — 콘솔 바로가기 설정값 |
 | **OpenMetadata** | `http://<metadata-host>:8585` — metadata VM, 실습 환경 접속 주소 |
+| **Iceberg REST Catalog API** | `http://worker3:9001/iceberg/v1/config` — Gravitino API(일반적인 웹 대시보드가 아님) |
+| **Trino API** | `http://metadata:8080/v1/info` — Trino 484 정보; SQL 조회는 HTTP Client/CLI/검증 스크립트 사용 |
 
 > 위 이름·주소는 실습 환경 기준이다. 특히 Grafana의 경우 worker3 내부 포트 3000과 호스트 브라우저 포트포워딩 23000을 구분한다. **다른 바로가기 URL이 실제 데몬의 listen 포트 또는 VirtualBox 포트포워딩과 동일하다는 뜻은 아니다.** 브라우저가 `master`/`worker3`를 해석하지 못하면 Ansible 변수로 브라우저에서 접근 가능한 주소를 지정한다. 실제 IP와 포트포워딩 설정은 로컬 Inventory에서 관리하고 공개 README에는 기재하지 않는다.
 
@@ -99,13 +108,19 @@
 | **52** | 최신 PASS 품질 리포트 기반 Warehouse 승인 | v3 승인 성공(사용자 확인), `_APPROVAL.json` 기록 |
 | **53** | Iceberg Hadoop Catalog / Snapshot / Time Travel / Mart 복사 | Java 11 호환 Iceberg 1.10.1로 PASS, 55,877행 일치·스냅샷 2개 확인 |
 | **54** | Iceberg INSERT/UPDATE/DELETE/MERGE, Schema Evolution, Branch WAP | stage와 publish까지 실습 완료(사용자 확인), 별도 실습 테이블만 변경 |
+| **55** | 5대 VM Iceberg/Trino 읽기 전용 사전 진단 | 각 노드 CPU/메모리/Java·포트·HDFS 실습 증빙 확인, metadata 경로 권한 예외 처리 후 성공 |
+| **56** | Gravitino 1.3.1 Iceberg REST Server + PostgreSQL + HDFS | worker3 `:9001`, 전용 Java 17, 새 Warehouse 및 Spark REST 테이블 생성/조회 검증 성공 |
+| **57** | Trino 484 독립 설치·Spark/Trino 교차 조회 | metadata `:8080`, 전용 Java 25, `[[56, 'spark']]` / 1행 SQL 검증 **PASS** |
+| **58** | 승인된 Olist v3 → Iceberg Silver(5)·Quarantine(1)·Gold(1) | REST Catalog `olist58_v3` 7개 테이블·스키마/행수/양방향 `exceptAll`·Trino 검증 완료(사용자 확인) |
+| **59** | 실제 Olist Gold 테이블에 WAP + 29개 DQ | `olist59_v3.gold_daily_category_sales`의 `audit_v3` 검증 후 Gold `main` 공개 완료 |
+| **60** | Iceberg Gold 릴리스 수동 One-shot 워크플로우 | Step58/59 재검증·멱등 Publish·Trino Gold **55,877행** 확인, systemd 정상 종료(`STEP60_PIPELINE_PASS: mode=run`) |
 
 > 번호 **28·29는 현재 확인한 Playbook 목록에 없다.** 44번은 패키지 제공 단계까지 진행했으며 DB View 및 OpenMetadata 계보가 실제 생성됐다는 근거는 없다.
 
-<!-- BEGIN OLIST PIPELINE 45-54 -->
-## Olist 데이터 파이프라인 및 Iceberg 실습 (45~54, 2026-10-31)
+<!-- BEGIN OLIST PIPELINE 45-60 -->
+## Olist 데이터 파이프라인과 Iceberg Lakehouse (45~60, 2026-11-01)
 
-**상태:** 45~52번 Olist 파이프라인 구축과 v3 품질 승인, 53~54번 독립 Iceberg 스모크/트랜잭션/WAP 실습을 사용자 확인으로 완료했다. **주의:** 48번 주기적 Timer는 기본 비활성이고, 49번 대시보드의 기본 질의 버전은 v1이며, v3를 항상 자동 처리·승인하는 통합 파이프라인은 아니다. 실제 결과의 수치·상태는 HDFS 증빙과 운영 메트릭으로 구분해 확인한다.
+**상태:** 45~52번 기존 Olist HDFS/Parquet 파이프라인, 53~54번 독립 Iceberg Lab, 55~57번 **공유 REST Catalog + Trino 교차 조회**, 58~60번 **승인된 v3의 Iceberg Silver/Gold·Gold WAP·수동 릴리스 오케스트레이션**을 확인했다. **주의:** 48번 Timer는 기본 비활성, 49번 Grafana 기본 질의 버전은 v1, 60번은 **일회성/수동 시스템 서비스**이며 자동 신규 데이터 유입·주기적 Bronze→Silver→Gold 갱신은 아직 미구축이다.
 
 ### 데이터 흐름
 
@@ -136,8 +151,21 @@ HDFS Warehouse (Parquet / immutable snapshot)
 
 [48] systemd 오케스트레이션(46→47) · [49] Prometheus/Grafana 관측
 
-[53~54] Iceberg 별도 실습: /data/olist/iceberg-lab/ (기존 Warehouse 미변경)
-    Iceberg Hadoop Catalog → Snapshot/Time Travel → SQL 변경 → audit Branch → Publish
+[53~54] 별도 Iceberg HadoopCatalog Lab /data/olist/iceberg-lab/
+     Spark Java 11 + Iceberg 1.10.1: Snapshot/DML/audit Branch (기존 Warehouse 미변경)
+
+[55] 5 VM Preflight → [56] worker3 Gravitino REST(:9001) + PostgreSQL Catalog DB
+                                      │
+                         Iceberg HDFS /data/olist/iceberg-rest/
+                                      │
+[57] metadata Trino(:8080) ◄──── 동일 Iceberg 테이블 ──── Spark on YARN
+                                      │
+[58] 승인 Parquet v3 → REST Iceberg 7개 (Silver 5 / Quarantine 1 / Gold 1)
+                                      │  exact exceptAll parity + Trino
+[59] 실제 Gold 1개 대상: audit_v3 → 29 DQ PASS → 명시적 fast_forward → main
+                                      │
+[60] worker3 One-shot Runner: 기존 공개 v3 재검증 + Trino 55,877행 확인
+     (신규 Raw 수집/정기 스케줄, 여러 테이블 원자적 공개는 미구축)
 ```
 
 **데이터 원본:** [Kaggle Olist Brazilian E-Commerce Public Dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce). Olist 원본은 9개의 CSV이며, `olist/source/`에 압축 해제했다. **9개 전부 Raw에 저장**하고, 46번 첫 ETL은 4개만 읽는다. 나머지 결제·리뷰·판매자·지역·카테고리 번역은 Raw에 보존하여 후속 변환에 사용한다.
@@ -297,18 +325,115 @@ ssh master "sudo -u hadoop hdfs dfs -text '/data/olist/iceberg-validation/step53
 ssh master "sudo -u hadoop hdfs dfs -text '/data/olist/iceberg-validation/step54/publish/part-*'"
 ```
 
-**WAP 실습의 경계:** 54번 검사는 소규모 샘플 행 검사로, 47번의 29개 실제 Olist 품질 검사 및 52번 승인을 대체하지 않는다. 53~54번은 기존 Raw/Warehouse/Quality/Approval/OpenMetadata를 변경하지 않는다. 공유 Catalog·Trino·운영용 권한정책·멀티테이블 원자적 공개는 아직 구축하지 않았다.
+**실습과 실제 Gold WAP의 구분:** 54번은 소규모 샘플 WAP이고, **59번은 29개 실제 Olist 품질 검사와 Silver/Gold 스냅샷 검증을 연결한 Gold 단일 테이블 WAP**다. 53~54번 HadoopCatalog와 56~60번 공유 REST Catalog는 별도로 유지된다. **멀티테이블 원자적 공개·사용자별 접근제어·새 버전의 정기 데이터 수집은 아직 구현하지 않았다.**
+
+### 55~57. 공유 Iceberg REST Catalog와 Trino SQL 엔진
+
+| 단계 | 배치 / 실제 구성 | 검증된 결과 |
+|---|---|---|
+| **55 사전 점검** | 5대 VM 상태를 읽기 전용으로 조사; `artifacts/55-iceberg-trino-preflight.json` | Spark Java 11 유지, `metadata` 4 vCPU/8GB; HDFS Step53 증빙 PASS. 경로 권한 제한을 `permission_denied`로 처리하는 패치 반영 |
+| **56 REST Catalog** | worker3 **Gravitino Iceberg REST Server 1.3.1**, `:9001`, 독립 JDK **17**, PostgreSQL `iceberg_rest56`(`127.0.0.1:5432`), HDFS `/data/olist/iceberg-rest` | `/iceberg/v1/config`와 Namespace API 성공, Spark YARN에서 `shared.olist56.catalog_smoke` 생성/조회 성공 |
+| **57 Trino** | metadata **Trino 484**, `:8080`, 독립 JDK **25**, 단일 노드 Coordinator+Worker; Iceberg REST Connector + `fs.hadoop.enabled=true` | SQL `iceberg_rest.olist56.catalog_smoke`에서 **`[[56, 'spark']]`, COUNT=1, `STEP57_TRINO_SPARK_CROSS_QUERY_PASS`** |
+
+```text
+Spark/YARN(Java 11) ──┐
+                      ├─ Iceberg REST API ── Gravitino(worker3:9001) ── PostgreSQL(Catalog DB)
+Trino(Java 25) ───────┘          │
+     │                          └── Iceberg metadata pointer
+     └──────────────────── HDFS Iceberg metadata + Manifest + Parquet files
+```
+
+**중요:** REST Catalog가 Parquet 데이터를 전달하거나 SQL을 실행하지 않는다. Catalog는 등록·조회·커밋을 처리하고, Spark/Trino는 Iceberg Metadata/Manifest를 해석해 **HDFS의 데이터 파일을 직접 읽고 쓴다**. PostgreSQL `iceberg_rest56`은 실제 판매 데이터가 아닌 Catalog 등록 정보를 보관한다. Trino는 **YARN 작업이 아니며**, 현재 metadata에서 Coordinator와 Worker를 함께 실행한다.
+
+```bash
+# worker3: 서비스/API 확인
+systemctl status bigtop-iceberg-rest --no-pager
+curl -fsS http://192.158.2.103:9001/iceberg/v1/namespaces | python3 -m json.tool
+curl -fsS http://192.158.2.104:8080/v1/info | python3 -m json.tool
+python3 scripts/57-verify-trino.py --url http://192.158.2.104:8080
+
+# metadata: Trino 노드 확인 및 메모리
+ssh metadata 'systemctl status bigtop-trino57 --no-pager'
+ssh metadata 'systemctl show bigtop-trino57 -p MemoryCurrent -p MemoryMax'
+```
+
+- **Java 분리:** Spark/HDFS/YARN은 Java 11, Gravitino는 전용 Java 17, Trino는 전용 Java 25. 시스템의 전역 `java`를 변경하지 않는다.
+- **오프라인 재현:** 다운로드 스크립트 `scripts/56-fetch-iceberg-rest-assets.py`, `scripts/57-fetch-trino-assets.py`와 검증 스크립트 사용. `vendor/`의 JAR/JDK/아카이브는 Git 제외. 실제 구축 중 PostgreSQL JDBC의 `.sha256` 404 문제를 다운로드 코드에서 해결했다.
+- **과거 오류:** 58번 Spark에서 `spark.sql.catalog.shared.warehouse=hdfs://...`를 전달하면 REST 서버가 이를 Catalog 식별자로 오해해 `Couldn't find Iceberg configuration` 오류가 발생했다. **58번 수정본에서는 해당 Spark 옵션을 제거**했으며 Gravitino가 HDFS Warehouse를 관리한다.
+
+### 58. 승인된 Olist v3 → Iceberg Silver/Gold (7개)
+
+- Playbook: `playbooks/58-olist-iceberg-materialization.yml` / Role: `roles/olist_iceberg_materialization/`.
+- **소스:** 52번 승인된 `/data/olist/warehouse/v3`의 기존 Parquet(변경하지 않음).
+- **대상:** REST Catalog `shared.olist58_v3` — Silver 5개, Quarantine 1개, Gold `daily_category_sales` 1개.
+- 검증: 스키마·행 수·전체 중복을 포함하는 **양방향 `exceptAll` 다중집합 일치**, Trino 7개 테이블과 Gold 집계 조회, HDFS `step58/v3` 증빙.
+- 동일한 원본 v3에 대한 재실행은 기존 테이블을 덮어쓰지 않고 출처/내용을 재검증한다. 부분 성공 시 이미 생성된 테이블은 삭제하지 않는다.
+
+```bash
+.venv/bin/ansible-playbook -i inventory/hosts.ini \
+  playbooks/58-olist-iceberg-materialization.yml \
+  -e olist_iceberg_materialization_apply=true
+python3 scripts/58-verify-trino.py --url http://192.158.2.104:8080 \
+  --proof artifacts/58-iceberg-v3-proof.json
+```
+
+**범위:** Raw CSV에서 Iceberg 테이블로 직접 ETL하는 새 파이프라인이 아니라 **이미 승인된 Parquet v3의 Iceberg 물질화**다. Bronze는 기존 Raw CSV이며 Silver/Gold는 Iceberg를 사용하는 혼합 메달리온 구조다.
+
+### 59. Olist Gold 단일 테이블 WAP (Write–Audit–Publish)
+
+- Playbook: `playbooks/59-olist-iceberg-gold-wap.yml` / Role: `roles/olist_iceberg_wap/`.
+- 58번의 Silver 5개/Quarantine 1개/Gold 1개는 **읽기 전용 입력**; 새로운 `shared.olist59_v3.gold_daily_category_sales`에 별도 `audit_v3` Branch를 만든다.
+- `stage`: 실제 Olist **29개 DQ** + 스키마 및 Gold 전체 레코드 동등성 + 소스/Branch Snapshot 검사, `/data/olist/iceberg-validation/step59/v3/_STAGE_REPORT.json`.
+- `publish`: PASS 증빙과 Snapshot 불변성을 다시 확인한 뒤 **Gold 1개 테이블만** `fast_forward(main ← audit_v3)`, `_PUBLISH_REPORT.json` 기록.
+- Trino `iceberg_rest.olist59_v3.gold_daily_category_sales` 공개 결과는 **55,877행**. Publish 전 기술적 main(1행)은 BI에 노출할 대상이 아니다.
+
+```bash
+# stage → 독립 Trino 점검 → 명시적 publish → 독립 Trino 점검
+.venv/bin/ansible-playbook -i inventory/hosts.ini \
+  playbooks/59-olist-iceberg-gold-wap.yml -e olist_iceberg_wap_mode=stage
+python3 scripts/59-verify-trino.py --mode stage --url http://192.158.2.104:8080
+.venv/bin/ansible-playbook -i inventory/hosts.ini \
+  playbooks/59-olist-iceberg-gold-wap.yml -e olist_iceberg_wap_mode=publish
+python3 scripts/59-verify-trino.py --mode publish --url http://192.158.2.104:8080
+```
+
+**제약:** Branch는 테이블별 Snapshot이고 **7개 Silver/Gold 테이블을 하나의 트랜잭션으로 Publish하지 않는다**. 접근 제어/승인 강제 소비자 게이트는 별도 과제다.
+
+### 60. 릴리스 검증·Publish 수동 One-shot 오케스트레이션
+
+- Runner: `scripts/60-run-iceberg-release.py` / Playbook `playbooks/60-olist-iceberg-release.yml` / Role `roles/olist_iceberg_release60/`.
+- **실행 체인:** 58번 Spark/Trino 검증 → 59번 stage·29개 DQ/증빙 확인 → 명시적 Gold Publish → Trino 최종 검증.
+- 이미 Publish된 불변 **v3**는 새로 덮어쓰지 않고 **동일 Snapshot과 증빙을 재검증**한다. 실행 중복을 `flock`으로 제한하고 실패 시 후속 단계를 차단한다.
+- systemd `bigtop-olist-iceberg-release60.service`는 **수동 One-shot**. 매일 실행하는 Timer나 새 Raw 파일을 수집하는 자동화는 없다.
+- **2026-11-01 실제 로그:** `STEP60_ALREADY_PUBLISHED_VERIFIED`, `STEP60_GOLD_RELEASE_PASS`, `STEP60_PIPELINE_PASS: mode=run`, Trino 55,877행, `Deactivated successfully`.
+
+```bash
+# worker3: 안전한 상태 확인(읽기 전용)
+python3 scripts/60-run-iceberg-release.py --mode plan
+python3 scripts/60-run-iceberg-release.py --mode verify
+cat artifacts/60-iceberg-release-last-attempt.json
+
+# 설치된 systemd One-shot 결과와 로그
+sudo systemctl status bigtop-olist-iceberg-release60.service --no-pager -l
+sudo journalctl -u bigtop-olist-iceberg-release60.service -n 120 --no-pager
+
+# 새로운 릴리스 발행이 필요할 때만 명시적으로 검토한 뒤 실행
+# python3 scripts/60-run-iceberg-release.py --mode run --allow-publish
+```
+
+**Proof 구분:** 58/59 증빙 원본은 HDFS `iceberg-validation/step58|step59/v3`이고, worker3 `artifacts/58-iceberg-v3-proof.json`, `59-olist-wap-stage.json`, `59-olist-wap-publish.json`, `60-iceberg-release-last-attempt.json`는 로컬 실행·검증 용도다. `--mode verify`는 로컬 증빙과 Trino를 읽어 검증하며, `--mode run`/`publish`는 Spark 경유로 HDFS Snapshot 조건까지 재확인한다.
+
 
 ### 향후 작업 / 검증 필요
 
-1. Iceberg 테이블과 47번 품질 검사를 연결한 **실제 Olist** WAP 설계. 54번 샘플 WAP를 운영 승인 정책과 혼동하지 않는다.
-2. Spark와 Trino가 함께 사용할 Catalog를 별도 선정·검증하고 SQL 소비자가 품질 승인 상태를 강제하도록 구현.
-3. 48번 Timer·Alert 실제 활성화 여부 및 v3 최신성 모니터링, 51번 Reconcile Timer 상태 확인.
-4. 결제·리뷰·판매자·지역·카테고리 번역 CSV 정제/모델링, 38/43/44번 미검증 기능 확인.
+1. **61번:** 신규 REST Iceberg Silver/Gold 및 Gold WAP 릴리스를 **OpenMetadata Container/Lineage + Prometheus/Grafana**에 연계한다. 기존 49번 v1 대시보드와 별도로 모델링한다.
+2. **62번 이후:** 새 데이터 버전의 Raw → Iceberg ETL, 실행별 DQ, 리텐션/스냅샷 정리, 배치 재실행/장애 주입, 멀티테이블 일관된 소비 버전 전략을 설계한다.
+3. **내부 플랫폼 접근정책:** 사용자별 Trino/Catalog/HDFS 권한·감사, 메타데이터 DB 백업, 오프라인 배포 자산 관리. 실습 네트워크의 HTTP 자체를 장애로 간주하지 않되 인증·승인 강제를 과장하지 않는다.
+4. 48번 Timer/49번 대시보드의 v1 기본값, 51번 Timer, 38/43/44번 미확인 작업 및 나머지 Olist CSV 모델링 여부를 점검한다.
 
-**단계별 상세 실행법:** [`docs/47-olist-apply.md`](docs/47-olist-apply.md) · [`docs/48-olist-apply.md`](docs/48-olist-apply.md) · [`docs/49-olist-apply.md`](docs/49-olist-apply.md) · [`docs/50-olist-apply.md`](docs/50-olist-apply.md) · [`docs/51-olist-apply.md`](docs/51-olist-apply.md) · [`docs/52-olist-apply.md`](docs/52-olist-apply.md) · [`docs/53-iceberg-apply.md`](docs/53-iceberg-apply.md) · [`docs/54-iceberg-apply.md`](docs/54-iceberg-apply.md).
+**단계별 상세 실행법:** [`docs/47-olist-apply.md`](docs/47-olist-apply.md) ~ [`docs/54-iceberg-apply.md`](docs/54-iceberg-apply.md) · [`docs/55-iceberg-trino-preflight.md`](docs/55-iceberg-trino-preflight.md) · [`docs/56-iceberg-rest-apply.md`](docs/56-iceberg-rest-apply.md) · [`docs/57-trino-iceberg-rest-apply.md`](docs/57-trino-iceberg-rest-apply.md) · [`docs/58-olist-iceberg-apply.md`](docs/58-olist-iceberg-apply.md) · [`docs/59-olist-iceberg-apply.md`](docs/59-olist-iceberg-apply.md) · [`docs/60-olist-iceberg-release-apply.md`](docs/60-olist-iceberg-release-apply.md).
 
-<!-- END OLIST PIPELINE 45-54 -->
+<!-- END OLIST PIPELINE 45-60 -->
 
 ## 시작하기 / 일상 점검
 
@@ -355,11 +480,16 @@ roles/data_pipeline_olist_runtime_lineage/  51번 실행 계보 API 브리지
 roles/data_pipeline_olist_promotion/  52번 HDFS 승인 게이트
 roles/iceberg_spark_lab/  53번 Iceberg Hadoop Catalog 스모크
 roles/iceberg_transactions_lab/  54번 Iceberg SQL/WAP 실습
+roles/iceberg_rest_catalog/      56번 Gravitino REST Server·PostgreSQL·HDFS
+roles/trino_iceberg_rest/        57번 단일 노드 Trino 484 및 REST/HDFS 커넥터
+roles/olist_iceberg_materialization/ 58번 v3 → Iceberg Silver/Gold 7개
+roles/olist_iceberg_wap/         59번 Gold 1개 테이블 audit/publish
+roles/olist_iceberg_release60/   60번 수동 One-shot 릴리스 서비스
 collections/         필요한 Ansible Collection 선언
 scripts/, tests/     검증·운영 스크립트·테스트
 Makefile             자주 쓰는 명령을 표준화
-docs/PROJECT_GUIDE.md 01~54번 구조·의존성·운영·검증 가이드
-docs/45-olist-*.md ~ docs/54-iceberg-*.md  실데이터 파이프라인·Iceberg 단계별 운영 문서
+docs/PROJECT_GUIDE.md 01~60번 구조·의존성·운영·검증 가이드
+docs/45-olist-*.md ~ docs/60-olist-*.md  데이터 파이프라인·Iceberg·Trino 단계별 운영 문서
 ```
 
 **문서 읽는 순서:** 이 README → [상세 프로젝트 가이드](docs/PROJECT_GUIDE.md) → 해당 단계의 `docs/*-apply.md` 및 설계 문서 → 필요 시 `docs/runbooks/`.
@@ -367,9 +497,9 @@ docs/45-olist-*.md ~ docs/54-iceberg-*.md  실데이터 파이프라인·Iceberg
 ## 운영 안전 원칙
 
 - SSH **개인키**, JWT, DB 비밀번호, `.env`, 실제 Inventory, DB 백업 파일을 Git에 넣지 않는다.
-- Olist 원본 CSV·ZIP 및 HDFS/Parquet/Iceberg 산출물, Iceberg Runtime JAR는 Git에 올리지 않는다. 프로젝트 `.gitignore`에 `/olist/`를 포함한다. HDFS 결과는 파일로 Export해서 커밋하지 않는다.
+- Olist 원본 CSV·ZIP 및 HDFS/Parquet/Iceberg 산출물, Java/Trino/Gravitino 바이너리, Iceberg Runtime JAR는 Git에 올리지 않는다. `.gitignore`에 `/olist/`, `/vendor/`, `/artifacts/` 등이 반영됐는지 확인한다. HDFS 결과는 Git에 Export/Commit하지 않는다.
 - 원격 다중 노드 Playbook(특히 **38, 40, 41**)에는 전역 `-e ansible_connection=local`을 사용하지 않는다.
 - OpenMetadata의 Docker 볼륨 삭제(`docker compose down -v`) 금지. PostgreSQL 복원 검증은 운영 DB가 아닌 임시 DB에서 수행한다.
 - **Web Console의 운영 Inventory(PostgreSQL)**와 **OpenMetadata의 데이터 카탈로그(MySQL)**는 목적이 다른 시스템이다.
 
-**문서 기준:** 2026-10-31. 기존 README(46번까지)와 47~54번 패키지·대화의 실제 결과를 종합해 갱신했다. 실제 worker3 Git 작업 트리를 직접 읽은 것은 아니므로 적용 전 `git diff`로 비교한다. 38·43·44번의 기존 미검증 표기는 유지한다.
+**문서 기준:** 2026-11-01. 54번까지의 기존 문서와 55~60번 ZIP의 Playbook/Role/운영 문서, 사용자가 제공한 56~57·60번 실제 성공 로그 및 58~59번 완료 확인을 반영했다. **worker3의 현재 Git 작업 트리 자체를 직접 열람한 것은 아니므로** 적용 전 `git diff`로 개인 수정사항을 검토한다. 38·43·44번 기존 미검증 표기는 유지한다.

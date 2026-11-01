@@ -1,0 +1,26 @@
+---
+- name: Assert isolated REST catalog scope
+  ansible.builtin.assert:
+    that:
+      - iceberg_rest_catalog_version == '1.3.1'
+      - iceberg_rest_catalog_jdbc_version == '42.7.11'
+      - iceberg_rest_catalog_pg_host == '127.0.0.1'
+      - iceberg_rest_catalog_bind in ['127.0.0.1', '192.158.2.103']
+      - iceberg_rest_catalog_hdfs_warehouse == 'hdfs://master:9000/data/olist/iceberg-rest'
+      - iceberg_rest_catalog_pg_db is match('^[a-z][a-z0-9_]{0,30}$')
+      - iceberg_rest_catalog_pg_user is match('^[a-z][a-z0-9_]{0,30}$')
+      - iceberg_rest_catalog_port | int >= 1024
+      - iceberg_rest_catalog_port | int <= 65535
+    fail_msg: Step 56 allows a separate localhost PostgreSQL DB and isolated HDFS path only.
+
+- name: Explain default read-only mode
+  ansible.builtin.debug:
+    msg:
+      - 'PLAN ONLY: Gravitino Iceberg REST 1.3.1 standalone on worker3:{{ iceberg_rest_catalog_port }}'
+      - 'PostgreSQL localhost:{{ iceberg_rest_catalog_pg_port }}/{{ iceberg_rest_catalog_pg_db }}; HDFS {{ iceberg_rest_catalog_hdfs_warehouse }}'
+      - 'No service, database or HDFS changes until -e iceberg_rest_catalog_apply=true.'
+  when: not (iceberg_rest_catalog_apply | bool)
+
+- name: Apply Step 56 isolated service only on explicit opt-in
+  ansible.builtin.include_tasks: apply.yml
+  when: iceberg_rest_catalog_apply | bool

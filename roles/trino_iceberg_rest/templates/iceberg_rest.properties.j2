@@ -1,0 +1,5 @@
+connector.name=iceberg
+iceberg.catalog.type=rest
+iceberg.rest-catalog.uri={{ trino_iceberg_rest_rest_uri }}
+fs.hadoop.enabled=true
+hive.config.resources={{ trino_iceberg_rest_config_base }}/hadoop/core-site.xml

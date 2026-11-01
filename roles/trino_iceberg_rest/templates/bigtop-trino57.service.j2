@@ -1,0 +1,22 @@
+[Unit]
+Description=Bigtop Step 57 isolated Trino {{ trino_iceberg_rest_version }} (Iceberg REST on HDFS)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User={{ trino_iceberg_rest_service_user }}
+Group={{ trino_iceberg_rest_service_user }}
+WorkingDirectory={{ trino_iceberg_rest_install_base }}/server
+Environment=JAVA_HOME={{ trino_iceberg_rest_install_base }}/jdk25
+Environment=PATH={{ trino_iceberg_rest_install_base }}/jdk25/bin:/usr/bin:/bin
+ExecStart={{ trino_iceberg_rest_install_base }}/server/bin/launcher run
+Restart=on-failure
+RestartSec=15
+TimeoutStartSec=180
+LimitNOFILE=131072
+MemoryMax={{ trino_iceberg_rest_memory_max }}
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

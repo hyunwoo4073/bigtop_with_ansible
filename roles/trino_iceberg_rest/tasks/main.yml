@@ -1,0 +1,22 @@
+---
+- name: Assert that Step 57 only targets standalone Trino on metadata
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == 'metadata'
+      - trino_iceberg_rest_version == '484'
+      - trino_iceberg_rest_catalog_name == 'iceberg_rest'
+      - trino_iceberg_rest_rest_uri == 'http://192.158.2.103:9001/iceberg/'
+      - trino_iceberg_rest_port | int == 8080
+      - trino_iceberg_rest_heap == '1536M'
+    fail_msg: This isolated step is pinned to the established Step 56 lab setup.
+
+- name: Describe read-only default (no packages or services changed)
+  ansible.builtin.debug:
+    msg: >-
+      STEP57_PLAN: metadata only, Trino 484, private Java 25, port 8080,
+      shared Step 56 Iceberg REST, HDFS; apply requires -e trino_iceberg_rest_apply=true.
+  when: not (trino_iceberg_rest_apply | bool)
+
+- name: Apply only when explicitly requested
+  ansible.builtin.include_tasks: apply.yml
+  when: trino_iceberg_rest_apply | bool

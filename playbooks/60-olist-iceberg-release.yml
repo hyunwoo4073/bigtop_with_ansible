@@ -1,0 +1,7 @@
+---
+- name: Step 60 install optional manual Iceberg Gold release runner service on worker3
+  hosts: worker3
+  become: false
+  gather_facts: false
+  roles:
+    - olist_iceberg_release60

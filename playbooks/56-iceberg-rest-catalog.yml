@@ -1,0 +1,71 @@
+---
+- name: Step 56 deploy isolated Iceberg REST Catalog on worker3
+  hosts: worker3
+  gather_facts: false
+  become: true
+  roles:
+    - iceberg_rest_catalog
+
+- name: Step 56 optional Spark YARN smoke against REST Catalog
+  hosts: master
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Install Spark REST Catalog smoke script (not submitted unless explicitly requested)
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../roles/iceberg_rest_catalog/files/56_spark_rest_smoke.py"
+        dest: /opt/bigtop-iceberg/56_spark_rest_smoke.py
+        owner: hadoop
+        group: hadoop
+        mode: '0644'
+      when: (iceberg_rest_catalog_apply | default(iceberg_rest_apply | default(false)) | bool) and (iceberg_rest_catalog_spark_smoke | default(iceberg_rest_spark_smoke | default(false)) | bool)
+
+    - name: Run isolated Spark Iceberg REST test using Step 53 pinned 1.10.1 jar
+      ansible.builtin.command:
+        argv:
+          - spark-submit
+          - --master
+          - yarn
+          - --deploy-mode
+          - cluster
+          - --name
+          - iceberg-rest-catalog-step56
+          - --queue
+          - batch
+          - --driver-memory
+          - 512m
+          - --executor-memory
+          - 512m
+          - --executor-cores
+          - '1'
+          - --num-executors
+          - '1'
+          - --jars
+          - /opt/bigtop-iceberg/iceberg-spark-runtime-3.5_2.12-1.10.1.jar
+          - --conf
+          - spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+          - --conf
+          - spark.sql.catalog.shared=org.apache.iceberg.spark.SparkCatalog
+          - --conf
+          - spark.sql.catalog.shared.type=rest
+          - --conf
+          - spark.sql.catalog.shared.uri=http://192.158.2.103:9001/iceberg/
+          - --conf
+          - spark.sql.shuffle.partitions=2
+          - --conf
+          - spark.pyspark.python=/usr/bin/python3
+          - --conf
+          - spark.yarn.submit.waitAppCompletion=true
+          - /opt/bigtop-iceberg/56_spark_rest_smoke.py
+      become: true
+      become_user: hadoop
+      environment:
+        HADOOP_CONF_DIR: /etc/hadoop/conf
+      register: iceberg_rest_catalog_smoke_result
+      changed_when: true
+      when: (iceberg_rest_catalog_apply | default(iceberg_rest_apply | default(false)) | bool) and (iceberg_rest_catalog_spark_smoke | default(iceberg_rest_spark_smoke | default(false)) | bool)
+
+    - name: Show Spark smoke result
+      ansible.builtin.debug:
+        msg: "{{ iceberg_rest_catalog_smoke_result.stdout_lines | default([]) | select('search', 'STEP56_') | list }}"
+      when: (iceberg_rest_catalog_apply | default(iceberg_rest_apply | default(false)) | bool) and (iceberg_rest_catalog_spark_smoke | default(iceberg_rest_spark_smoke | default(false)) | bool)

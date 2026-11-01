@@ -1,0 +1,23 @@
+---
+iceberg_rest_catalog_apply: "{{ iceberg_rest_apply | default(false) }}"
+iceberg_rest_catalog_spark_smoke: "{{ iceberg_rest_spark_smoke | default(false) }}"
+iceberg_rest_catalog_version: '1.3.1'
+iceberg_rest_catalog_jdbc_version: '42.7.11'
+iceberg_rest_catalog_install_base: /opt/bigtop-iceberg-rest
+iceberg_rest_catalog_service_user: icebergrest
+iceberg_rest_catalog_bind: '192.158.2.103'
+iceberg_rest_catalog_port: 9001
+iceberg_rest_catalog_hdfs_warehouse: 'hdfs://master:9000/data/olist/iceberg-rest'
+iceberg_rest_catalog_pg_db: iceberg_rest56
+iceberg_rest_catalog_pg_user: iceberg_rest56
+iceberg_rest_catalog_pg_host: '127.0.0.1'
+iceberg_rest_catalog_pg_port: 5432
+iceberg_rest_catalog_heap_initial: 256m
+iceberg_rest_catalog_heap_max: 768m
+iceberg_rest_catalog_metaspace_max: 384m
+iceberg_rest_catalog_hdfs_user: hadoop
+iceberg_rest_catalog_archive_name: 'gravitino-iceberg-rest-server-1.3.1-bin.tar.gz'
+iceberg_rest_catalog_archive_sha256: '46524669213374b60243e7fd4b75709cbeb45ce78fd0d88fd1ac797d928ee8ba'
+iceberg_rest_catalog_jdk_archive_name: 'temurin17-jdk-linux-x64.tar.gz'
+iceberg_rest_catalog_jdbc_name: 'postgresql-42.7.11.jar'
+iceberg_rest_catalog_asset_dir: "{{ playbook_dir }}/../vendor/iceberg-rest"

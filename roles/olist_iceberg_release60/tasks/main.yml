@@ -1,0 +1,75 @@
+---
+- name: Validate Step 60 release runner boundaries
+  ansible.builtin.assert:
+    that:
+      - olist_iceberg_release60_runner_user is match('^[a-z_][a-z0-9_-]*[$]?$')
+      - olist_iceberg_release60_runner_user != 'root'
+      - olist_iceberg_release60_project_dir is match('^/[^\n]+$')
+      - olist_iceberg_release60_service_name == 'bigtop-olist-iceberg-release60'
+      - olist_iceberg_release60_trino_url is match('^https?://[^/]+(:[0-9]+)?/?$')
+    fail_msg: Step 60 requires a non-root controller runner, fixed unit name and REST URL.
+
+- name: Explain Step 60 nonmutating default
+  ansible.builtin.debug:
+    msg:
+      - 'STEP60_PLAN_ONLY: no systemd changes, Spark jobs, HDFS writes or Gold publication.'
+      - 'Direct execution: python3 scripts/60-run-iceberg-release.py --mode plan'
+      - 'Install optional oneshot unit with -e olist_iceberg_release60_apply=true.'
+  when: not (olist_iceberg_release60_apply | bool)
+
+- name: Validate Step 60 controller prerequisite files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ olist_iceberg_release60_project_dir }}/scripts/60-run-iceberg-release.py"
+    - "{{ olist_iceberg_release60_project_dir }}/scripts/58-verify-trino.py"
+    - "{{ olist_iceberg_release60_project_dir }}/scripts/59-verify-trino.py"
+    - "{{ olist_iceberg_release60_project_dir }}/playbooks/58-olist-iceberg-materialization.yml"
+    - "{{ olist_iceberg_release60_project_dir }}/playbooks/59-olist-iceberg-gold-wap.yml"
+    - "{{ olist_iceberg_release60_project_dir }}/.venv/bin/ansible-playbook"
+    - "{{ olist_iceberg_release60_project_dir }}/inventory/hosts.ini"
+  register: olist_iceberg_release60_prerequisites
+  when: olist_iceberg_release60_apply | bool
+
+- name: Refuse installation if earlier Steps are missing
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+    fail_msg: "Step 60 prerequisite absent {{ item.item }}"
+  loop: "{{ olist_iceberg_release60_prerequisites.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: olist_iceberg_release60_apply | bool
+
+- name: Check Step 60 controller user
+  ansible.builtin.command:
+    argv:
+      - id
+      - -u
+      - "{{ olist_iceberg_release60_runner_user }}"
+  changed_when: false
+  when: olist_iceberg_release60_apply | bool
+
+- name: Install Step 60 manual oneshot systemd service only
+  ansible.builtin.template:
+    src: bigtop-olist-iceberg-release60.service.j2
+    dest: /etc/systemd/system/bigtop-olist-iceberg-release60.service
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  notify: Reload systemd for Step 60
+  when: olist_iceberg_release60_apply | bool
+
+- name: Apply Step 60 systemd unit without starting it
+  ansible.builtin.meta: flush_handlers
+  when: olist_iceberg_release60_apply | bool
+
+- name: Show Step 60 service result
+  ansible.builtin.debug:
+    msg:
+      - 'STEP60_ONESHOT_INSTALLED_NOT_STARTED'
+      - 'Manual execution: sudo systemctl start bigtop-olist-iceberg-release60.service'
+      - 'No recurring timer is installed because v3 is immutable.'
+  when: olist_iceberg_release60_apply | bool

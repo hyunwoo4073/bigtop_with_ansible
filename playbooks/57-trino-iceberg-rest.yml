@@ -1,0 +1,23 @@
+---
+- name: Step 57 deploy isolated single-node Trino on metadata VM
+  hosts: metadata
+  gather_facts: false
+  become: true
+  roles:
+    - trino_iceberg_rest
+
+- name: Step 57 optional Trino read-only cross-engine smoke from controller
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Verify Trino reads the exact Step 56 Spark-created Iceberg row
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../scripts/57-verify-trino.py"
+          - --url
+          - http://192.158.2.104:8080
+      changed_when: false
+      when: trino_iceberg_rest_smoke | default(false) | bool

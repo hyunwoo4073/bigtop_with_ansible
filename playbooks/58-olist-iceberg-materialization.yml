@@ -1,0 +1,7 @@
+---
+- name: Step 58 approved Olist v3 immutable Parquet to isolated REST Iceberg Silver and Gold
+  hosts: master
+  gather_facts: false
+  become: false
+  roles:
+    - olist_iceberg_materialization

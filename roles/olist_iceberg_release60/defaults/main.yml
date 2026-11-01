@@ -1,0 +1,7 @@
+---
+# Step 60 does not install or run anything unless explicitly requested.
+olist_iceberg_release60_apply: false
+olist_iceberg_release60_project_dir: "{{ playbook_dir | dirname }}"
+olist_iceberg_release60_runner_user: bae
+olist_iceberg_release60_trino_url: 'http://192.158.2.104:8080'
+olist_iceberg_release60_service_name: bigtop-olist-iceberg-release60
