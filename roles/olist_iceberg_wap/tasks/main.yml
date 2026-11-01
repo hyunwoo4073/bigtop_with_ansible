@@ -1,0 +1,27 @@
+---
+- name: Validate isolated Step 59 scope and explicit mode
+  ansible.builtin.assert:
+    that:
+      - olist_iceberg_wap_mode in ['plan', 'stage', 'publish']
+      - olist_iceberg_wap_catalog == 'shared'
+      - olist_iceberg_wap_source_version == 'v3'
+      - olist_iceberg_wap_source_namespace == 'olist58_v3'
+      - olist_iceberg_wap_target_namespace == 'olist59_v3'
+      - olist_iceberg_wap_branch == 'audit_v3'
+      - olist_iceberg_wap_rest_uri == 'http://192.158.2.103:9001/iceberg/'
+      - olist_iceberg_wap_proof_root == '/data/olist/iceberg-validation/step59/v3'
+      - olist_iceberg_wap_num_executors | int == 1
+      - olist_iceberg_wap_shuffle_partitions | int >= 1
+    fail_msg: Step 59 is restricted to an isolated v3 Gold WAP release and must explicitly choose stage/publish.
+
+- name: Print nonmutating Step 59 plan
+  ansible.builtin.debug:
+    msg:
+      - 'STEP59_PLAN_ONLY: no namespace, table, branch, Spark or HDFS modifications.'
+      - 'Stage uses -e olist_iceberg_wap_mode=stage, publish uses ...=publish.'
+      - 'Target is one isolated Gold table in shared.olist59_v3, NOT 58 originals.'
+  when: olist_iceberg_wap_mode == 'plan'
+
+- name: Execute explicit Stage 59 or Publish 59
+  ansible.builtin.include_tasks: apply.yml
+  when: olist_iceberg_wap_mode in ['stage', 'publish']

@@ -1,0 +1,21 @@
+---
+# Step59 uses explicit mode to avoid accidental publication.
+olist_iceberg_wap_mode: plan
+olist_iceberg_wap_rest_uri: 'http://192.158.2.103:9001/iceberg/'
+olist_iceberg_wap_catalog: shared
+olist_iceberg_wap_source_namespace: olist58_v3
+olist_iceberg_wap_target_namespace: olist59_v3
+olist_iceberg_wap_source_version: v3
+olist_iceberg_wap_branch: audit_v3
+olist_iceberg_wap_script: /opt/bigtop-iceberg/olist_iceberg_wap59.py
+olist_iceberg_wap_jar: /opt/bigtop-iceberg/iceberg-spark-runtime-3.5_2.12-1.10.1.jar
+olist_iceberg_wap_spark_user: hadoop
+olist_iceberg_wap_hdfs_user: hadoop
+olist_iceberg_wap_queue: batch
+olist_iceberg_wap_driver_memory: 768m
+olist_iceberg_wap_executor_memory: 768m
+olist_iceberg_wap_num_executors: 1
+olist_iceberg_wap_shuffle_partitions: 4
+olist_iceberg_wap_proof_root: /data/olist/iceberg-validation/step59/v3
+olist_iceberg_wap_local_stage_proof: "{{ playbook_dir }}/../artifacts/59-olist-wap-stage.json"
+olist_iceberg_wap_local_publish_proof: "{{ playbook_dir }}/../artifacts/59-olist-wap-publish.json"

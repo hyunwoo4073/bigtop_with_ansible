@@ -1,0 +1,27 @@
+---
+trino_iceberg_rest_apply: false
+trino_iceberg_rest_smoke: false
+trino_iceberg_rest_version: '484'
+trino_iceberg_rest_port: 8080
+trino_iceberg_rest_bind_host: '192.158.2.104'
+trino_iceberg_rest_rest_uri: 'http://192.158.2.103:9001/iceberg/'
+trino_iceberg_rest_warehouse_uri: 'hdfs://master:9000/data/olist/iceberg-rest'
+trino_iceberg_rest_catalog_name: iceberg_rest
+trino_iceberg_rest_install_base: /opt/bigtop-trino57
+trino_iceberg_rest_data_base: /var/lib/bigtop-trino57
+trino_iceberg_rest_config_base: /etc/bigtop-trino57
+trino_iceberg_rest_service_user: trino57
+trino_iceberg_rest_asset_dir: "{{ playbook_dir }}/../vendor/trino57"
+trino_iceberg_rest_heap: 1536M
+trino_iceberg_rest_memory_max: 3G
+trino_iceberg_rest_query_memory: 512MB
+trino_iceberg_rest_query_memory_per_node: 384MB
+trino_iceberg_rest_heap_headroom: 512MB
+trino_iceberg_rest_min_available_mem_mib: 3000
+trino_iceberg_rest_hdfs_user: hadoop
+trino_iceberg_rest_hdfs_master: '192.158.2.100'
+trino_iceberg_rest_hdfs_master_port: 9000
+trino_iceberg_rest_datanodes:
+  - 192.158.2.101
+  - 192.158.2.102
+trino_iceberg_rest_datanode_port: 9866

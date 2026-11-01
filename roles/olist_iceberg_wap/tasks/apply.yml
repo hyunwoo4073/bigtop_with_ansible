@@ -1,0 +1,146 @@
+---
+- name: Require pinned Step53 Iceberg 1.10.1 Spark runtime
+  ansible.builtin.stat:
+    path: "{{ olist_iceberg_wap_jar }}"
+  register: olist_iceberg_wap_jar_stat
+
+- name: Refuse deployment without Iceberg runtime
+  ansible.builtin.assert:
+    that:
+      - olist_iceberg_wap_jar_stat.stat.exists
+      - olist_iceberg_wap_jar_stat.stat.isreg
+
+- name: Require approved Step 52 Olist v3 source
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -test, -e, /data/olist/published/v3/_APPROVAL.json]
+  become: true
+  become_user: "{{ olist_iceberg_wap_hdfs_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+
+- name: Require Step 58 seven-table parity proof
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -test, -e, /data/olist/iceberg-validation/step58/v3/_SUCCESS]
+  become: true
+  become_user: "{{ olist_iceberg_wap_hdfs_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+
+- name: Require Step 56 Gravitino Iceberg REST Catalog
+  ansible.builtin.uri:
+    url: "{{ olist_iceberg_wap_rest_uri }}v1/config"
+    status_code: 200
+    return_content: false
+  changed_when: false
+
+- name: Stage standalone Step 59 Spark application on master
+  ansible.builtin.copy:
+    src: olist_iceberg_wap59.py
+    dest: "{{ olist_iceberg_wap_script }}"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
+- name: Execute Step 59 against isolated release Gold via Spark on YARN
+  ansible.builtin.command:
+    argv:
+      - spark-submit
+      - --master
+      - yarn
+      - --deploy-mode
+      - cluster
+      - --name
+      - "olist-iceberg-wap59-{{ olist_iceberg_wap_mode }}"
+      - --queue
+      - "{{ olist_iceberg_wap_queue }}"
+      - --driver-memory
+      - "{{ olist_iceberg_wap_driver_memory }}"
+      - --executor-memory
+      - "{{ olist_iceberg_wap_executor_memory }}"
+      - --executor-cores
+      - '1'
+      - --num-executors
+      - "{{ olist_iceberg_wap_num_executors | string }}"
+      - --jars
+      - "{{ olist_iceberg_wap_jar }}"
+      - --conf
+      - spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+      - --conf
+      - spark.sql.catalog.shared=org.apache.iceberg.spark.SparkCatalog
+      - --conf
+      - spark.sql.catalog.shared.type=rest
+      - --conf
+      - "spark.sql.catalog.shared.uri={{ olist_iceberg_wap_rest_uri }}"
+      # Gravitino REST: do not set warehouse to HDFS; warehouse selects catalog.
+      - --conf
+      - "spark.sql.shuffle.partitions={{ olist_iceberg_wap_shuffle_partitions }}"
+      - --conf
+      - spark.sql.adaptive.enabled=true
+      - --conf
+      - spark.sql.session.timeZone=UTC
+      - --conf
+      - spark.pyspark.python=/usr/bin/python3
+      - --conf
+      - spark.yarn.submit.waitAppCompletion=true
+      - "{{ olist_iceberg_wap_script }}"
+      - --mode
+      - "{{ olist_iceberg_wap_mode }}"
+  become: true
+  become_user: "{{ olist_iceberg_wap_spark_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+    SPARK_CONF_DIR: /etc/spark/conf
+    PYSPARK_PYTHON: /usr/bin/python3
+  register: olist_iceberg_wap_submit
+  changed_when: olist_iceberg_wap_mode in ['stage', 'publish']
+
+- name: Read immutable Step 59 evidence from HDFS
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -cat
+      - "{{ olist_iceberg_wap_proof_root }}/{{ '_STAGE_REPORT.json' if olist_iceberg_wap_mode == 'stage' else '_PUBLISH_REPORT.json' }}"
+  become: true
+  become_user: "{{ olist_iceberg_wap_hdfs_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: olist_iceberg_wap_proof
+  changed_when: false
+
+- name: Confirm immutable Step 59 evidence passed
+  ansible.builtin.assert:
+    that:
+      - (olist_iceberg_wap_proof.stdout | from_json).status == 'PASS'
+      - (olist_iceberg_wap_proof.stdout | from_json).target_table == 'shared.olist59_v3.gold_daily_category_sales'
+      - >-
+        (olist_iceberg_wap_mode == 'publish') or
+        ((olist_iceberg_wap_proof.stdout | from_json).quality_checks_total == 29)
+      - >-
+        (olist_iceberg_wap_mode == 'stage') or
+        ((olist_iceberg_wap_proof.stdout | from_json).stage_report_sha256 | length == 64)
+
+- name: Ensure controller artifacts directory
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../artifacts"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  become: false
+
+- name: Save Step 59 Stage or Publish evidence for Trino validation
+  ansible.builtin.copy:
+    dest: "{{ olist_iceberg_wap_local_stage_proof if olist_iceberg_wap_mode == 'stage' else olist_iceberg_wap_local_publish_proof }}"
+    content: "{{ olist_iceberg_wap_proof.stdout | trim }}\n"
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+
+- name: Show Step 59 result
+  ansible.builtin.debug:
+    msg:
+      - "STEP59_{{ 'WAP_STAGED_PASS' if olist_iceberg_wap_mode == 'stage' else 'WAP_PUBLISHED_PASS' }}"
+      - 'Only the isolated Gold release table was targeted. No seven-table atomic commit is claimed.'

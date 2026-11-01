@@ -1,0 +1,11 @@
+-server
+-Xmx{{ trino_iceberg_rest_heap }}
+-XX:+ExitOnOutOfMemoryError
+-XX:+HeapDumpOnOutOfMemoryError
+-XX:+ExplicitGCInvokesConcurrent
+-XX:-OmitStackTraceInFastThrow
+-Djdk.attach.allowAttachSelf=true
+-Djdk.nio.maxCachedBufferSize=2000000
+-Djava.io.tmpdir={{ trino_iceberg_rest_data_base }}/tmp
+-DHADOOP_USER_NAME={{ trino_iceberg_rest_hdfs_user }}
+--add-modules=jdk.incubator.vector

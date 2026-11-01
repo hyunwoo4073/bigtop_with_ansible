@@ -1,0 +1,156 @@
+---
+- name: Require Step 53 Java 11-compatible Iceberg runtime already on master
+  ansible.builtin.stat:
+    path: "{{ olist_iceberg_materialization_spark_dir }}/{{ olist_iceberg_materialization_jar_name }}"
+  register: olist_iceberg_materialization_jar
+
+- name: Refuse to use missing or unexpected Spark runtime
+  ansible.builtin.assert:
+    that:
+      - olist_iceberg_materialization_jar.stat.exists
+      - olist_iceberg_materialization_jar.stat.isreg
+    fail_msg: The Step 53 Iceberg 1.10.1 runtime must exist under /opt/bigtop-iceberg on master.
+
+- name: Verify the original v3 quality approval is available (never modified)
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -test, -e, /data/olist/published/v3/_APPROVAL.json]
+  become: true
+  become_user: "{{ olist_iceberg_materialization_hdfs_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+
+- name: Verify the immutable source ETL manifest (never modified)
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -test, -e, /data/olist/warehouse/v3/_ETL_MANIFEST.json]
+  become: true
+  become_user: "{{ olist_iceberg_materialization_hdfs_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+
+- name: Check the existing Step 56 REST Catalog endpoint
+  ansible.builtin.uri:
+    url: 'http://192.158.2.103:9001/iceberg/v1/config'
+    method: GET
+    status_code: 200
+    return_content: false
+  changed_when: false
+
+- name: Stage standalone Step 58 Spark application without modifying existing ETL
+  ansible.builtin.copy:
+    src: olist_iceberg58.py
+    dest: "{{ olist_iceberg_materialization_spark_script }}"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
+- name: Construct isolated Spark submit argument list
+  ansible.builtin.set_fact:
+    olist_iceberg_materialization_spark_argv:
+      - spark-submit
+      - --master
+      - yarn
+      - --deploy-mode
+      - cluster
+      - --name
+      - olist-iceberg-materialize-step58-v3
+      - --queue
+      - "{{ olist_iceberg_materialization_queue }}"
+      - --driver-memory
+      - "{{ olist_iceberg_materialization_driver_memory }}"
+      - --executor-memory
+      - "{{ olist_iceberg_materialization_executor_memory }}"
+      - --executor-cores
+      - "{{ olist_iceberg_materialization_executor_cores | string }}"
+      - --num-executors
+      - "{{ olist_iceberg_materialization_num_executors | string }}"
+      - --jars
+      - "{{ olist_iceberg_materialization_spark_dir }}/{{ olist_iceberg_materialization_jar_name }}"
+      - --conf
+      - spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+      - --conf
+      - spark.sql.catalog.shared=org.apache.iceberg.spark.SparkCatalog
+      - --conf
+      - spark.sql.catalog.shared.type=rest
+      - --conf
+      - "spark.sql.catalog.shared.uri={{ olist_iceberg_materialization_rest_uri }}"
+      # Do not set spark.sql.catalog.shared.warehouse to an HDFS path.
+      # For Gravitino REST this selects a catalog backend, not a data location.
+      # The physical HDFS warehouse is configured on the server in Step 56.
+      - --conf
+      - "spark.sql.shuffle.partitions={{ olist_iceberg_materialization_shuffle_partitions }}"
+      - --conf
+      - spark.sql.adaptive.enabled=true
+      - --conf
+      - spark.sql.session.timeZone=UTC
+      - --conf
+      - spark.pyspark.python=/usr/bin/python3
+      - --conf
+      - spark.yarn.submit.waitAppCompletion=true
+      - "{{ olist_iceberg_materialization_spark_script }}"
+
+- name: Run or verify all seven Iceberg tables with exact multiset parity on YARN
+  ansible.builtin.command:
+    argv: >-
+      {{ olist_iceberg_materialization_spark_argv +
+         (['--verify-only'] if (olist_iceberg_materialization_verify_only | bool) else []) }}
+  become: true
+  become_user: "{{ olist_iceberg_materialization_spark_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+    SPARK_CONF_DIR: /etc/spark/conf
+    PYSPARK_PYTHON: /usr/bin/python3
+  register: olist_iceberg_materialization_submit
+  changed_when: not (olist_iceberg_materialization_verify_only | bool)
+
+- name: Require completed Spark-generated HDFS proof
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -test, -e, /data/olist/iceberg-validation/step58/v3/_SUCCESS]
+  become: true
+  become_user: "{{ olist_iceberg_materialization_hdfs_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+
+- name: Read actual Spark proof written after all seven tables passed
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -text, /data/olist/iceberg-validation/step58/v3/part-*]
+  become: true
+  become_user: "{{ olist_iceberg_materialization_hdfs_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: olist_iceberg_materialization_proof
+  changed_when: false
+
+- name: Verify Spark proof schema and approved parity status
+  ansible.builtin.assert:
+    that:
+      - (olist_iceberg_materialization_proof.stdout | from_json).status == 'PASS'
+      - (olist_iceberg_materialization_proof.stdout | from_json).parity == 'bidirectional_exceptAll_exact_multiset'
+      - (olist_iceberg_materialization_proof.stdout | from_json).tables | length == 7
+    fail_msg: Step 58 did not yield the expected verified source-to-Iceberg materialization proof.
+
+- name: Create local artifacts directory (controller only)
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../artifacts"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  become: false
+
+- name: Save nonsecret proof JSON to worker3 for independent Trino checks
+  ansible.builtin.copy:
+    dest: "{{ olist_iceberg_materialization_local_proof }}"
+    content: "{{ olist_iceberg_materialization_proof.stdout | trim }}\n"
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+
+- name: Show Step 58 completion and verification instructions
+  ansible.builtin.debug:
+    msg:
+      - 'STEP58_ICEBERG_SILVER_GOLD_PASS: seven versioned tables created or verified'
+      - 'Step 52 approves original Parquet only; Step 58 is NOT a new Iceberg quality gate or WAP publish.'
+      - 'Next: python3 scripts/58-verify-trino.py --proof artifacts/58-iceberg-v3-proof.json'

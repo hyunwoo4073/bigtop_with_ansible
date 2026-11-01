@@ -1,0 +1,193 @@
+---
+- name: Verify SHA256 of both pinned artifacts on Ansible controller
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/57-verify-artifacts.py"
+      - "{{ trino_iceberg_rest_asset_dir }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Check whether Step 57 service unit already exists
+  ansible.builtin.stat:
+    path: /etc/systemd/system/bigtop-trino57.service
+  register: trino_iceberg_rest_existing_unit
+
+- name: Read free RAM on metadata for first installation only
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - "import re; s=open('/proc/meminfo').read(); print(int(re.search(r'^MemAvailable:\\s+(\\d+)', s, re.M).group(1))//1024)"
+  register: trino_iceberg_rest_mem_available
+  changed_when: false
+  when: not trino_iceberg_rest_existing_unit.stat.exists
+
+- name: Reject installation if it would steal OpenMetadata memory headroom
+  ansible.builtin.assert:
+    that:
+      - (trino_iceberg_rest_mem_available.stdout | int) >= (trino_iceberg_rest_min_available_mem_mib | int)
+    fail_msg: >-
+      metadata has less than 3000 MiB MemAvailable. Do not deploy a second JVM
+      until Docker/OpenMetadata memory is checked or VM RAM is increased.
+  when: not trino_iceberg_rest_existing_unit.stat.exists
+
+- name: Require REST catalog and HDFS TCP endpoints reachable from metadata
+  ansible.builtin.wait_for:
+    host: "{{ item.host }}"
+    port: "{{ item.port }}"
+    timeout: 5
+    connect_timeout: 3
+    state: started
+  loop:
+    - {host: '192.158.2.103', port: 9001}
+    - {host: '192.158.2.100', port: 9000}
+    - {host: '192.158.2.101', port: 9866}
+    - {host: '192.158.2.102', port: 9866}
+
+- name: Require HDFS node names resolvable on metadata
+  ansible.builtin.command:
+    argv: [getent, hosts, "{{ item }}"]
+  loop:
+    - master
+    - worker1
+    - worker2
+  changed_when: false
+
+- name: Check existing Trino port is free when not yet managed
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ trino_iceberg_rest_port }}"
+    timeout: 2
+    state: stopped
+  when: not trino_iceberg_rest_existing_unit.stat.exists
+
+- name: Ensure isolated Trino service account exists
+  ansible.builtin.user:
+    name: "{{ trino_iceberg_rest_service_user }}"
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+
+- name: Create isolated Trino install and state directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: '{{ trino_iceberg_rest_install_base }}', owner: root, group: root, mode: '0755'}
+    - {path: '{{ trino_iceberg_rest_install_base }}/server', owner: root, group: root, mode: '0755'}
+    - {path: '{{ trino_iceberg_rest_install_base }}/jdk25', owner: root, group: root, mode: '0755'}
+    - {path: '{{ trino_iceberg_rest_data_base }}', owner: trino57, group: trino57, mode: '0750'}
+    - {path: '{{ trino_iceberg_rest_data_base }}/data', owner: trino57, group: trino57, mode: '0750'}
+    - {path: '{{ trino_iceberg_rest_data_base }}/tmp', owner: trino57, group: trino57, mode: '0700'}
+    - {path: '{{ trino_iceberg_rest_config_base }}', owner: root, group: root, mode: '0755'}
+    - {path: '{{ trino_iceberg_rest_config_base }}/hadoop', owner: root, group: root, mode: '0755'}
+
+- name: Extract official Trino 484 release in isolated prefix
+  ansible.builtin.unarchive:
+    src: "{{ trino_iceberg_rest_asset_dir }}/trino-server-484.tar.gz"
+    dest: "{{ trino_iceberg_rest_install_base }}/server"
+    extra_opts: ['--strip-components=1']
+    creates: "{{ trino_iceberg_rest_install_base }}/server/bin/launcher"
+    owner: root
+    group: root
+
+- name: Extract dedicated Temurin JDK 25 without global java alternatives
+  ansible.builtin.unarchive:
+    src: "{{ trino_iceberg_rest_asset_dir }}/temurin25-jdk-linux-x64.tar.gz"
+    dest: "{{ trino_iceberg_rest_install_base }}/jdk25"
+    extra_opts: ['--strip-components=1']
+    creates: "{{ trino_iceberg_rest_install_base }}/jdk25/bin/java"
+    owner: root
+    group: root
+
+- name: Require JDK 25.0.1 or later, rather than Spark Java 11
+  ansible.builtin.command:
+    argv:
+      - "{{ trino_iceberg_rest_install_base }}/jdk25/bin/java"
+      - -version
+  register: trino_iceberg_rest_java_version
+  changed_when: false
+  failed_when: >-
+    trino_iceberg_rest_java_version.rc != 0 or
+    not (trino_iceberg_rest_java_version.stderr is search('version "25\\.0\\.[1-9][0-9]*'))
+
+- name: Create Trino etc and catalog directories (separate from Hadoop)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - "{{ trino_iceberg_rest_install_base }}/server/etc"
+    - "{{ trino_iceberg_rest_install_base }}/server/etc/catalog"
+
+- name: Render Trino node, memory, JVM and Iceberg REST catalog configs
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ trino_iceberg_rest_install_base }}/server/etc/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - {src: node.properties.j2, dest: node.properties}
+    - {src: config.properties.j2, dest: config.properties}
+    - {src: jvm.config.j2, dest: jvm.config}
+    - {src: iceberg_rest.properties.j2, dest: catalog/iceberg_rest.properties}
+  notify: Restart isolated Trino 57
+
+- name: Stage minimum HDFS client configuration on metadata
+  ansible.builtin.template:
+    src: core-site.xml.j2
+    dest: "{{ trino_iceberg_rest_config_base }}/hadoop/core-site.xml"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart isolated Trino 57
+
+- name: Install dedicated Step 57 service definition
+  ansible.builtin.template:
+    src: bigtop-trino57.service.j2
+    dest: /etc/systemd/system/bigtop-trino57.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart isolated Trino 57
+
+- name: Enable and start isolated Trino service
+  ansible.builtin.systemd_service:
+    name: bigtop-trino57.service
+    daemon_reload: true
+    enabled: true
+    state: started
+
+- name: Apply pending config changes before health probe
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for Trino REST HTTP info endpoint (startup may take time)
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ trino_iceberg_rest_port }}/v1/info"
+    method: GET
+    return_content: true
+    timeout: 10
+    status_code: 200
+  register: trino_iceberg_rest_info
+  until: >-
+    trino_iceberg_rest_info.status | default(0) == 200 and
+    trino_iceberg_rest_info.json.nodeVersion.version | default('') == trino_iceberg_rest_version
+  retries: 24
+  delay: 5
+  changed_when: false
+
+- name: Print Trino service summary, not a cross-engine PASS claim
+  ansible.builtin.debug:
+    msg:
+      - 'STEP57_TRINO_READY: http://192.158.2.104:8080'
+      - 'Catalog: iceberg_rest -> http://192.158.2.103:9001/iceberg/'
+      - 'HDFS: fs.hadoop.enabled=true; warehouse unchanged'
+      - 'Smoke: python3 scripts/57-verify-trino.py --url http://192.158.2.104:8080'

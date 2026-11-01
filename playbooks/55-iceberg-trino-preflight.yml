@@ -1,0 +1,72 @@
+---
+- name: Step 55 read-only inventory of all five Bigtop VMs
+  hosts: master:workers:ops:governance_nodes
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Collect nonsecret runtime, memory, service and HDFS client facts
+      ansible.builtin.script: "{{ playbook_dir }}/../scripts/55-probe-node.py"
+      register: step55_probe
+      changed_when: false
+
+    - name: Parse node probe result without changing remote services
+      ansible.builtin.set_fact:
+        step55_node_report: "{{ step55_probe.stdout | from_json }}"
+
+    - name: Check Step 53 Iceberg lab proof on HDFS
+      ansible.builtin.command:
+        argv:
+          - hdfs
+          - dfs
+          - -test
+          - -e
+          - /data/olist/iceberg-validation/step53/_SUCCESS
+      become: true
+      become_user: hadoop
+      environment:
+        HADOOP_CONF_DIR: /etc/hadoop/conf
+      register: step55_iceberg_proof
+      changed_when: false
+      failed_when: false
+      when: inventory_hostname == 'master'
+
+    - name: Record HDFS proof probe outcome
+      ansible.builtin.set_fact:
+        step55_hdfs_proof_exists: "{{ step55_iceberg_proof.rc == 0 }}"
+      when: inventory_hostname == 'master'
+
+- name: Write Step 55 environment report only on Ansible controller
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    step55_inventory_nodes: "{{ ((groups['master'] | default([])) + (groups['workers'] | default([])) + (groups['ops'] | default([])) + (groups['governance_nodes'] | default([]))) | unique | list }}"
+    step55_report_path: "{{ playbook_dir }}/../artifacts/55-iceberg-trino-preflight.json"
+  tasks:
+    - name: Require all five expected node probes to have returned
+      ansible.builtin.assert:
+        that:
+          - step55_inventory_nodes | length == 5
+          - "(step55_inventory_nodes | select('in', groups['all']) | list | length) == 5"
+          - hostvars[item].step55_node_report is defined
+        fail_msg: Step 55 needs a successful probe from every named VM.
+      loop: "{{ step55_inventory_nodes }}"
+
+    - name: Create local-only ignored artifacts directory
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/../artifacts"
+        state: directory
+        mode: '0700'
+
+    - name: Save reviewable nonsecret cluster report on worker3
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/55-iceberg-trino-report.json.j2"
+        dest: "{{ step55_report_path }}"
+        mode: '0600'
+
+    - name: Print report path and follow-up evaluation command
+      ansible.builtin.debug:
+        msg:
+          - "Preflight complete; no packages, configs, daemons, or HDFS data changed."
+          - "Report: {{ step55_report_path }}"
+          - "Review: python3 scripts/55-review-preflight.py artifacts/55-iceberg-trino-preflight.json"

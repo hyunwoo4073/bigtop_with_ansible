@@ -1,0 +1,271 @@
+---
+- name: Check offline vendor artifacts on controller
+  ansible.builtin.stat:
+    path: "{{ iceberg_rest_catalog_asset_dir }}/{{ item }}"
+    checksum_algorithm: sha256
+  loop:
+    - "{{ iceberg_rest_catalog_archive_name }}"
+    - "{{ iceberg_rest_catalog_jdk_archive_name }}"
+    - "{{ iceberg_rest_catalog_jdk_archive_name }}.sha256"
+    - "{{ iceberg_rest_catalog_jdbc_name }}"
+    - "{{ iceberg_rest_catalog_jdbc_name }}.sha256"
+  delegate_to: localhost
+  become: false
+  register: iceberg_rest_catalog_assets
+
+- name: Fail safely if archives missing
+  ansible.builtin.assert:
+    that:
+      - (iceberg_rest_catalog_assets.results | map(attribute='stat.exists') | list) | min
+      - iceberg_rest_catalog_assets.results[0].stat.checksum == iceberg_rest_catalog_archive_sha256
+    fail_msg: Download Step 56 artifacts on worker3 with scripts/56-fetch-iceberg-rest-assets.py first; require pinned Gravitino SHA256.
+
+- name: Verify downloaded JDK and JDBC checksums on controller
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - "{{ playbook_dir }}/../scripts/56-verify-artifacts.py"
+      - "{{ iceberg_rest_catalog_asset_dir }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Require worker3 PostgreSQL service running
+  ansible.builtin.command:
+    argv: [systemctl, is-active, postgresql]
+  changed_when: false
+
+- name: Check existing service unit
+  ansible.builtin.stat:
+    path: /etc/systemd/system/bigtop-iceberg-rest.service
+  register: iceberg_rest_catalog_service_existing
+
+- name: Ensure REST HTTP port not already used by another service
+  ansible.builtin.shell: "! ss -lnt | awk '{print $4}' | grep -Eq ':{{ iceberg_rest_catalog_port }}$'"
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when: not iceberg_rest_catalog_service_existing.stat.exists
+
+- name: Validate existing unit does not collide with another service
+  ansible.builtin.command:
+    argv: [systemctl, show, -p, FragmentPath, --value, bigtop-iceberg-rest.service]
+  changed_when: false
+  register: iceberg_rest_catalog_unit_path
+  when: iceberg_rest_catalog_service_existing.stat.exists
+
+- name: Create isolated OS service account
+  ansible.builtin.user:
+    name: "{{ iceberg_rest_catalog_service_user }}"
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+
+- name: Create install and state directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: '{{ iceberg_rest_catalog_install_base }}', owner: root, group: root, mode: '0755'}
+    - {path: '{{ iceberg_rest_catalog_install_base }}/server', owner: root, group: root, mode: '0755'}
+    - {path: '{{ iceberg_rest_catalog_install_base }}/jdk17', owner: root, group: root, mode: '0755'}
+    - {path: /etc/bigtop-iceberg-rest, owner: root, group: root, mode: '0700'}
+
+- name: Extract pinned standalone Gravitino release without changing existing Java
+  ansible.builtin.unarchive:
+    src: "{{ iceberg_rest_catalog_asset_dir }}/{{ iceberg_rest_catalog_archive_name }}"
+    dest: "{{ iceberg_rest_catalog_install_base }}/server"
+    extra_opts: ['--strip-components=1']
+    creates: "{{ iceberg_rest_catalog_install_base }}/server/bin/gravitino-iceberg-rest-server.sh"
+    owner: root
+    group: root
+
+- name: Ensure writable Gravitino logs directory for service user
+  ansible.builtin.file:
+    path: "{{ iceberg_rest_catalog_install_base }}/server/logs"
+    state: directory
+    owner: "{{ iceberg_rest_catalog_service_user }}"
+    group: "{{ iceberg_rest_catalog_service_user }}"
+    mode: '0750'
+
+- name: Extract dedicated portable Java 17 without changing system java alternatives
+  ansible.builtin.unarchive:
+    src: "{{ iceberg_rest_catalog_asset_dir }}/{{ iceberg_rest_catalog_jdk_archive_name }}"
+    dest: "{{ iceberg_rest_catalog_install_base }}/jdk17"
+    extra_opts: ['--strip-components=1']
+    creates: "{{ iceberg_rest_catalog_install_base }}/jdk17/bin/java"
+    owner: root
+    group: root
+
+- name: Verify dedicated JDK major version 17
+  ansible.builtin.command:
+    argv: ['{{ iceberg_rest_catalog_install_base }}/jdk17/bin/java', -version]
+  changed_when: false
+  register: iceberg_rest_catalog_java_version
+  failed_when: '"17." not in iceberg_rest_catalog_java_version.stderr and "17." not in iceberg_rest_catalog_java_version.stdout'
+
+- name: Stage JDBC driver into REST server libs
+  ansible.builtin.copy:
+    src: "{{ iceberg_rest_catalog_asset_dir }}/{{ iceberg_rest_catalog_jdbc_name }}"
+    dest: "{{ iceberg_rest_catalog_install_base }}/server/libs/{{ iceberg_rest_catalog_jdbc_name }}"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Iceberg REST server
+
+- name: Stage secure local PostgreSQL/bootstrap tool
+  ansible.builtin.copy:
+    src: ensure_catalog_postgres.py
+    dest: "{{ iceberg_rest_catalog_install_base }}/ensure_catalog_postgres.py"
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Provision local-only catalog password, DB and role (no secret output)
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - "{{ iceberg_rest_catalog_install_base }}/ensure_catalog_postgres.py"
+      - --secret
+      - /etc/bigtop-iceberg-rest/postgres.pass
+      - --role
+      - "{{ iceberg_rest_catalog_pg_user }}"
+      - --database
+      - "{{ iceberg_rest_catalog_pg_db }}"
+  no_log: true
+  register: iceberg_rest_catalog_pg_bootstrap
+  changed_when: "'CREATED' in iceberg_rest_catalog_pg_bootstrap.stdout"
+
+- name: Create isolated HDFS Iceberg warehouse as existing hadoop user
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -mkdir, -p, /data/olist/iceberg-rest]
+  delegate_to: master
+  become: true
+  become_user: hadoop
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+
+- name: Protect isolated HDFS warehouse
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -chmod, '0750', /data/olist/iceberg-rest]
+  delegate_to: master
+  become: true
+  become_user: hadoop
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+
+- name: Read HDFS core configuration from master
+  ansible.builtin.slurp:
+    src: /etc/hadoop/conf/core-site.xml
+  delegate_to: master
+  register: iceberg_rest_catalog_core_site
+
+- name: Read HDFS Namenode configuration from master
+  ansible.builtin.slurp:
+    src: /etc/hadoop/conf/hdfs-site.xml
+  delegate_to: master
+  register: iceberg_rest_catalog_hdfs_site
+
+- name: Stage HDFS client XML files in standalone classpath
+  ansible.builtin.copy:
+    content: "{{ item.content | b64decode }}"
+    dest: "{{ iceberg_rest_catalog_install_base }}/server/conf/{{ item.name }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - {name: core-site.xml, content: '{{ iceberg_rest_catalog_core_site.content }}'}
+    - {name: hdfs-site.xml, content: '{{ iceberg_rest_catalog_hdfs_site.content }}'}
+  notify: Restart Iceberg REST server
+
+- name: Restrict server config to root and service account
+  ansible.builtin.file:
+    path: "{{ iceberg_rest_catalog_install_base }}/server/conf"
+    state: directory
+    owner: root
+    group: "{{ iceberg_rest_catalog_service_user }}"
+    mode: '0750'
+
+- name: Render Postgres password into standalone server config without logging
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - "{{ iceberg_rest_catalog_install_base }}/ensure_catalog_postgres.py"
+      - --render
+      - --secret
+      - /etc/bigtop-iceberg-rest/postgres.pass
+      - --output
+      - "{{ iceberg_rest_catalog_install_base }}/server/conf/gravitino-iceberg-rest-server.conf"
+      - --dbuser
+      - "{{ iceberg_rest_catalog_pg_user }}"
+      - --dbname
+      - "{{ iceberg_rest_catalog_pg_db }}"
+      - --dbport
+      - "{{ iceberg_rest_catalog_pg_port | string }}"
+      - --warehouse
+      - "{{ iceberg_rest_catalog_hdfs_warehouse }}"
+      - --bind
+      - "{{ iceberg_rest_catalog_bind }}"
+      - --port
+      - "{{ iceberg_rest_catalog_port | string }}"
+      - --group
+      - "{{ iceberg_rest_catalog_service_user }}"
+  no_log: true
+  register: iceberg_rest_catalog_config_render
+  changed_when: "'CHANGED' in iceberg_rest_catalog_config_render.stdout"
+  notify: Restart Iceberg REST server
+
+- name: Install systemd service isolated from global Java
+  ansible.builtin.template:
+    src: bigtop-iceberg-rest.service.j2
+    dest: /etc/systemd/system/bigtop-iceberg-rest.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Iceberg REST server
+
+- name: Reload systemd unit definitions
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Start isolated Iceberg REST server
+  ansible.builtin.systemd_service:
+    name: bigtop-iceberg-rest.service
+    enabled: true
+    state: started
+
+- name: Flush pending restarts when relevant config changed
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for REST API to become available on worker3
+  ansible.builtin.uri:
+    url: 'http://{{ iceberg_rest_catalog_bind }}:{{ iceberg_rest_catalog_port }}/iceberg/v1/config'
+    method: GET
+    status_code: 200
+    return_content: true
+  register: iceberg_rest_catalog_health
+  retries: 12
+  delay: 5
+  until: iceberg_rest_catalog_health.status | default(0) == 200
+
+- name: Verify real catalog backend by listing namespaces via REST
+  ansible.builtin.uri:
+    url: 'http://{{ iceberg_rest_catalog_bind }}:{{ iceberg_rest_catalog_port }}/iceberg/v1/namespaces'
+    method: GET
+    status_code: 200
+    return_content: true
+  register: iceberg_rest_catalog_namespaces
+
+- name: Print nonsecret service summary
+  ansible.builtin.debug:
+    msg:
+      - 'STEP56_REST_READY: http://{{ iceberg_rest_catalog_bind }}:{{ iceberg_rest_catalog_port }}/iceberg/'
+      - 'PostgreSQL localhost-only catalog database: {{ iceberg_rest_catalog_pg_db }}'
+      - 'Warehouse: {{ iceberg_rest_catalog_hdfs_warehouse }}'
+      - 'Namespaces returned: {{ iceberg_rest_catalog_namespaces.json.namespaces | default([]) | length }}'
+      - 'Spark smoke: rerun -e iceberg_rest_catalog_apply=true -e iceberg_rest_catalog_spark_smoke=true'

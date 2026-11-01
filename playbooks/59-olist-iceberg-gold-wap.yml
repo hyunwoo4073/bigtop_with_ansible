@@ -1,0 +1,7 @@
+---
+- name: Step 59 Olist approved Iceberg Gold WAP with 29 Iceberg quality rules
+  hosts: master
+  gather_facts: false
+  become: false
+  roles:
+    - olist_iceberg_wap

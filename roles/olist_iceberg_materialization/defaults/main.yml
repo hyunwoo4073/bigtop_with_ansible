@@ -1,0 +1,22 @@
+---
+# Explicit apply only; Step 58 never changes Step 46/47/52 source artifacts.
+olist_iceberg_materialization_apply: false
+olist_iceberg_materialization_verify_only: false
+olist_iceberg_materialization_source_version: v3
+olist_iceberg_materialization_catalog: shared
+olist_iceberg_materialization_namespace: olist58_v3
+olist_iceberg_materialization_rest_uri: 'http://192.158.2.103:9001/iceberg/'
+olist_iceberg_materialization_warehouse: 'hdfs://master:9000/data/olist/iceberg-rest'
+olist_iceberg_materialization_spark_dir: /opt/bigtop-iceberg
+olist_iceberg_materialization_spark_script: /opt/bigtop-iceberg/olist_iceberg58.py
+olist_iceberg_materialization_jar_name: iceberg-spark-runtime-3.5_2.12-1.10.1.jar
+olist_iceberg_materialization_hdfs_user: hadoop
+olist_iceberg_materialization_spark_user: hadoop
+olist_iceberg_materialization_queue: batch
+olist_iceberg_materialization_driver_memory: 768m
+olist_iceberg_materialization_executor_memory: 768m
+olist_iceberg_materialization_executor_cores: 1
+olist_iceberg_materialization_num_executors: 1
+olist_iceberg_materialization_shuffle_partitions: 4
+olist_iceberg_materialization_proof_path: /data/olist/iceberg-validation/step58/v3
+olist_iceberg_materialization_local_proof: "{{ playbook_dir }}/../artifacts/58-iceberg-v3-proof.json"

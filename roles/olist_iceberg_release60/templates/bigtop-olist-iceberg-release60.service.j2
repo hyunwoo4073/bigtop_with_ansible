@@ -1,0 +1,16 @@
+[Unit]
+Description=Bigtop Step60 Olist Iceberg v3 guarded Gold release (manual one-shot)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User={{ olist_iceberg_release60_runner_user }}
+Group={{ olist_iceberg_release60_runner_user }}
+WorkingDirectory={{ olist_iceberg_release60_project_dir }}
+ExecStart=/usr/bin/python3 {{ olist_iceberg_release60_project_dir }}/scripts/60-run-iceberg-release.py --mode run --allow-publish --trino-url {{ olist_iceberg_release60_trino_url }}
+TimeoutStartSec=14400
+UMask=0077
+# Step58/59 use Ansible become (root/hadoop). Do not enable NoNewPrivileges.
+
+# Intentionally no [Install] section or timer: explicit systemctl start only.

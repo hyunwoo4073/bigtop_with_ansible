@@ -1,0 +1,25 @@
+[Unit]
+Description=Bigtop Iceberg REST Catalog (Gravitino {{ iceberg_rest_catalog_version }})
+Wants=network-online.target postgresql.service
+After=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User={{ iceberg_rest_catalog_service_user }}
+Group={{ iceberg_rest_catalog_service_user }}
+WorkingDirectory={{ iceberg_rest_catalog_install_base }}/server
+Environment=GRAVITINO_HOME={{ iceberg_rest_catalog_install_base }}/server
+Environment=JAVA_HOME={{ iceberg_rest_catalog_install_base }}/jdk17
+Environment=HADOOP_USER_NAME={{ iceberg_rest_catalog_hdfs_user }}
+Environment="GRAVITINO_MEM=-Xms{{ iceberg_rest_catalog_heap_initial }} -Xmx{{ iceberg_rest_catalog_heap_max }} -XX:MaxMetaspaceSize={{ iceberg_rest_catalog_metaspace_max }}"
+ExecStart=/bin/bash {{ iceberg_rest_catalog_install_base }}/server/bin/gravitino-iceberg-rest-server.sh run
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+LimitNOFILE=16384
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

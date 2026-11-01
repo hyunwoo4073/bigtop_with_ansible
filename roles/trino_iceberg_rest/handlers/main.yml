@@ -1,0 +1,6 @@
+---
+- name: Restart isolated Trino 57
+  ansible.builtin.systemd_service:
+    name: bigtop-trino57.service
+    state: restarted
+    daemon_reload: true

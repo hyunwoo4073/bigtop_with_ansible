@@ -1,0 +1,24 @@
+---
+- name: Validate Step 58 immutable/source/REST boundaries
+  ansible.builtin.assert:
+    that:
+      - olist_iceberg_materialization_source_version == 'v3'
+      - olist_iceberg_materialization_catalog == 'shared'
+      - olist_iceberg_materialization_namespace == 'olist58_v3'
+      - olist_iceberg_materialization_rest_uri == 'http://192.158.2.103:9001/iceberg/'
+      - olist_iceberg_materialization_warehouse == 'hdfs://master:9000/data/olist/iceberg-rest'
+      - olist_iceberg_materialization_proof_path == '/data/olist/iceberg-validation/step58/v3'
+      - olist_iceberg_materialization_shuffle_partitions | int >= 1
+      - olist_iceberg_materialization_num_executors | int == 1
+    fail_msg: Step 58 is restricted to the approved immutable Olist v3 and isolated Iceberg namespace.
+
+- name: Explain safe default for Step 58
+  ansible.builtin.debug:
+    msg: >-
+      STEP58_PLAN_ONLY: no Spark submission, namespace or table changes. Use
+      -e olist_iceberg_materialization_apply=true after reviewing docs/58-olist-iceberg-apply.md.
+  when: not (olist_iceberg_materialization_apply | bool)
+
+- name: Materialize approved v3 Parquet into isolated Iceberg tables only when explicitly requested
+  ansible.builtin.include_tasks: apply.yml
+  when: olist_iceberg_materialization_apply | bool
