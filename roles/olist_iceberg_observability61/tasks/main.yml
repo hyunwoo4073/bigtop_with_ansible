@@ -1,0 +1,204 @@
+---
+- name: Validate Step 61 topology and explicit apply boundary
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == 'worker3'
+      - olist_iceberg_observability61_project_dir is match('^/[^\n]+$')
+      - olist_iceberg_observability61_service_name == 'bigtop-olist-iceberg-observability61'
+      - olist_iceberg_observability61_dashboard_uid == 'bigtop-olist-iceberg61'
+      - olist_iceberg_observability61_metrics_file == 'olist_iceberg61.prom'
+      - olist_iceberg_observability61_rest_url is match('^https?://[^/]+/iceberg$')
+      - olist_iceberg_observability61_trino_url is match('^https?://[^/]+(:[0-9]+)?$')
+      - olist_iceberg_observability61_om_url is match('^https?://[^/]+/api$')
+      - olist_iceberg_observability61_datasource_uid is match('^[a-zA-Z0-9_-]+$')
+    fail_msg: Step61 only observes existing Step58-60 v3 release on worker3.
+
+- name: Ensure Step 61 controller script and immutable evidence exist
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ olist_iceberg_observability61_script_src }}"
+    - "{{ olist_iceberg_observability61_project_dir }}/artifacts/58-iceberg-v3-proof.json"
+    - "{{ olist_iceberg_observability61_project_dir }}/artifacts/59-olist-wap-stage.json"
+    - "{{ olist_iceberg_observability61_project_dir }}/artifacts/59-olist-wap-publish.json"
+    - "{{ olist_iceberg_observability61_project_dir }}/artifacts/60-iceberg-release-last-attempt.json"
+  register: olist_iceberg_observability61_prerequisites
+
+- name: Refuse missing Step 58-60 evidence or script
+  ansible.builtin.assert:
+    that:
+      - item.stat.isreg | default(false)
+    fail_msg: "Step61 missing local evidence: {{ item.item }}"
+  loop: "{{ olist_iceberg_observability61_prerequisites.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Verify existing OpenMetadata Bot token remains private
+  ansible.builtin.stat:
+    path: "{{ olist_iceberg_observability61_token_file }}"
+  become: true
+  register: olist_iceberg_observability61_token_stat
+  no_log: true
+
+- name: Require existing private OpenMetadata Bot token
+  ansible.builtin.assert:
+    that:
+      - olist_iceberg_observability61_token_stat.stat.isreg | default(false)
+      - not (olist_iceberg_observability61_token_stat.stat.islnk | default(false))
+      - olist_iceberg_observability61_token_stat.stat.mode == '0600'
+    fail_msg: Use the existing Step42 0600 OpenMetadata Bot token; never commit a token.
+
+- name: Validate existing Grafana file provider and metrics directory before deployment
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /etc/grafana/provisioning/dashboards/platform.yml
+    - /etc/grafana/provisioning/datasources/prometheus.yml
+    - "{{ olist_iceberg_observability61_dashboard_dir }}"
+    - "{{ olist_iceberg_observability61_metrics_dir }}"
+  register: olist_iceberg_observability61_infra
+  when: olist_iceberg_observability61_apply | bool
+
+- name: Refuse to create a replacement monitoring infrastructure
+  ansible.builtin.assert:
+    that:
+      - olist_iceberg_observability61_infra.results[0].stat.isreg | default(false)
+      - olist_iceberg_observability61_infra.results[1].stat.isreg | default(false)
+      - olist_iceberg_observability61_infra.results[2].stat.isdir | default(false)
+      - olist_iceberg_observability61_infra.results[3].stat.isdir | default(false)
+    fail_msg: Existing Step49 Grafana provisioning and Step48 Node Exporter textfile dir required.
+  when: olist_iceberg_observability61_apply | bool
+
+- name: Read Grafana file provider configuration
+  ansible.builtin.slurp:
+    src: /etc/grafana/provisioning/dashboards/platform.yml
+  register: olist_iceberg_observability61_provider_raw
+  when: olist_iceberg_observability61_apply | bool
+
+- name: Read Grafana Prometheus datasource configuration
+  ansible.builtin.slurp:
+    src: /etc/grafana/provisioning/datasources/prometheus.yml
+  register: olist_iceberg_observability61_datasource_raw
+  when: olist_iceberg_observability61_apply | bool
+
+- name: Validate provisioning is compatible with Step 49
+  ansible.builtin.assert:
+    that:
+      - (olist_iceberg_observability61_provider_raw.content | b64decode | from_yaml).providers[0].options.path == olist_iceberg_observability61_dashboard_dir
+      - (olist_iceberg_observability61_datasource_raw.content | b64decode | from_yaml).datasources[0].uid == olist_iceberg_observability61_datasource_uid
+    fail_msg: Step61 will not replace or silently reconfigure existing Grafana provisioning.
+  when: olist_iceberg_observability61_apply | bool
+
+- name: Ensure root-owned observer installation directory
+  ansible.builtin.file:
+    path: "{{ olist_iceberg_observability61_install_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+  when: olist_iceberg_observability61_apply | bool
+
+- name: Install Step 61 read-only observation executable
+  ansible.builtin.copy:
+    src: "{{ olist_iceberg_observability61_script_src }}"
+    dest: "{{ olist_iceberg_observability61_install_dir }}/observe.py"
+    owner: root
+    group: root
+    mode: '0750'
+  become: true
+  when: olist_iceberg_observability61_apply | bool
+
+- name: Deploy independent Step 61 Grafana dashboard
+  ansible.builtin.template:
+    src: olist-iceberg-release61.json.j2
+    dest: "{{ olist_iceberg_observability61_dashboard_dir }}/{{ olist_iceberg_observability61_dashboard_file }}"
+    owner: grafana
+    group: grafana
+    mode: '0644'
+  become: true
+  when: olist_iceberg_observability61_apply | bool
+
+- name: Validate Step 61 rendered Grafana dashboard JSON
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -m
+      - json.tool
+      - "{{ olist_iceberg_observability61_dashboard_dir }}/{{ olist_iceberg_observability61_dashboard_file }}"
+  changed_when: false
+  when: olist_iceberg_observability61_apply | bool
+
+- name: Install read-only observer oneshot unit without starting it
+  ansible.builtin.template:
+    src: bigtop-olist-iceberg-observability61.service.j2
+    dest: "/etc/systemd/system/{{ olist_iceberg_observability61_service_name }}.service"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  register: olist_iceberg_observability61_unit_result
+  when: olist_iceberg_observability61_apply | bool
+
+- name: Install optional scheduled verification timer
+  ansible.builtin.template:
+    src: bigtop-olist-iceberg-observability61.timer.j2
+    dest: "/etc/systemd/system/{{ olist_iceberg_observability61_service_name }}.timer"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  register: olist_iceberg_observability61_timer_result
+  when: olist_iceberg_observability61_apply | bool
+
+- name: Reload systemd only when observer units change
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  become: true
+  when:
+    - olist_iceberg_observability61_apply | bool
+    - (olist_iceberg_observability61_unit_result.changed | default(false)) or (olist_iceberg_observability61_timer_result.changed | default(false))
+
+- name: Keep timer disabled by default, optional hourly verification only
+  ansible.builtin.systemd_service:
+    name: "{{ olist_iceberg_observability61_service_name }}.timer"
+    enabled: "{{ olist_iceberg_observability61_timer_enabled | bool }}"
+    state: "{{ 'started' if (olist_iceberg_observability61_timer_enabled | bool) else 'stopped' }}"
+  become: true
+  when: olist_iceberg_observability61_apply | bool
+
+- name: Explain manual metadata import and observation validation
+  ansible.builtin.debug:
+    msg:
+      - 'Step61 deployment never changes Iceberg or starts any ETL.'
+      - 'Register missing OM assets manually: sudo python3 scripts/61-iceberg-observability.py --mode apply'
+      - 'Then verify metrics: sudo systemctl start bigtop-olist-iceberg-observability61.service'
+      - 'Timer is disabled by default; enable only after manual health verification.'
+  when: olist_iceberg_observability61_apply | bool
+
+- name: Run read-only Step 61 plan without API mutation
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - "{{ olist_iceberg_observability61_script_src }}"
+      - --mode
+      - plan
+      - --project
+      - "{{ olist_iceberg_observability61_project_dir }}"
+      - --rest-url
+      - "{{ olist_iceberg_observability61_rest_url }}"
+      - --trino-url
+      - "{{ olist_iceberg_observability61_trino_url }}"
+      - --om-url
+      - "{{ olist_iceberg_observability61_om_url }}"
+      - --token-file
+      - "{{ olist_iceberg_observability61_token_file }}"
+  become: true
+  changed_when: false
+  register: olist_iceberg_observability61_plan
+  when: not (olist_iceberg_observability61_apply | bool)
+
+- name: Display validated read-only Iceberg observability plan
+  ansible.builtin.debug:
+    msg: "{{ olist_iceberg_observability61_plan.stdout_lines }}"
+  when: not (olist_iceberg_observability61_apply | bool)

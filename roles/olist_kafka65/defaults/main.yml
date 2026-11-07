@@ -1,0 +1,19 @@
+---
+olist_kafka65_mode: plan
+olist_kafka65_bootstrap: '192.158.2.101:9092,192.158.2.102:9092,192.158.2.103:9092'
+olist_kafka65_topic: bigtop_olist_step65_cdc_v1
+olist_kafka65_rest_uri: http://192.158.2.103:9001/iceberg/
+olist_kafka65_script_dir: /opt/bigtop-iceberg/step65
+olist_kafka65_app: /opt/bigtop-iceberg/step65/olist_kafka65.py
+olist_kafka65_control: /opt/bigtop-iceberg/step65/step65_yarn_control.py
+olist_kafka65_iceberg_jar: /opt/bigtop-iceberg/iceberg-spark-runtime-3.5_2.12-1.10.1.jar
+olist_kafka65_jar_dir: /opt/bigtop-iceberg/kafka64
+olist_kafka65_asset_dir: "{{ playbook_dir }}/../vendor/kafka64"
+olist_kafka65_user: hadoop
+olist_kafka65_queue: batch
+olist_kafka65_jars:
+  - spark-sql-kafka-0-10_2.12-3.5.6.jar
+  - spark-token-provider-kafka-0-10_2.12-3.5.6.jar
+  - kafka-clients-3.4.1.jar
+  - commons-pool2-2.11.1.jar
+  - jsr305-3.0.0.jar

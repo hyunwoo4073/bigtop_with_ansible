@@ -1,0 +1,95 @@
+---
+- name: Require isolated metadata VM and supported mode
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == 'metadata'
+      - kafka_ui64c_mode in ['plan', 'apply', 'verify']
+      - kafka_ui64c_bind_ip == '192.158.2.104'
+      - kafka_ui64c_host_port | int == 18081
+      - kafka_ui64c_memory_mib | int >= 768
+      - kafka_ui64c_memory_mib | int <= 1536
+      - kafka_ui64c_bootstrap == '192.158.2.101:9092,192.158.2.102:9092,192.158.2.103:9092'
+    fail_msg: 'Step64C is restricted to a read-only UI on metadata VM.'
+
+- name: Check existing Docker daemon on metadata
+  ansible.builtin.command:
+    argv: [docker, info]
+  become: true
+  register: kafka_ui64c_docker_info
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Require Docker daemon without installing or changing it
+  ansible.builtin.assert:
+    that:
+      - kafka_ui64c_docker_info.rc == 0
+    fail_msg: 'Docker unavailable on metadata. Step64C will not install or restart Docker.'
+
+- name: Check all three Kafka brokers from metadata VM
+  ansible.builtin.wait_for:
+    host: '{{ item.host }}'
+    port: '{{ item.port }}'
+    state: started
+    connect_timeout: 2
+    timeout: 4
+  loop: '{{ kafka_ui64c_brokers }}'
+  loop_control:
+    label: '{{ item.host }}:{{ item.port }}'
+
+- name: Read available metadata VM memory in MiB
+  ansible.builtin.command:
+    argv:
+      - awk
+      - '/^MemAvailable:/ {print int($2 / 1024)}'
+      - /proc/meminfo
+  register: kafka_ui64c_available_memory
+  changed_when: false
+
+- name: Inspect any existing Step64C container without modifying it
+  ansible.builtin.command:
+    argv: [docker, container, inspect, '{{ kafka_ui64c_container_name }}']
+  become: true
+  register: kafka_ui64c_container_inspect
+  changed_when: false
+  failed_when: false
+
+- name: Refuse to overwrite or take over an incompatible existing container
+  ansible.builtin.assert:
+    that:
+      - (kafka_ui64c_container_inspect.stdout | from_json)[0].Config.Image == kafka_ui64c_image
+      - "'KAFKA_CLUSTERS_0_READONLY=true' in (kafka_ui64c_container_inspect.stdout | from_json)[0].Config.Env"
+      - "'DYNAMIC_CONFIG_ENABLED=false' in (kafka_ui64c_container_inspect.stdout | from_json)[0].Config.Env"
+      - "(kafka_ui64c_container_inspect.stdout | from_json)[0].HostConfig.PortBindings['8080/tcp'][0].HostIp == kafka_ui64c_bind_ip"
+      - "(kafka_ui64c_container_inspect.stdout | from_json)[0].HostConfig.PortBindings['8080/tcp'][0].HostPort == (kafka_ui64c_host_port | string)"
+    fail_msg: 'Existing container has different image, port or read-only policy. Inspect it manually; no replacement will occur.'
+  when: kafka_ui64c_container_inspect.rc == 0
+
+- name: Refuse to start an extra JVM when memory headroom is insufficient
+  ansible.builtin.assert:
+    that:
+      - kafka_ui64c_available_memory.stdout | int >= kafka_ui64c_min_available_mib | int
+    fail_msg: 'metadata VM MemAvailable is too small for a separate 1 GiB Kafbat UI container. Do not crowd Trino/OpenMetadata.'
+  when:
+    - kafka_ui64c_mode == 'apply'
+    - kafka_ui64c_container_inspect.rc != 0
+
+- name: Ensure the selected internal-only port is free before new installation
+  ansible.builtin.wait_for:
+    host: '{{ kafka_ui64c_bind_ip }}'
+    port: '{{ kafka_ui64c_host_port }}'
+    state: stopped
+    connect_timeout: 1
+    timeout: 2
+  when:
+    - kafka_ui64c_mode == 'apply'
+    - kafka_ui64c_container_inspect.rc != 0
+
+- name: Show safe integration plan
+  ansible.builtin.debug:
+    msg:
+      - 'STEP64C_PREFLIGHT_PASS: existing Docker and Kafka broker reachability checked'
+      - 'mode={{ kafka_ui64c_mode }}, metadata MemAvailable={{ kafka_ui64c_available_memory.stdout }} MiB'
+      - 'image={{ kafka_ui64c_image }}; container memory limit={{ kafka_ui64c_memory_mib }} MiB'
+      - 'UI URL=http://{{ kafka_ui64c_bind_ip }}:{{ kafka_ui64c_host_port }}'
+      - 'Read-only Kafka UI; no broker restarts, topic changes or Docker installation'

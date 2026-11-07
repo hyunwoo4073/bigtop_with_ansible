@@ -1,0 +1,3 @@
+---
+- name: Run safe default prerequisite inspection
+  ansible.builtin.import_tasks: preflight.yml

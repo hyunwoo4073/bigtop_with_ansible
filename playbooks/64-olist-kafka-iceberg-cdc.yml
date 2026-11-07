@@ -1,0 +1,7 @@
+---
+- name: Step 64 isolated Kafka Structured Streaming CDC to Iceberg lab
+  hosts: master
+  gather_facts: false
+  become: false
+  roles:
+    - role: olist_iceberg_kafka64

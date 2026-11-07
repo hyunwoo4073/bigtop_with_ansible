@@ -1,0 +1,429 @@
+{
+  "uid": "bigtop-olist-iceberg61",
+  "title": "Olist Iceberg Release & Quality (Step 61)",
+  "tags": [
+    "bigtop",
+    "iceberg",
+    "olist",
+    "quality",
+    "lineage"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "browser",
+  "refresh": "1m",
+  "editable": false,
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "description": "Immutable approved v3 only. 8 REST Iceberg tables, 29 DQ checks, published Gold main, eight manual evidence-based OpenMetadata edges. No new streaming ingestion. No data is not success.",
+  "annotations": {
+    "list": []
+  },
+  "links": [
+    {
+      "type": "link",
+      "title": "OpenMetadata — manually registered Iceberg containers",
+      "url": "http://192.158.2.104:8585",
+      "targetBlank": true,
+      "includeVars": false,
+      "keepTime": false
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "End-to-end Read Verification",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "{{ olist_iceberg_observability61_datasource_uid }}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "olist_iceberg61_observation_success{source_version=\"v3\"}",
+          "instant": true,
+          "range": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "{{ olist_iceberg_observability61_datasource_uid }}"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Gold Main Snapshot Verified",
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "{{ olist_iceberg_observability61_datasource_uid }}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "olist_iceberg61_main_snapshot_verified{source_version=\"v3\"}",
+          "instant": true,
+          "range": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "{{ olist_iceberg_observability61_datasource_uid }}"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Quality Checks Passed",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "{{ olist_iceberg_observability61_datasource_uid }}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "olist_iceberg61_quality_checks_passed{source_version=\"v3\"}",
+          "instant": true,
+          "range": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "{{ olist_iceberg_observability61_datasource_uid }}"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Gold Published Rows",
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "{{ olist_iceberg_observability61_datasource_uid }}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "olist_iceberg61_published_gold_rows{source_version=\"v3\"}",
+          "instant": true,
+          "range": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "{{ olist_iceberg_observability61_datasource_uid }}"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "OpenMetadata Iceberg Assets",
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 6,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "{{ olist_iceberg_observability61_datasource_uid }}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "olist_iceberg61_openmetadata_assets{source_version=\"v3\"}",
+          "instant": true,
+          "range": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "{{ olist_iceberg_observability61_datasource_uid }}"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "OpenMetadata Lineage Edges",
+      "gridPos": {
+        "x": 6,
+        "y": 6,
+        "w": 6,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "{{ olist_iceberg_observability61_datasource_uid }}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "olist_iceberg61_openmetadata_edges{source_version=\"v3\"}",
+          "instant": true,
+          "range": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "{{ olist_iceberg_observability61_datasource_uid }}"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Last Verification (UTC)",
+      "gridPos": {
+        "x": 12,
+        "y": 6,
+        "w": 6,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "{{ olist_iceberg_observability61_datasource_uid }}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "olist_iceberg61_last_check_timestamp_seconds{source_version=\"v3\"} * 1000",
+          "instant": true,
+          "range": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "{{ olist_iceberg_observability61_datasource_uid }}"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dateTimeAsIso"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Verification Age (seconds)",
+      "gridPos": {
+        "x": 18,
+        "y": 6,
+        "w": 6,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "{{ olist_iceberg_observability61_datasource_uid }}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - olist_iceberg61_last_check_timestamp_seconds{source_version=\"v3\"}",
+          "instant": true,
+          "range": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "{{ olist_iceberg_observability61_datasource_uid }}"
+          }
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Iceberg Observation Success History (1 = healthy)",
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 24,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "{{ olist_iceberg_observability61_datasource_uid }}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "olist_iceberg61_observation_success{source_version=\"v3\"}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "{{ olist_iceberg_observability61_datasource_uid }}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    }
+  ]
+}

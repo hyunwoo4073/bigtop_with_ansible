@@ -1,0 +1,16 @@
+---
+# Read-only by default. Only isolated shared.olist62_ops.maintenance_smoke can be mutated.
+olist_iceberg_maintenance62_mode: plan
+olist_iceberg_maintenance62_confirm_expire_sandbox: false
+olist_iceberg_maintenance62_jar: /opt/bigtop-iceberg/iceberg-spark-runtime-3.5_2.12-1.10.1.jar
+olist_iceberg_maintenance62_script: /opt/bigtop-iceberg/olist_iceberg_maintenance62.py
+olist_iceberg_maintenance62_rest_uri: 'http://192.158.2.103:9001/iceberg/'
+olist_iceberg_maintenance62_hdfs_user: hadoop
+olist_iceberg_maintenance62_spark_user: hadoop
+olist_iceberg_maintenance62_queue: batch
+olist_iceberg_maintenance62_driver_memory: 768m
+olist_iceberg_maintenance62_executor_memory: 768m
+olist_iceberg_maintenance62_num_executors: 1
+olist_iceberg_maintenance62_proof_root: /data/olist/iceberg-validation/step62/v1
+olist_iceberg_maintenance62_local_lab_proof: "{{ playbook_dir }}/../artifacts/62-iceberg-maintenance-lab.json"
+olist_iceberg_maintenance62_local_expire_proof: "{{ playbook_dir }}/../artifacts/62-iceberg-maintenance-expire.json"

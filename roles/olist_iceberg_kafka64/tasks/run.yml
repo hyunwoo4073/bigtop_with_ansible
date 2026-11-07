@@ -1,0 +1,216 @@
+---
+- name: Confirm pinned Step53 Iceberg Spark runtime
+  ansible.builtin.stat:
+    path: "{{ olist_iceberg_kafka64_iceberg_jar }}"
+  register: olist_iceberg_kafka64_iceberg_stat
+
+- name: Require matching existing Iceberg runtime
+  ansible.builtin.assert:
+    that:
+      - olist_iceberg_kafka64_iceberg_stat.stat.isreg | default(false)
+      - "'iceberg-spark-runtime-3.5_2.12-1.10.1.jar' in olist_iceberg_kafka64_iceberg_jar"
+
+- name: Validate offline Kafka jars only for Kafka modes
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/64-verify-kafka-jars.py"
+      - "{{ olist_iceberg_kafka64_asset_dir }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  when: olist_iceberg_kafka64_mode in ['produce', 'ingest', 'replay']
+
+- name: Ensure dedicated dependency folder exists on Spark client
+  ansible.builtin.file:
+    path: "{{ olist_iceberg_kafka64_remote_jar_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+  when: olist_iceberg_kafka64_mode in ['produce', 'ingest', 'replay']
+
+- name: Stage pinned Kafka client dependencies on master only
+  ansible.builtin.copy:
+    src: "{{ olist_iceberg_kafka64_asset_dir }}/{{ item }}"
+    dest: "{{ olist_iceberg_kafka64_remote_jar_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  loop: "{{ olist_iceberg_kafka64_jars }}"
+  when: olist_iceberg_kafka64_mode in ['produce', 'ingest', 'replay']
+
+- name: Stage isolated Step64 PySpark application
+  ansible.builtin.copy:
+    src: olist_iceberg_kafka64.py
+    dest: "{{ olist_iceberg_kafka64_script }}"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
+- name: Construct isolated Spark on YARN submission arguments
+  ansible.builtin.set_fact:
+    olist_iceberg_kafka64_spark_argv:
+      - spark-submit
+      - --master
+      - yarn
+      - --deploy-mode
+      - cluster
+      - --name
+      - "olist-iceberg-kafka64-{{ olist_iceberg_kafka64_mode }}"
+      - --queue
+      - "{{ olist_iceberg_kafka64_queue }}"
+      - --driver-memory
+      - "{{ olist_iceberg_kafka64_driver_memory }}"
+      - --executor-memory
+      - "{{ olist_iceberg_kafka64_executor_memory }}"
+      - --executor-cores
+      - '1'
+      - --num-executors
+      - "{{ olist_iceberg_kafka64_num_executors | string }}"
+      - --jars
+      - >-
+        {{
+          ([olist_iceberg_kafka64_iceberg_jar] +
+            (olist_iceberg_kafka64_jars
+             | map('regex_replace', '^', olist_iceberg_kafka64_remote_jar_dir + '/')
+             | list if olist_iceberg_kafka64_mode in ['produce', 'ingest', 'replay'] else []))
+          | join(',')
+        }}
+      - --conf
+      - spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+      - --conf
+      - spark.sql.catalog.shared=org.apache.iceberg.spark.SparkCatalog
+      - --conf
+      - spark.sql.catalog.shared.type=rest
+      - --conf
+      - "spark.sql.catalog.shared.uri={{ olist_iceberg_kafka64_rest_uri }}"
+      - --conf
+      - spark.sql.shuffle.partitions=4
+      - --conf
+      - spark.sql.adaptive.enabled=true
+      - --conf
+      - spark.sql.session.timeZone=UTC
+      - --conf
+      - spark.pyspark.python=/usr/bin/python3
+      - --conf
+      - spark.yarn.submit.waitAppCompletion=true
+      - "{{ olist_iceberg_kafka64_script }}"
+      - --mode
+      - "{{ olist_iceberg_kafka64_mode }}"
+
+- name: Submit Step64 to YARN in the selected mode
+  ansible.builtin.command:
+    argv: >-
+      {{
+        olist_iceberg_kafka64_spark_argv +
+        (['--bootstrap', olist_iceberg_kafka64_bootstrap]
+          if olist_iceberg_kafka64_mode in ['produce', 'ingest', 'replay'] else [])
+      }}
+  become: true
+  become_user: "{{ olist_iceberg_kafka64_spark_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+    SPARK_CONF_DIR: /etc/spark/conf
+    PYSPARK_PYTHON: /usr/bin/python3
+  register: olist_iceberg_kafka64_submit
+  changed_when: olist_iceberg_kafka64_mode in ['seed', 'produce', 'ingest', 'replay']
+
+- name: Read immutable Step64 seed evidence
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -cat, "{{ olist_iceberg_kafka64_proof_root }}/_SEED_REPORT.json"]
+  become: true
+  become_user: "{{ olist_iceberg_kafka64_spark_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: olist_iceberg_kafka64_seed_proof
+  changed_when: false
+
+- name: Require Step64 isolated baseline proof
+  ansible.builtin.assert:
+    that:
+      - (olist_iceberg_kafka64_seed_proof.stdout | from_json).status == 'PASS'
+      - (olist_iceberg_kafka64_seed_proof.stdout | from_json).table == 'shared.olist64_kafka.fact_cdc_stream_v1'
+      - (olist_iceberg_kafka64_seed_proof.stdout | from_json).rows == 516
+
+- name: Read immutable Step64 Kafka producer evidence
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -cat, "{{ olist_iceberg_kafka64_proof_root }}/_PRODUCE_REPORT.json"]
+  become: true
+  become_user: "{{ olist_iceberg_kafka64_spark_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: olist_iceberg_kafka64_produce_proof
+  changed_when: false
+  when: olist_iceberg_kafka64_mode in ['produce', 'ingest', 'replay', 'verify']
+
+- name: Require Step64 producer proof
+  ansible.builtin.assert:
+    that:
+      - (olist_iceberg_kafka64_produce_proof.stdout | from_json).status == 'PASS'
+      - (olist_iceberg_kafka64_produce_proof.stdout | from_json).messages == 48
+      - (olist_iceberg_kafka64_produce_proof.stdout | from_json).topic == 'bigtop_olist_step64_cdc_v1'
+  when: olist_iceberg_kafka64_mode in ['produce', 'ingest', 'replay', 'verify']
+
+- name: Read immutable Step64 ingestion evidence
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -cat, "{{ olist_iceberg_kafka64_proof_root }}/_INGEST_REPORT.json"]
+  become: true
+  become_user: "{{ olist_iceberg_kafka64_spark_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: olist_iceberg_kafka64_ingest_proof
+  changed_when: false
+  when: olist_iceberg_kafka64_mode in ['ingest', 'replay', 'verify']
+
+- name: Require Step64 successful Kafka ingestion evidence
+  ansible.builtin.assert:
+    that:
+      - (olist_iceberg_kafka64_ingest_proof.stdout | from_json).status == 'PASS'
+      - (olist_iceberg_kafka64_ingest_proof.stdout | from_json).rows == 520
+      - (olist_iceberg_kafka64_ingest_proof.stdout | from_json).live_rows == 512
+      - (olist_iceberg_kafka64_ingest_proof.stdout | from_json).tombstones == 8
+  when: olist_iceberg_kafka64_mode in ['ingest', 'replay', 'verify']
+
+- name: Ensure controller evidence directory
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../artifacts"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  become: false
+
+- name: Copy Step64 baseline evidence to controller
+  ansible.builtin.copy:
+    dest: "{{ olist_iceberg_kafka64_seed_local }}"
+    content: "{{ olist_iceberg_kafka64_seed_proof.stdout | trim }}\n"
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+
+- name: Copy Step64 Kafka producer evidence to controller
+  ansible.builtin.copy:
+    dest: "{{ olist_iceberg_kafka64_produce_local }}"
+    content: "{{ olist_iceberg_kafka64_produce_proof.stdout | trim }}\n"
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+  when: olist_iceberg_kafka64_mode in ['produce', 'ingest', 'replay', 'verify']
+
+- name: Copy Step64 Kafka ingestion evidence to controller
+  ansible.builtin.copy:
+    dest: "{{ olist_iceberg_kafka64_ingest_local }}"
+    content: "{{ olist_iceberg_kafka64_ingest_proof.stdout | trim }}\n"
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+  when: olist_iceberg_kafka64_mode in ['ingest', 'replay', 'verify']
+
+- name: Report selected Step64 result
+  ansible.builtin.debug:
+    msg:
+      - "STEP64_{{ olist_iceberg_kafka64_mode | upper }}_ANSIBLE_PASS"
+      - 'Spark stdout is in the YARN Driver logs; run scripts/64-verify-trino.py after ingest.'

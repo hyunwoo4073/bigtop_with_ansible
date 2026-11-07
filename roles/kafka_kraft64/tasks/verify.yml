@@ -1,0 +1,40 @@
+---
+- name: Wait for KRaft broker TCP listeners from worker3
+  ansible.builtin.wait_for:
+    host: "{{ kafka_kraft64_nodes[item].ip }}"
+    port: "{{ kafka_kraft64_client_port }}"
+    timeout: 60
+  loop: [worker1, worker2, worker3]
+
+- name: Read Kafka 3-voter KRaft quorum status
+  ansible.builtin.command:
+    argv:
+      - "{{ kafka_kraft64_home }}/kafka/bin/kafka-metadata-quorum.sh"
+      - --bootstrap-server
+      - "{{ kafka_kraft64_bootstrap }}"
+      - describe
+      - --status
+  environment:
+    JAVA_HOME: "{{ kafka_kraft64_home }}/jdk17"
+  register: kafka_kraft64_quorum
+  changed_when: false
+  retries: 12
+  delay: 5
+  until: kafka_kraft64_quorum.rc == 0
+
+- name: Require that all three KRaft voters are visible
+  ansible.builtin.assert:
+    that:
+      - "'LeaderId:' in kafka_kraft64_quorum.stdout"
+      - "'CurrentVoters:' in kafka_kraft64_quorum.stdout"
+      - "'1' in kafka_kraft64_quorum.stdout"
+      - "'2' in kafka_kraft64_quorum.stdout"
+      - "'3' in kafka_kraft64_quorum.stdout"
+    fail_msg: Kafka quorum is not ready; inspect Kafka journals on worker1/2/3.
+
+- name: Show three-broker Kafka quorum
+  ansible.builtin.debug:
+    msg:
+      - 'STEP64A_KAFKA_KRAFT_QUORUM_READY'
+      - "{{ kafka_kraft64_quorum.stdout_lines }}"
+      - 'Next run: scripts/64a-smoke-kafka.sh on worker3 for RF3 produce/consume validation.'

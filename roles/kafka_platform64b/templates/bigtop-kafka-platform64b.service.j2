@@ -1,0 +1,16 @@
+[Unit]
+Description=Bigtop Kafka KRaft64 read-only platform collector
+After=network-online.target bigtop-kafka-kraft64.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 {{ kafka_platform64b_script_dest }} --mode metrics --bootstrap {{ kafka_platform64b_bootstrap }} --metrics-path {{ kafka_platform64b_metrics_path }}
+TimeoutStartSec=150
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{ kafka_platform64b_metrics_dir }}

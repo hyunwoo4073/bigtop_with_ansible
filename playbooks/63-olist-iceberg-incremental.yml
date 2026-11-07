@@ -1,0 +1,7 @@
+---
+- name: Step 63 isolated Olist Iceberg CDC incremental MERGE and retry lab
+  hosts: master
+  gather_facts: false
+  become: false
+  roles:
+    - role: olist_iceberg_incremental63

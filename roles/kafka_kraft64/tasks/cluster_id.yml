@@ -1,0 +1,38 @@
+---
+- name: Create persistent Kafka configuration directory for stable cluster ID
+  ansible.builtin.file:
+    path: "{{ kafka_kraft64_conf_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Stage safe create-once cluster ID helper
+  ansible.builtin.copy:
+    src: kafka_cluster_id.py
+    dest: "{{ kafka_kraft64_conf_dir }}/kafka_cluster_id.py"
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Reuse existing persistent KRaft cluster ID or create it once
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - "{{ kafka_kraft64_conf_dir }}/kafka_cluster_id.py"
+      - "{{ kafka_kraft64_conf_dir }}/cluster.id"
+  register: kafka_kraft64_cluster_id_result
+  changed_when: "'STEP64A_CLUSTER_ID_CREATED' in kafka_kraft64_cluster_id_result.stdout"
+  become: true
+
+- name: Expose cluster ID to remaining Ansible plays
+  ansible.builtin.set_fact:
+    kafka_kraft64_cluster_id: "{{ kafka_kraft64_cluster_id_result.stdout.split()[-1] }}"
+
+- name: Verify cluster ID format is valid
+  ansible.builtin.assert:
+    that:
+      - kafka_kraft64_cluster_id | length == 22
+    fail_msg: Invalid Kafka cluster id; do not format storage.

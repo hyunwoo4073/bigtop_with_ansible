@@ -1,0 +1,100 @@
+---
+- name: Accept only supported modes and exact dedicated host set
+  ansible.builtin.assert:
+    that:
+      - kafka_kraft64_mode in ['plan', 'preflight', 'install', 'verify']
+      - inventory_hostname in kafka_kraft64_nodes
+      - kafka_kraft64_version == '4.2.2'
+      - kafka_kraft64_nodes | length == 3
+      - kafka_kraft64_heap == '512m'
+    fail_msg: Refuse unexpected Kafka topology, mode or memory limits.
+
+- name: Read available RAM in MiB without changing settings
+  ansible.builtin.command:
+    argv: [awk, '/^MemAvailable:/ {print int($2 / 1024)}', /proc/meminfo]
+  register: kafka_kraft64_mem_available
+  changed_when: false
+
+- name: Read /var/lib free disk space (KiB)
+  ansible.builtin.command:
+    argv: [df, -Pk, /var/lib]
+  register: kafka_kraft64_disk_space
+  changed_when: false
+
+- name: Check existing dedicated service unit
+  ansible.builtin.stat:
+    path: "/etc/systemd/system/{{ kafka_kraft64_unit }}.service"
+  register: kafka_kraft64_existing_unit
+
+- name: Read current listener sockets
+  ansible.builtin.command:
+    argv: [ss, -H, -ltn]
+  register: kafka_kraft64_listeners
+  changed_when: false
+
+- name: Require enough available RAM and disk before installing a co-located Kafka node
+  ansible.builtin.assert:
+    that:
+      - kafka_kraft64_mem_available.stdout | int >= kafka_kraft64_min_free_mb
+      - (kafka_kraft64_disk_space.stdout_lines[-1].split()[3] | int) >= kafka_kraft64_min_disk_kb
+    fail_msg: Not enough RAM or local disk for a safe Kafka lab install; add VM RAM/disk before retrying.
+  when:
+    - kafka_kraft64_mode in ['preflight', 'install']
+    - not kafka_kraft64_existing_unit.stat.exists
+
+- name: Refuse listener collisions before first installation
+  ansible.builtin.assert:
+    that:
+      - "(kafka_kraft64_listeners.stdout | regex_search('(?m):' ~ (kafka_kraft64_client_port | string) ~ '\\s')) is none"
+      - "(kafka_kraft64_listeners.stdout | regex_search('(?m):' ~ (kafka_kraft64_controller_port | string) ~ '\\s')) is none"
+    fail_msg: "Kafka listener collision on configured ports. Do not stop or overwrite another service; inspect ss -lntp."
+  when:
+    - kafka_kraft64_mode in ['preflight', 'install']
+    - not kafka_kraft64_existing_unit.stat.exists
+
+- name: Check if worker3 already has formatted Kafka storage
+  ansible.builtin.stat:
+    path: "{{ kafka_kraft64_data_dir }}/metadata/meta.properties"
+  register: kafka_kraft64_existing_metadata
+  when:
+    - kafka_kraft64_mode == 'install'
+    - inventory_hostname == 'worker3'
+  become: true
+
+- name: Check if worker3 persisted the Kafka cluster identity
+  ansible.builtin.stat:
+    path: "{{ kafka_kraft64_conf_dir }}/cluster.id"
+  register: kafka_kraft64_existing_cluster_id
+  when:
+    - kafka_kraft64_mode == 'install'
+    - inventory_hostname == 'worker3'
+  become: true
+
+- name: Refuse generating a new cluster ID for an already formatted cluster
+  ansible.builtin.assert:
+    that:
+      - not kafka_kraft64_existing_metadata.stat.exists or kafka_kraft64_existing_cluster_id.stat.exists
+    fail_msg: worker3 Kafka metadata exists but persisted cluster.id is missing; restore original, do not regenerate.
+  when:
+    - kafka_kraft64_mode == 'install'
+    - inventory_hostname == 'worker3'
+
+- name: Verify vendor Kafka and dedicated JDK17 archives on controller before install
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - "{{ playbook_dir }}/../scripts/64a-verify-kafka-assets.py"
+      - "{{ kafka_kraft64_asset_dir }}"
+      - "{{ kafka_kraft64_jdk_archive_path }}"
+      - "{{ kafka_kraft64_jdk_checksum_path }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  when: kafka_kraft64_mode == 'install'
+
+- name: Print Kafka lab plan without changing any Kafka data
+  ansible.builtin.debug:
+    msg:
+      - "mode={{ kafka_kraft64_mode }} host={{ inventory_hostname }} ip={{ kafka_kraft64_nodes[inventory_hostname].ip }} node_id={{ kafka_kraft64_nodes[inventory_hostname].id }}"
+      - "MemAvailable={{ kafka_kraft64_mem_available.stdout }} MiB free_disk_kb={{ kafka_kraft64_disk_space.stdout_lines[-1].split()[3] }}"
+      - 'KRaft combined broker+controller; RF=3/minISR=2; dedicated Java17 and systemd; existing HDFS/YARN and Java11 unchanged.'

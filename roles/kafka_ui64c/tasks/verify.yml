@@ -1,0 +1,41 @@
+---
+- name: Wait for the isolated Kafka UI TCP endpoint
+  ansible.builtin.wait_for:
+    host: '{{ kafka_ui64c_bind_ip }}'
+    port: '{{ kafka_ui64c_host_port }}'
+    state: started
+    delay: 2
+    timeout: 120
+
+- name: Confirm Kafka UI health endpoint
+  ansible.builtin.uri:
+    url: 'http://{{ kafka_ui64c_bind_ip }}:{{ kafka_ui64c_host_port }}/actuator/health'
+    method: GET
+    status_code: 200
+    return_content: true
+    timeout: 12
+  register: kafka_ui64c_health
+  until: kafka_ui64c_health.status == 200 and (kafka_ui64c_health.json.status | default('')) == 'UP'
+  retries: 10
+  delay: 4
+
+- name: Verify container is running and capped
+  ansible.builtin.command:
+    argv: [docker, container, inspect, '{{ kafka_ui64c_container_name }}']
+  become: true
+  register: kafka_ui64c_verified_container
+  changed_when: false
+
+- name: Reject stopped or unconstrained container
+  ansible.builtin.assert:
+    that:
+      - (kafka_ui64c_verified_container.stdout | from_json)[0].State.Running
+      - (kafka_ui64c_verified_container.stdout | from_json)[0].HostConfig.Memory == (kafka_ui64c_memory_mib | int * 1024 * 1024)
+      - "'KAFKA_CLUSTERS_0_READONLY=true' in (kafka_ui64c_verified_container.stdout | from_json)[0].Config.Env"
+
+- name: Report verified Kafka UI endpoint
+  ansible.builtin.debug:
+    msg:
+      - 'STEP64C_KAFBAT_UI_READY: http://{{ kafka_ui64c_bind_ip }}:{{ kafka_ui64c_host_port }}'
+      - 'KAFBAT_UI_HEALTH_UP; Kafka cluster read-only mode enabled'
+      - 'Check Brokers, Topics and Consumer Groups in the UI; broker/JMX metrics remain on Grafana'

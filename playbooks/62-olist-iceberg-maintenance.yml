@@ -1,0 +1,7 @@
+---
+- name: Step 62 read-only operations audit and isolated Iceberg maintenance exercises
+  hosts: master
+  gather_facts: false
+  become: false
+  roles:
+    - role: olist_iceberg_maintenance62

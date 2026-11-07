@@ -1,0 +1,18 @@
+---
+# Step61 is strictly a read-only inspector unless explicitly opted in.
+olist_iceberg_observability61_apply: false
+olist_iceberg_observability61_project_dir: /home/bae/bigtop-cluster-ansible
+olist_iceberg_observability61_script_src: "{{ playbook_dir | dirname }}/scripts/61-iceberg-observability.py"
+olist_iceberg_observability61_install_dir: /usr/local/lib/bigtop-olist/observability61
+olist_iceberg_observability61_service_name: bigtop-olist-iceberg-observability61
+olist_iceberg_observability61_token_file: /etc/bigtop-governance/pg-catalog/bot.token
+olist_iceberg_observability61_rest_url: http://192.158.2.103:9001/iceberg
+olist_iceberg_observability61_trino_url: http://192.158.2.104:8080
+olist_iceberg_observability61_om_url: http://192.158.2.104:8585/api
+olist_iceberg_observability61_metrics_dir: /var/lib/prometheus/node-exporter
+olist_iceberg_observability61_metrics_file: olist_iceberg61.prom
+olist_iceberg_observability61_dashboard_dir: "{{ grafana_dashboard_dir | default('/var/lib/grafana/dashboards') }}"
+olist_iceberg_observability61_dashboard_file: olist-iceberg-release61.json
+olist_iceberg_observability61_dashboard_uid: bigtop-olist-iceberg61
+olist_iceberg_observability61_datasource_uid: "{{ grafana_datasource_uid | default('prometheus') }}"
+olist_iceberg_observability61_timer_enabled: false

@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodic read-only Kafka cluster check (every 5m)
+
+[Timer]
+OnCalendar=*:0/5
+Persistent=false
+Unit={{ kafka_platform64b_service }}.service
+
+[Install]
+WantedBy=timers.target

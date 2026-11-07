@@ -1,0 +1,56 @@
+---
+- name: Require Step64 successful ingestion checkpoint proof
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -test
+      - -e
+      - /data/olist/iceberg-validation/step64/v1/_INGEST_REPORT.json
+  become: true
+  become_user: "{{ olist_kafka65_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+
+- name: Check Gravitino REST catalog service
+  ansible.builtin.uri:
+    url: "{{ olist_kafka65_rest_uri }}v1/config"
+    status_code: 200
+  changed_when: false
+
+- name: Check existing Iceberg runtime on Spark submission host
+  ansible.builtin.stat:
+    path: "{{ olist_kafka65_iceberg_jar }}"
+  register: olist_kafka65_iceberg_stat
+
+- name: Require pinned Spark Iceberg runtime
+  ansible.builtin.assert:
+    that:
+      - olist_kafka65_iceberg_stat.stat.isreg | default(false)
+      - "'iceberg-spark-runtime-3.5_2.12-1.10.1.jar' in olist_kafka65_iceberg_jar"
+
+- name: Check broker TCP reachability from Spark submission and execution hosts
+  ansible.builtin.wait_for:
+    host: "{{ item.1.split(':')[0] }}"
+    port: "{{ item.1.split(':')[1] | int }}"
+    state: started
+    timeout: 4
+  loop: "{{ ['master', 'worker1', 'worker2'] | product(olist_kafka65_bootstrap.split(',')) | list }}"
+  delegate_to: "{{ item.0 }}"
+  changed_when: false
+
+- name: Require existing dedicated Kafka topic before starting or producing
+  ansible.builtin.command:
+    argv:
+      - bash
+      - "{{ playbook_dir }}/../scripts/65-kafka-topic.sh"
+      - describe
+  delegate_to: worker3
+  changed_when: false
+  when: olist_kafka65_mode in ['start', 'produce', 'replay']
+
+- name: Announce Step65 verified preflight
+  ansible.builtin.debug:
+    msg: 'STEP65_PREFLIGHT_PASS: source proof, REST and 3 x Kafka broker connectivity'
+  when: olist_kafka65_mode == 'preflight'

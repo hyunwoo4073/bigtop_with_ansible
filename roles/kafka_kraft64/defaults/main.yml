@@ -1,0 +1,25 @@
+---
+kafka_kraft64_mode: plan
+# Kafka 4.2.2 is a supported 2026 patch release; no changes to Spark Java 11.
+kafka_kraft64_version: '4.2.2'
+kafka_kraft64_nodes:
+  worker1: {id: 1, ip: '192.158.2.101'}
+  worker2: {id: 2, ip: '192.158.2.102'}
+  worker3: {id: 3, ip: '192.158.2.103'}
+kafka_kraft64_client_port: 9092
+kafka_kraft64_controller_port: 19093
+kafka_kraft64_home: /opt/bigtop-kafka-kraft64
+kafka_kraft64_conf_dir: /etc/bigtop-kafka-kraft64
+kafka_kraft64_data_dir: /var/lib/bigtop-kafka-kraft64
+kafka_kraft64_service_user: bigtopkafka64
+kafka_kraft64_unit: bigtop-kafka-kraft64
+kafka_kraft64_archive: kafka_2.13-4.2.2.tgz
+kafka_kraft64_asset_dir: "{{ playbook_dir }}/../vendor/kafka-broker64"
+# Reuse verified dedicated Java 17 archive installed for Gravitino Step56.
+kafka_kraft64_jdk_archive_path: "{{ playbook_dir }}/../vendor/iceberg-rest/temurin17-jdk-linux-x64.tar.gz"
+kafka_kraft64_jdk_checksum_path: "{{ playbook_dir }}/../vendor/iceberg-rest/temurin17-jdk-linux-x64.tar.gz.sha256"
+kafka_kraft64_heap: 512m
+kafka_kraft64_memory_max: 1536M
+kafka_kraft64_min_free_mb: 1500
+kafka_kraft64_min_disk_kb: 3145728
+kafka_kraft64_bootstrap: '192.158.2.101:9092,192.158.2.102:9092,192.158.2.103:9092'

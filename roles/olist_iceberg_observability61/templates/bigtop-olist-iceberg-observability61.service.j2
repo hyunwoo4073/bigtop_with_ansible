@@ -1,0 +1,19 @@
+[Unit]
+Description=Bigtop Step61 Iceberg v3 release metadata and metrics read-only verification
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory={{ olist_iceberg_observability61_project_dir }}
+ExecStart=/usr/bin/python3 {{ olist_iceberg_observability61_install_dir }}/observe.py --mode verify --project {{ olist_iceberg_observability61_project_dir }} --rest-url {{ olist_iceberg_observability61_rest_url }} --trino-url {{ olist_iceberg_observability61_trino_url }} --om-url {{ olist_iceberg_observability61_om_url }} --token-file {{ olist_iceberg_observability61_token_file }} --metrics-file {{ olist_iceberg_observability61_metrics_dir }}/{{ olist_iceberg_observability61_metrics_file }}
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths={{ olist_iceberg_observability61_metrics_dir }}
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target
