@@ -1,0 +1,14 @@
+---
+kafka_ui64c_mode: plan
+kafka_ui64c_container_name: bigtop-kafbat-ui64c
+kafka_ui64c_image: ghcr.io/kafbat/kafka-ui:v1.5.0
+kafka_ui64c_bind_ip: '192.158.2.104'
+kafka_ui64c_host_port: 18081
+kafka_ui64c_memory_mib: 1024
+kafka_ui64c_min_available_mib: 1536
+kafka_ui64c_cluster_name: bigtop_kafka_kraft64
+kafka_ui64c_bootstrap: '192.158.2.101:9092,192.158.2.102:9092,192.158.2.103:9092'
+kafka_ui64c_brokers:
+  - {host: '192.158.2.101', port: 9092}
+  - {host: '192.158.2.102', port: 9092}
+  - {host: '192.158.2.103', port: 9092}

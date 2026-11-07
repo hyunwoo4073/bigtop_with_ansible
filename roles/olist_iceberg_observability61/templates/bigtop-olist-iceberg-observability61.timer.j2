@@ -1,0 +1,10 @@
+[Unit]
+Description=Optional hourly read-only Iceberg v3 observability verification
+
+[Timer]
+OnCalendar=hourly
+Persistent=false
+Unit={{ olist_iceberg_observability61_service_name }}.service
+
+[Install]
+WantedBy=timers.target

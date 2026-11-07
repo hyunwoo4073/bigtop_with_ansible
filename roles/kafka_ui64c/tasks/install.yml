@@ -1,0 +1,65 @@
+---
+- name: Check pinned image was prepared on metadata Docker host
+  ansible.builtin.command:
+    argv: [docker, image, inspect, '{{ kafka_ui64c_image }}']
+  become: true
+  register: kafka_ui64c_image_local
+  changed_when: false
+  failed_when: false
+  when: kafka_ui64c_container_inspect.rc != 0
+
+- name: Refuse implicit image pull in internal network
+  ansible.builtin.assert:
+    that:
+      - kafka_ui64c_image_local.rc == 0
+    fail_msg: 'Prepare pinned image on metadata first with docker pull or offline docker load; no implicit network download.'
+  when: kafka_ui64c_container_inspect.rc != 0
+
+- name: Create only Step64C read-only UI container
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --detach
+      - --pull=never
+      - --name
+      - '{{ kafka_ui64c_container_name }}'
+      - --restart
+      - unless-stopped
+      - --memory
+      - '{{ kafka_ui64c_memory_mib }}m'
+      - --memory-swap
+      - '{{ kafka_ui64c_memory_mib }}m'
+      - --cpus
+      - '1.0'
+      - --security-opt
+      - no-new-privileges
+      - --cap-drop
+      - ALL
+      - --publish
+      - '{{ kafka_ui64c_bind_ip }}:{{ kafka_ui64c_host_port }}:8080'
+      - --env
+      - 'KAFKA_CLUSTERS_0_NAME={{ kafka_ui64c_cluster_name }}'
+      - --env
+      - 'KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS={{ kafka_ui64c_bootstrap }}'
+      - --env
+      - KAFKA_CLUSTERS_0_READONLY=true
+      - --env
+      - DYNAMIC_CONFIG_ENABLED=false
+      - --env
+      - 'JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=60.0 -XX:InitialRAMPercentage=20.0'
+      - '{{ kafka_ui64c_image }}'
+  become: true
+  when: kafka_ui64c_container_inspect.rc != 0
+  register: kafka_ui64c_new_container
+  changed_when: kafka_ui64c_new_container.rc == 0
+
+- name: Start only an existing previously validated Step64C container
+  ansible.builtin.command:
+    argv: [docker, start, '{{ kafka_ui64c_container_name }}']
+  become: true
+  when:
+    - kafka_ui64c_container_inspect.rc == 0
+    - not (kafka_ui64c_container_inspect.stdout | from_json)[0].State.Running
+  register: kafka_ui64c_started_container
+  changed_when: kafka_ui64c_started_container.rc == 0

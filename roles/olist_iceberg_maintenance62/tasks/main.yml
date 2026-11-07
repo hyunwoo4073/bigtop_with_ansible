@@ -1,0 +1,55 @@
+---
+- name: Validate Step 62 isolation and execution mode
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == 'master'
+      - olist_iceberg_maintenance62_mode in ['plan', 'inspect', 'lab', 'verify', 'expire-lab']
+      - olist_iceberg_maintenance62_rest_uri == 'http://192.158.2.103:9001/iceberg/'
+      - olist_iceberg_maintenance62_proof_root == '/data/olist/iceberg-validation/step62/v1'
+      - olist_iceberg_maintenance62_num_executors | int == 1
+      - olist_iceberg_maintenance62_driver_memory == '768m'
+      - olist_iceberg_maintenance62_executor_memory == '768m'
+    fail_msg: Step62 refuses deployment outside the pinned Spark/REST sandbox.
+
+- name: Require explicit consent before expiring abandoned sandbox snapshot
+  ansible.builtin.assert:
+    that:
+      - olist_iceberg_maintenance62_confirm_expire_sandbox | bool
+    fail_msg: Set -e olist_iceberg_maintenance62_confirm_expire_sandbox=true only for expire-lab.
+  when: olist_iceberg_maintenance62_mode == 'expire-lab'
+
+- name: Require the approved Gold WAP publish proof for every mode
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -test
+      - -e
+      - /data/olist/iceberg-validation/step59/v3/_PUBLISH_REPORT.json
+  become: true
+  become_user: "{{ olist_iceberg_maintenance62_hdfs_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+
+- name: Require healthy shared Iceberg REST endpoint
+  ansible.builtin.uri:
+    url: "{{ olist_iceberg_maintenance62_rest_uri }}v1/config"
+    status_code: 200
+    return_content: false
+  changed_when: false
+
+- name: Print nonmutating Step 62 plan
+  ansible.builtin.debug:
+    msg:
+      - 'STEP62_PLAN_ONLY: existing Iceberg tables and HDFS remain unchanged.'
+      - 'inspect: read-only statistics for 58/59 tables; inspect output lives in YARN driver logs.'
+      - 'lab: isolated small-file compaction, faulty append and rollback on shared.olist62_ops.maintenance_smoke ONLY.'
+      - 'verify: immutable HDFS lab proof plus current data and protected main snapshot.'
+      - 'expire-lab: separately confirmed expiration of exactly one abandoned lab fault snapshot.'
+      - 'Never run expire_snapshots or remove_orphan_files against approved 58/59 tables in Step62.'
+  when: olist_iceberg_maintenance62_mode == 'plan'
+
+- name: Run explicit Step 62 Spark inspection or sandbox experiment
+  ansible.builtin.include_tasks: run.yml
+  when: olist_iceberg_maintenance62_mode != 'plan'

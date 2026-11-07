@@ -1,0 +1,23 @@
+---
+# Step64B: integrate existing 64A Kafka cluster into worker3 monitoring and OpenMetadata.
+- name: Step 64B Kafka platform integration without broker changes
+  hosts: worker3
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Validate existing Kafka monitoring prerequisites
+      ansible.builtin.include_role:
+        name: kafka_platform64b
+        tasks_from: preflight
+
+    - name: Install read-only monitoring integration on explicit apply
+      ansible.builtin.include_role:
+        name: kafka_platform64b
+        tasks_from: install
+      when: (kafka_platform64b_mode | default('plan')) == 'apply'
+
+    - name: Verify Kafka runtime metrics and dashboard after installation
+      ansible.builtin.include_role:
+        name: kafka_platform64b
+        tasks_from: verify
+      when: (kafka_platform64b_mode | default('plan')) == 'verify'

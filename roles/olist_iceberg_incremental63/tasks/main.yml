@@ -1,0 +1,51 @@
+---
+- name: Validate Step63 exact isolated scope and mode
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == 'master'
+      - olist_iceberg_incremental63_mode in ['plan', 'seed', 'apply', 'verify']
+      - olist_iceberg_incremental63_rest_uri == 'http://192.158.2.103:9001/iceberg/'
+      - olist_iceberg_incremental63_proof_root == '/data/olist/iceberg-validation/step63/v1'
+      - olist_iceberg_incremental63_num_executors | int == 1
+      - olist_iceberg_incremental63_driver_memory == '768m'
+      - olist_iceberg_incremental63_executor_memory == '768m'
+    fail_msg: Step63 only supports the pinned shared REST-Catalog sandbox.
+
+- name: Require Step59 published Gold evidence to exist
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -test, -e, /data/olist/iceberg-validation/step59/v3/_PUBLISH_REPORT.json]
+  become: true
+  become_user: "{{ olist_iceberg_incremental63_hdfs_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+
+- name: Require Step58 exact parity proof to exist
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -test, -e, /data/olist/iceberg-validation/step58/v3/_SUCCESS]
+  become: true
+  become_user: "{{ olist_iceberg_incremental63_hdfs_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+
+- name: Check REST Catalog is reachable
+  ansible.builtin.uri:
+    url: "{{ olist_iceberg_incremental63_rest_uri }}v1/config"
+    status_code: 200
+    return_content: false
+  changed_when: false
+
+- name: Explain isolated CDC lab plan
+  ansible.builtin.debug:
+    msg:
+      - 'STEP63_PLAN_ONLY: no Spark submit or Iceberg mutations.'
+      - 'seed: read 512 rows from Step58 Olist fact and create one isolated Iceberg table.'
+      - 'apply: replay 48 synthetic CDC events; 16 distinct keys, 8 updates, 4 tombstones, 4 inserts.'
+      - 'verify: recheck immutable HDFS evidence and expected full-table digest; Trino separate.'
+      - 'Step58 Silver and Step59 published Gold remain read-only; this is not real CDC ingestion.'
+  when: olist_iceberg_incremental63_mode == 'plan'
+
+- name: Run explicitly requested Step63 Spark mode
+  ansible.builtin.include_tasks: run.yml
+  when: olist_iceberg_incremental63_mode != 'plan'

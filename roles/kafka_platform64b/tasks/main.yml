@@ -1,0 +1,4 @@
+---
+- name: Explain Step64B entrypoints
+  ansible.builtin.debug:
+    msg: Use playbooks/64b-kafka-platform-integration.yml with plan, apply or verify.

@@ -1,0 +1,7 @@
+---
+- name: Step65 isolated persistent Kafka Spark Iceberg CDC operations
+  hosts: master
+  gather_facts: false
+  become: false
+  roles:
+    - role: olist_kafka65

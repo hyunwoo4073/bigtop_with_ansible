@@ -1,0 +1,91 @@
+---
+- name: Validate protected Step64 scope and mode
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == 'master'
+      - olist_iceberg_kafka64_mode in ['plan', 'preflight', 'seed', 'produce', 'ingest', 'replay', 'verify']
+      - olist_iceberg_kafka64_topic == 'bigtop_olist_step64_cdc_v1'
+      - olist_iceberg_kafka64_rest_uri == 'http://192.158.2.103:9001/iceberg/'
+      - olist_iceberg_kafka64_proof_root == '/data/olist/iceberg-validation/step64/v1'
+      - olist_iceberg_kafka64_driver_memory == '768m'
+      - olist_iceberg_kafka64_executor_memory == '768m'
+      - olist_iceberg_kafka64_num_executors | int == 1
+    fail_msg: Step64 must use the dedicated Kafka topic, table and fixed HDFS checkpoint.
+
+- name: Explain safe default and prerequisites
+  ansible.builtin.debug:
+    msg:
+      - 'STEP64_PLAN_ONLY: use existing 64-A Kafka 4.2.2 brokers; does not create topic.'
+      - 'Requires a real running Kafka cluster accessible from YARN workers, not just the controller.'
+      - 'Default brokers worker1/2/3:9092 (override only after verified broker topology changes).'
+      - 'Manually create dedicated Kafka topic with scripts/64-kafka-lab-topic.sh.'
+      - 'Only shared.olist64_kafka.fact_cdc_stream_v1 may be mutated.'
+      - 'Seed -> Produce -> Ingest -> Verify -> optional Replay -> Ingest.'
+      - 'Data is synthetic CDC published over REAL Kafka; this is not a CDC source connector.'
+  when: olist_iceberg_kafka64_mode == 'plan'
+
+- name: Require immutable Step63 applied evidence
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -test, -e, /data/olist/iceberg-validation/step63/v1/_APPLY_REPORT.json]
+  become: true
+  become_user: "{{ olist_iceberg_kafka64_spark_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+
+- name: Require Step59 published Gold evidence
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -test, -e, /data/olist/iceberg-validation/step59/v3/_PUBLISH_REPORT.json]
+  become: true
+  become_user: "{{ olist_iceberg_kafka64_spark_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+
+- name: Verify existing Gravitino REST endpoint
+  ansible.builtin.uri:
+    url: "{{ olist_iceberg_kafka64_rest_uri }}v1/config"
+    status_code: 200
+    return_content: false
+  changed_when: false
+
+- name: Require supplied Kafka broker endpoints for Kafka operations
+  ansible.builtin.assert:
+    that:
+      - olist_iceberg_kafka64_bootstrap | length > 0
+      - olist_iceberg_kafka64_bootstrap is match('^[A-Za-z0-9._-]+:[0-9]{1,5}(,[A-Za-z0-9._-]+:[0-9]{1,5})*$')
+    fail_msg: Invalid Kafka bootstrap endpoints; verify the installed 64-A broker addresses.
+  when: olist_iceberg_kafka64_mode in ['preflight', 'produce', 'ingest', 'replay']
+
+- name: Check TCP reachability of first Kafka broker from master
+  ansible.builtin.wait_for:
+    host: "{{ (olist_iceberg_kafka64_bootstrap.split(',') | first).split(':')[0] }}"
+    port: "{{ (olist_iceberg_kafka64_bootstrap.split(',') | first).split(':')[1] | int }}"
+    timeout: 4
+    state: started
+  changed_when: false
+  when: olist_iceberg_kafka64_mode in ['preflight', 'produce', 'ingest', 'replay']
+
+# Kafka Metadata may advertise any broker. Check all three from the master and
+# BOTH YARN worker nodes; checking only the bootstrap TCP endpoint is insufficient.
+- name: Check every Kafka broker port from master and YARN execution hosts
+  ansible.builtin.wait_for:
+    host: "{{ item.1.split(':')[0] }}"
+    port: "{{ item.1.split(':')[1] | int }}"
+    timeout: 4
+    state: started
+  delegate_to: "{{ item.0 }}"
+  loop: "{{ ['master', 'worker1', 'worker2'] | product(olist_iceberg_kafka64_bootstrap.split(',')) | list }}"
+  changed_when: false
+  when: olist_iceberg_kafka64_mode in ['preflight', 'produce', 'ingest', 'replay']
+
+- name: Announce nonmutating preflight success
+  ansible.builtin.debug:
+    msg: >-
+      STEP64_PREFLIGHT_TCP_PASS: all 3 Kafka broker ports reachable from master/worker1/worker2; check topic,
+      and YARN worker connectivity before producing.
+  when: olist_iceberg_kafka64_mode == 'preflight'
+
+- name: Run explicitly requested Spark CDC stage
+  ansible.builtin.include_tasks: run.yml
+  when: olist_iceberg_kafka64_mode in ['seed', 'produce', 'ingest', 'replay', 'verify']

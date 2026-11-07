@@ -1,0 +1,26 @@
+[Unit]
+Description=Bigtop Step64A Apache Kafka 4.2.2 KRaft combined lab node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ kafka_kraft64_service_user }}
+Group={{ kafka_kraft64_service_user }}
+Environment=JAVA_HOME={{ kafka_kraft64_home }}/jdk17
+Environment="KAFKA_HEAP_OPTS=-Xms{{ kafka_kraft64_heap }} -Xmx{{ kafka_kraft64_heap }}"
+Environment=LOG_DIR=/var/log/bigtop-kafka-kraft64
+ExecStart={{ kafka_kraft64_home }}/kafka/bin/kafka-server-start.sh {{ kafka_kraft64_conf_dir }}/server.properties
+Restart=on-failure
+RestartSec=7
+LimitNOFILE=65536
+MemoryMax={{ kafka_kraft64_memory_max }}
+TimeoutStopSec=120
+SuccessExitStatus=143
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths={{ kafka_kraft64_data_dir }} /var/log/bigtop-kafka-kraft64
+
+[Install]
+WantedBy=multi-user.target

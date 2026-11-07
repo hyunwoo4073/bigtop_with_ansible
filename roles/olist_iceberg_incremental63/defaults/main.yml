@@ -1,0 +1,15 @@
+---
+# Plan is read-only; never infer permission to seed or merge from installation.
+olist_iceberg_incremental63_mode: plan
+olist_iceberg_incremental63_jar: /opt/bigtop-iceberg/iceberg-spark-runtime-3.5_2.12-1.10.1.jar
+olist_iceberg_incremental63_script: /opt/bigtop-iceberg/olist_iceberg_incremental63.py
+olist_iceberg_incremental63_rest_uri: 'http://192.158.2.103:9001/iceberg/'
+olist_iceberg_incremental63_spark_user: hadoop
+olist_iceberg_incremental63_hdfs_user: hadoop
+olist_iceberg_incremental63_queue: batch
+olist_iceberg_incremental63_driver_memory: 768m
+olist_iceberg_incremental63_executor_memory: 768m
+olist_iceberg_incremental63_num_executors: 1
+olist_iceberg_incremental63_proof_root: /data/olist/iceberg-validation/step63/v1
+olist_iceberg_incremental63_local_seed_proof: "{{ playbook_dir }}/../artifacts/63-iceberg-cdc-seed.json"
+olist_iceberg_incremental63_local_apply_proof: "{{ playbook_dir }}/../artifacts/63-iceberg-cdc-apply.json"

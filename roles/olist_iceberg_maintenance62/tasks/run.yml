@@ -1,0 +1,143 @@
+---
+- name: Require pinned Iceberg runtime on Spark submit node
+  ansible.builtin.stat:
+    path: "{{ olist_iceberg_maintenance62_jar }}"
+  register: olist_iceberg_maintenance62_jar_stat
+
+- name: Refuse to substitute a different Iceberg runtime
+  ansible.builtin.assert:
+    that:
+      - olist_iceberg_maintenance62_jar_stat.stat.isreg | default(false)
+      - "'iceberg-spark-runtime-3.5_2.12-1.10.1.jar' in olist_iceberg_maintenance62_jar"
+
+- name: Stage isolated Step62 Spark application
+  ansible.builtin.copy:
+    src: olist_iceberg_maintenance62.py
+    dest: "{{ olist_iceberg_maintenance62_script }}"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
+- name: Construct exactly scoped Spark submit arguments
+  ansible.builtin.set_fact:
+    olist_iceberg_maintenance62_spark_argv: >-
+      {{ [
+        'spark-submit', '--master', 'yarn', '--deploy-mode', 'cluster',
+        '--name', 'olist-iceberg-maintenance62-' ~ olist_iceberg_maintenance62_mode,
+        '--queue', olist_iceberg_maintenance62_queue,
+        '--driver-memory', olist_iceberg_maintenance62_driver_memory,
+        '--executor-memory', olist_iceberg_maintenance62_executor_memory,
+        '--executor-cores', '1', '--num-executors', olist_iceberg_maintenance62_num_executors | string,
+        '--jars', olist_iceberg_maintenance62_jar,
+        '--conf', 'spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions',
+        '--conf', 'spark.sql.catalog.shared=org.apache.iceberg.spark.SparkCatalog',
+        '--conf', 'spark.sql.catalog.shared.type=rest',
+        '--conf', 'spark.sql.catalog.shared.uri=' ~ olist_iceberg_maintenance62_rest_uri,
+        '--conf', 'spark.sql.shuffle.partitions=4',
+        '--conf', 'spark.sql.adaptive.enabled=true',
+        '--conf', 'spark.sql.session.timeZone=UTC',
+        '--conf', 'spark.pyspark.python=/usr/bin/python3',
+        '--conf', 'spark.yarn.submit.waitAppCompletion=true',
+        olist_iceberg_maintenance62_script, '--mode', olist_iceberg_maintenance62_mode
+      ] + (['--confirm-expire-sandbox'] if olist_iceberg_maintenance62_mode == 'expire-lab' else []) }}
+
+- name: Execute isolated Step62 Spark application on YARN cluster
+  ansible.builtin.command:
+    argv: "{{ olist_iceberg_maintenance62_spark_argv }}"
+  become: true
+  become_user: "{{ olist_iceberg_maintenance62_spark_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+    SPARK_CONF_DIR: /etc/spark/conf
+    PYSPARK_PYTHON: /usr/bin/python3
+  register: olist_iceberg_maintenance62_submit
+  changed_when: olist_iceberg_maintenance62_mode in ['lab', 'expire-lab']
+
+- name: Read immutable isolated lab result from HDFS
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -cat
+      - "{{ olist_iceberg_maintenance62_proof_root }}/_LAB_REPORT.json"
+  become: true
+  become_user: "{{ olist_iceberg_maintenance62_hdfs_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: olist_iceberg_maintenance62_lab_proof
+  changed_when: false
+  when: olist_iceberg_maintenance62_mode in ['lab', 'verify', 'expire-lab']
+
+- name: Require successful isolated file compaction and rollback evidence
+  ansible.builtin.assert:
+    that:
+      - (olist_iceberg_maintenance62_lab_proof.stdout | from_json).status == 'PASS'
+      - (olist_iceberg_maintenance62_lab_proof.stdout | from_json).table == 'shared.olist62_ops.maintenance_smoke'
+      - (olist_iceberg_maintenance62_lab_proof.stdout | from_json).rows == 2048
+      - >-
+        (olist_iceberg_maintenance62_lab_proof.stdout | from_json).after_files
+        < (olist_iceberg_maintenance62_lab_proof.stdout | from_json).before_files
+      - >-
+        (olist_iceberg_maintenance62_lab_proof.stdout | from_json).compacted_snapshot
+        == (olist_iceberg_maintenance62_lab_proof.stdout | from_json).main_snapshot
+  when: olist_iceberg_maintenance62_mode in ['lab', 'verify', 'expire-lab']
+
+- name: Read separately authorized lab snapshot expiration proof
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -cat
+      - "{{ olist_iceberg_maintenance62_proof_root }}/_EXPIRE_REPORT.json"
+  become: true
+  become_user: "{{ olist_iceberg_maintenance62_hdfs_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: olist_iceberg_maintenance62_expire_proof
+  changed_when: false
+  when: olist_iceberg_maintenance62_mode == 'expire-lab'
+
+- name: Require expiration proof only for the abandoned lab snapshot
+  ansible.builtin.assert:
+    that:
+      - (olist_iceberg_maintenance62_expire_proof.stdout | from_json).status == 'PASS'
+      - (olist_iceberg_maintenance62_expire_proof.stdout | from_json).table == 'shared.olist62_ops.maintenance_smoke'
+      - >-
+        (olist_iceberg_maintenance62_expire_proof.stdout | from_json).expired_snapshot
+        == (olist_iceberg_maintenance62_lab_proof.stdout | from_json).fault_snapshot
+  when: olist_iceberg_maintenance62_mode == 'expire-lab'
+
+- name: Create local proof storage for read-only Trino verification
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../artifacts"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  become: false
+  when: olist_iceberg_maintenance62_mode in ['lab', 'verify', 'expire-lab']
+
+- name: Copy immutable HDFS lab proof to Ansible controller
+  ansible.builtin.copy:
+    dest: "{{ olist_iceberg_maintenance62_local_lab_proof }}"
+    content: "{{ olist_iceberg_maintenance62_lab_proof.stdout | trim }}\n"
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+  when: olist_iceberg_maintenance62_mode in ['lab', 'verify', 'expire-lab']
+
+- name: Copy immutable HDFS expiration evidence to Ansible controller
+  ansible.builtin.copy:
+    dest: "{{ olist_iceberg_maintenance62_local_expire_proof }}"
+    content: "{{ olist_iceberg_maintenance62_expire_proof.stdout | trim }}\n"
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+  when: olist_iceberg_maintenance62_mode == 'expire-lab'
+
+- name: Explain independent Trino verification
+  ansible.builtin.debug:
+    msg:
+      - "STEP62_SPARK_{{ olist_iceberg_maintenance62_mode | upper | replace('-', '_') }}_FINISHED"
+      - 'Validate with python3 scripts/62-verify-trino.py --url http://192.158.2.104:8080'
+      - 'Step 58/59 data, WAP main and published snapshot were never targeted for mutation.'

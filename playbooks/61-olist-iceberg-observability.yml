@@ -1,0 +1,7 @@
+---
+- name: Step 61 integrate Iceberg release observability on existing worker3
+  hosts: worker3
+  gather_facts: false
+  become: false
+  roles:
+    - role: olist_iceberg_observability61

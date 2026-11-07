@@ -1,0 +1,107 @@
+---
+- name: Check existing worker3 monitoring infrastructure
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /etc/grafana/provisioning/dashboards/platform.yml
+    - /etc/grafana/provisioning/datasources/prometheus.yml
+    - "{{ kafka_platform64b_dashboard_dir }}"
+    - "{{ kafka_platform64b_metrics_dir }}"
+  register: kafka_platform64b_infra
+
+- name: Refuse to install a replacement Prometheus Grafana stack
+  ansible.builtin.assert:
+    that:
+      - kafka_platform64b_infra.results[0].stat.isreg | default(false)
+      - kafka_platform64b_infra.results[1].stat.isreg | default(false)
+      - kafka_platform64b_infra.results[2].stat.isdir | default(false)
+      - kafka_platform64b_infra.results[3].stat.isdir | default(false)
+    fail_msg: Existing Grafana provider and node-exporter textfile collector must already exist.
+
+- name: Read existing Grafana provisioning
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  loop:
+    - /etc/grafana/provisioning/dashboards/platform.yml
+    - /etc/grafana/provisioning/datasources/prometheus.yml
+  register: kafka_platform64b_provisioning
+
+- name: Preserve existing Grafana dashboard provider and Prometheus datasource
+  ansible.builtin.assert:
+    that:
+      - (kafka_platform64b_provisioning.results[0].content | b64decode | from_yaml).providers[0].options.path == kafka_platform64b_dashboard_dir
+      - (kafka_platform64b_provisioning.results[1].content | b64decode | from_yaml).datasources[0].uid == kafka_platform64b_datasource_uid
+    fail_msg: Grafana source paths differ; refusing to replace existing configuration.
+
+- name: Install Kafka read-only metric collector directory
+  ansible.builtin.file:
+    path: /usr/local/lib/bigtop-kafka64
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Install Kafka read-only metric and OpenMetadata registration executable
+  ansible.builtin.copy:
+    src: "{{ kafka_platform64b_script_src }}"
+    dest: "{{ kafka_platform64b_script_dest }}"
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Add independent Kafka Grafana dashboard without changing existing dashboards
+  ansible.builtin.template:
+    src: kafka-kraft64-platform.json.j2
+    dest: "{{ kafka_platform64b_dashboard_dir }}/{{ kafka_platform64b_dashboard_file }}"
+    owner: grafana
+    group: grafana
+    mode: '0644'
+  become: true
+
+- name: Validate rendered Grafana dashboard JSON
+  ansible.builtin.command:
+    argv: [python3, -m, json.tool, "{{ kafka_platform64b_dashboard_dir }}/{{ kafka_platform64b_dashboard_file }}"]
+  changed_when: false
+
+- name: Install independent read-only Kafka metrics oneshot unit
+  ansible.builtin.template:
+    src: bigtop-kafka-platform64b.service.j2
+    dest: "/etc/systemd/system/{{ kafka_platform64b_service }}.service"
+    owner: root
+    group: root
+    mode: '0644'
+  register: kafka_platform64b_unit
+  become: true
+
+- name: Install optional Kafka monitoring timer disabled by default
+  ansible.builtin.template:
+    src: bigtop-kafka-platform64b.timer.j2
+    dest: "/etc/systemd/system/{{ kafka_platform64b_service }}.timer"
+    owner: root
+    group: root
+    mode: '0644'
+  register: kafka_platform64b_timer
+  become: true
+
+- name: Reload systemd units after file changes
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  become: true
+  when: kafka_platform64b_unit.changed or kafka_platform64b_timer.changed
+
+- name: Keep Kafka observation timer disabled unless explicitly enabled
+  ansible.builtin.systemd_service:
+    name: "{{ kafka_platform64b_service }}.timer"
+    state: "{{ 'started' if (kafka_platform64b_timer_enabled | bool) else 'stopped' }}"
+    enabled: "{{ kafka_platform64b_timer_enabled | bool }}"
+  become: true
+
+- name: Explain manual first collection and OpenMetadata registration
+  ansible.builtin.debug:
+    msg:
+      - 'STEP64B_DEPLOYED: Kafka not restarted; existing Grafana and OM assets unchanged'
+      - 'Collect: sudo systemctl start bigtop-kafka-platform64b.service'
+      - 'OpenMetadata registration: sudo python3 scripts/64b-kafka-platform.py --mode metadata'
+      - 'Timer disabled by default; enable only after metrics validation.'

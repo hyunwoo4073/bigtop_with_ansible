@@ -1,0 +1,30 @@
+---
+- name: Ensure dedicated Kafka observer script is installed
+  ansible.builtin.stat:
+    path: "{{ kafka_platform64b_script_dest }}"
+  register: kafka_platform64b_observer
+
+- name: Require installed Kafka observer
+  ansible.builtin.assert:
+    that:
+      - kafka_platform64b_observer.stat.isreg | default(false)
+    fail_msg: Run Step64B apply before verify.
+
+- name: Run a fresh read-only Kafka metrics collection
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ kafka_platform64b_script_dest }}"
+      - --mode
+      - metrics
+      - --bootstrap
+      - "{{ kafka_platform64b_bootstrap }}"
+      - --metrics-path
+      - "{{ kafka_platform64b_metrics_path }}"
+  become: true
+  changed_when: false
+  register: kafka_platform64b_verify_output
+
+- name: Show Kafka platform runtime validation
+  ansible.builtin.debug:
+    msg: "{{ kafka_platform64b_verify_output.stdout_lines }}"

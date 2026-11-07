@@ -1,0 +1,22 @@
+---
+# Step 64C: isolated, read-only Kafka Web UI on the existing metadata Docker host.
+- name: Step 64C attach Kafbat UI to the existing KRaft brokers
+  hosts: metadata
+  gather_facts: false
+  tasks:
+    - name: Check Kafka UI prerequisites without changing existing services
+      ansible.builtin.include_role:
+        name: kafka_ui64c
+        tasks_from: preflight
+
+    - name: Install read-only Kafbat UI only when explicitly requested
+      ansible.builtin.include_role:
+        name: kafka_ui64c
+        tasks_from: install
+      when: (kafka_ui64c_mode | default('plan')) == 'apply'
+
+    - name: Verify existing or newly installed Kafbat UI
+      ansible.builtin.include_role:
+        name: kafka_ui64c
+        tasks_from: verify
+      when: (kafka_ui64c_mode | default('plan')) in ['apply', 'verify']

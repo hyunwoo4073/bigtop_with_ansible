@@ -1,0 +1,149 @@
+---
+- name: Require pinned Step53 Iceberg Spark runtime
+  ansible.builtin.stat:
+    path: "{{ olist_iceberg_incremental63_jar }}"
+  register: olist_iceberg_incremental63_jar_stat
+
+- name: Refuse incompatible or missing Iceberg runtime
+  ansible.builtin.assert:
+    that:
+      - olist_iceberg_incremental63_jar_stat.stat.isreg | default(false)
+      - "'iceberg-spark-runtime-3.5_2.12-1.10.1.jar' in olist_iceberg_incremental63_jar"
+
+- name: Stage isolated Step63 Spark CDC application
+  ansible.builtin.copy:
+    src: olist_iceberg_incremental63.py
+    dest: "{{ olist_iceberg_incremental63_script }}"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
+- name: Build scoped YARN cluster-mode Spark arguments
+  ansible.builtin.set_fact:
+    olist_iceberg_incremental63_spark_argv:
+      - spark-submit
+      - --master
+      - yarn
+      - --deploy-mode
+      - cluster
+      - --name
+      - "olist-iceberg-cdc63-{{ olist_iceberg_incremental63_mode }}"
+      - --queue
+      - "{{ olist_iceberg_incremental63_queue }}"
+      - --driver-memory
+      - "{{ olist_iceberg_incremental63_driver_memory }}"
+      - --executor-memory
+      - "{{ olist_iceberg_incremental63_executor_memory }}"
+      - --executor-cores
+      - '1'
+      - --num-executors
+      - "{{ olist_iceberg_incremental63_num_executors | string }}"
+      - --jars
+      - "{{ olist_iceberg_incremental63_jar }}"
+      - --conf
+      - spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+      - --conf
+      - spark.sql.catalog.shared=org.apache.iceberg.spark.SparkCatalog
+      - --conf
+      - spark.sql.catalog.shared.type=rest
+      - --conf
+      - "spark.sql.catalog.shared.uri={{ olist_iceberg_incremental63_rest_uri }}"
+      # Do NOT pass a physical HDFS path as REST .warehouse (Gravitino routes by catalog identifier).
+      - --conf
+      - spark.sql.shuffle.partitions=4
+      - --conf
+      - spark.sql.adaptive.enabled=true
+      - --conf
+      - spark.sql.session.timeZone=UTC
+      - --conf
+      - spark.pyspark.python=/usr/bin/python3
+      - --conf
+      - spark.yarn.submit.waitAppCompletion=true
+      - "{{ olist_iceberg_incremental63_script }}"
+      - --mode
+      - "{{ olist_iceberg_incremental63_mode }}"
+
+- name: Execute Step63 CDC lab using Spark on YARN
+  ansible.builtin.command:
+    argv: "{{ olist_iceberg_incremental63_spark_argv }}"
+  become: true
+  become_user: "{{ olist_iceberg_incremental63_spark_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+    SPARK_CONF_DIR: /etc/spark/conf
+    PYSPARK_PYTHON: /usr/bin/python3
+  register: olist_iceberg_incremental63_submit
+  changed_when: olist_iceberg_incremental63_mode in ['seed', 'apply']
+
+- name: Read immutable Step63 seed evidence
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -cat, "{{ olist_iceberg_incremental63_proof_root }}/_SEED_REPORT.json"]
+  become: true
+  become_user: "{{ olist_iceberg_incremental63_hdfs_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: olist_iceberg_incremental63_seed_proof
+  changed_when: false
+
+- name: Require seed proof to reference the isolated table
+  ansible.builtin.assert:
+    that:
+      - (olist_iceberg_incremental63_seed_proof.stdout | from_json).status == 'PASS'
+      - (olist_iceberg_incremental63_seed_proof.stdout | from_json).table == 'shared.olist63_cdc.fact_change_lab'
+      - (olist_iceberg_incremental63_seed_proof.stdout | from_json).rows == 512
+      - (olist_iceberg_incremental63_seed_proof.stdout | from_json).digest_sha256 | length == 64
+
+- name: Read immutable Step63 applied CDC proof
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -cat, "{{ olist_iceberg_incremental63_proof_root }}/_APPLY_REPORT.json"]
+  become: true
+  become_user: "{{ olist_iceberg_incremental63_hdfs_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: olist_iceberg_incremental63_apply_proof
+  changed_when: false
+  when: olist_iceberg_incremental63_mode in ['apply', 'verify']
+
+- name: Require full CDC MERGE evidence
+  ansible.builtin.assert:
+    that:
+      - (olist_iceberg_incremental63_apply_proof.stdout | from_json).status == 'PASS'
+      - (olist_iceberg_incremental63_apply_proof.stdout | from_json).table == 'shared.olist63_cdc.fact_change_lab'
+      - (olist_iceberg_incremental63_apply_proof.stdout | from_json).rows == 516
+      - (olist_iceberg_incremental63_apply_proof.stdout | from_json).live_rows == 512
+      - (olist_iceberg_incremental63_apply_proof.stdout | from_json).deleted_rows == 4
+      - (olist_iceberg_incremental63_apply_proof.stdout | from_json).duplicate_replay_skipped | bool
+      - (olist_iceberg_incremental63_apply_proof.stdout | from_json).late_events_skipped | bool
+  when: olist_iceberg_incremental63_mode in ['apply', 'verify']
+
+- name: Ensure local evidence directory
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../artifacts"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  become: false
+
+- name: Copy Step63 seed evidence to Ansible controller
+  ansible.builtin.copy:
+    dest: "{{ olist_iceberg_incremental63_local_seed_proof }}"
+    content: "{{ olist_iceberg_incremental63_seed_proof.stdout | trim }}\n"
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+
+- name: Copy Step63 applied CDC evidence to Ansible controller
+  ansible.builtin.copy:
+    dest: "{{ olist_iceberg_incremental63_local_apply_proof }}"
+    content: "{{ olist_iceberg_incremental63_apply_proof.stdout | trim }}\n"
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+  when: olist_iceberg_incremental63_mode in ['apply', 'verify']
+
+- name: Summarize isolated CDC test outcome
+  ansible.builtin.debug:
+    msg:
+      - "STEP63_{{ olist_iceberg_incremental63_mode | upper }}_EVIDENCE_PASS"
+      - 'For Spark details inspect YARN Driver logs; separate Trino verification is required.'

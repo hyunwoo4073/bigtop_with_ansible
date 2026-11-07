@@ -1,0 +1,100 @@
+---
+- name: Validate cached Spark Kafka 3.5.6 offline dependencies
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/64-verify-kafka-jars.py"
+      - "{{ olist_kafka65_asset_dir }}"
+  delegate_to: localhost
+  changed_when: false
+
+- name: Create isolated Spark application directory
+  ansible.builtin.file:
+    path: "{{ olist_kafka65_script_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Create dedicated Step65 YARN lifecycle lock directory
+  ansible.builtin.file:
+    path: /var/lib/bigtop-olist-step65
+    state: directory
+    owner: "{{ olist_kafka65_user }}"
+    group: "{{ olist_kafka65_user }}"
+    mode: '0750'
+  become: true
+
+- name: Stage Step65 Spark streaming and strict YARN control applications
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ olist_kafka65_script_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - olist_kafka65.py
+    - step65_yarn_control.py
+  become: true
+
+- name: Copy verified Kafka connector dependencies to master
+  ansible.builtin.copy:
+    src: "{{ olist_kafka65_asset_dir }}/{{ item }}"
+    dest: "{{ olist_kafka65_jar_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop: "{{ olist_kafka65_jars }}"
+  become: true
+
+- name: Seed Step65 isolated Iceberg target from verified Step64 post-image
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['spark-submit', '--master', 'yarn', '--deploy-mode', 'cluster',
+         '--name', 'olist-kafka65-seed', '--queue', olist_kafka65_queue,
+         '--driver-memory', '768m', '--executor-memory', '768m',
+         '--executor-cores', '1', '--num-executors', '1',
+         '--jars', olist_kafka65_iceberg_jar,
+         '--conf', 'spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions',
+         '--conf', 'spark.sql.catalog.shared=org.apache.iceberg.spark.SparkCatalog',
+         '--conf', 'spark.sql.catalog.shared.type=rest',
+         '--conf', 'spark.sql.catalog.shared.uri=' + olist_kafka65_rest_uri,
+         '--conf', 'spark.sql.shuffle.partitions=4',
+         '--conf', 'spark.pyspark.python=/usr/bin/python3',
+         olist_kafka65_app, '--mode', 'seed']
+      }}
+  become: true
+  become_user: "{{ olist_kafka65_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+    SPARK_CONF_DIR: /etc/spark/conf
+    PYSPARK_PYTHON: /usr/bin/python3
+  register: olist_kafka65_seed_output
+  changed_when: "'STEP65_SEED_PASS' in olist_kafka65_seed_output.stdout"
+
+- name: Require seeded Step65 evidence exists on HDFS
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -cat
+      - /data/olist/iceberg-validation/step65/v1/_SEED_REPORT.json
+  become: true
+  become_user: "{{ olist_kafka65_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: olist_kafka65_seed_proof
+  changed_when: false
+
+- name: Validate only isolated target was created
+  ansible.builtin.assert:
+    that:
+      - (olist_kafka65_seed_proof.stdout | from_json).status == 'PASS'
+      - (olist_kafka65_seed_proof.stdout | from_json).rows == 520
+      - (olist_kafka65_seed_proof.stdout | from_json).table == 'shared.olist65_stream.fact_cdc_running_v1'
+
+- name: Announce Step65 seeded isolated application
+  ansible.builtin.debug:
+    msg: 'STEP65_APPLY_PASS: isolated table seeded 520 rows; no stream started'

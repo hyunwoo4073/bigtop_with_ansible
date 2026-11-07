@@ -1,0 +1,45 @@
+---
+# Step 64A: deploy a dedicated, small KRaft lab cluster; never touch existing brokers.
+- name: Step 64A preflight on the three selected nodes
+  hosts: worker1:worker2:worker3
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  tasks:
+    - name: Preflight dedicated Kafka nodes
+      ansible.builtin.include_role:
+        name: kafka_kraft64
+        tasks_from: preflight
+
+- name: Step 64A create or reuse ONE stable cluster ID
+  hosts: worker3
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Prepare persistent KRaft cluster ID only during install
+      ansible.builtin.include_role:
+        name: kafka_kraft64
+        tasks_from: cluster_id
+      when: kafka_kraft64_mode == 'install'
+
+- name: Step 64A install three KRaft broker-controller processes
+  hosts: worker1:worker2:worker3
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Install or reapply Kafka only on explicit request
+      ansible.builtin.include_role:
+        name: kafka_kraft64
+        tasks_from: install
+      when: kafka_kraft64_mode == 'install'
+
+- name: Step 64A verify cluster using CLI on worker3
+  hosts: worker3
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Verify KRaft quorum and cluster status
+      ansible.builtin.include_role:
+        name: kafka_kraft64
+        tasks_from: verify
+      when: kafka_kraft64_mode in ['install', 'verify']

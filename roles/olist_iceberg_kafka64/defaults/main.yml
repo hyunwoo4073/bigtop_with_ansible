@@ -1,0 +1,25 @@
+---
+olist_iceberg_kafka64_mode: plan
+# Confirmed Step64-A Kafka KRaft 4.2.2 broker list (worker1/2/3).
+olist_iceberg_kafka64_bootstrap: '192.158.2.101:9092,192.158.2.102:9092,192.158.2.103:9092'
+olist_iceberg_kafka64_topic: bigtop_olist_step64_cdc_v1
+olist_iceberg_kafka64_rest_uri: http://192.158.2.103:9001/iceberg/
+olist_iceberg_kafka64_iceberg_jar: /opt/bigtop-iceberg/iceberg-spark-runtime-3.5_2.12-1.10.1.jar
+olist_iceberg_kafka64_script: /opt/bigtop-iceberg/olist_iceberg_kafka64.py
+olist_iceberg_kafka64_asset_dir: "{{ playbook_dir }}/../vendor/kafka64"
+olist_iceberg_kafka64_remote_jar_dir: /opt/bigtop-iceberg/kafka64
+olist_iceberg_kafka64_spark_user: hadoop
+olist_iceberg_kafka64_queue: batch
+olist_iceberg_kafka64_driver_memory: 768m
+olist_iceberg_kafka64_executor_memory: 768m
+olist_iceberg_kafka64_num_executors: 1
+olist_iceberg_kafka64_proof_root: /data/olist/iceberg-validation/step64/v1
+olist_iceberg_kafka64_seed_local: "{{ playbook_dir }}/../artifacts/64-kafka-cdc-seed.json"
+olist_iceberg_kafka64_produce_local: "{{ playbook_dir }}/../artifacts/64-kafka-cdc-produce.json"
+olist_iceberg_kafka64_ingest_local: "{{ playbook_dir }}/../artifacts/64-kafka-cdc-ingest.json"
+olist_iceberg_kafka64_jars:
+  - spark-sql-kafka-0-10_2.12-3.5.6.jar
+  - spark-token-provider-kafka-0-10_2.12-3.5.6.jar
+  - kafka-clients-3.4.1.jar
+  - commons-pool2-2.11.1.jar
+  - jsr305-3.0.0.jar

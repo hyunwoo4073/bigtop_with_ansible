@@ -1,0 +1,78 @@
+---
+- name: Validate Step64B safe scope and options
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == 'worker3'
+      - kafka_platform64b_mode in ['plan', 'apply', 'verify']
+      - kafka_platform64b_bootstrap == '192.158.2.101:9092,192.158.2.102:9092,192.158.2.103:9092'
+      - kafka_platform64b_metrics_path == '/var/lib/prometheus/node-exporter/kafka_platform64b.prom'
+      - kafka_platform64b_dashboard_uid == 'bigtop-kafka-kraft64'
+    fail_msg: Step64B only observes existing Kafka 64A and worker3 monitoring.
+
+- name: Check required existing Kafka CLI and dedicated JVM
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ kafka_platform64b_kafka_home }}/bin/kafka-metadata-quorum.sh"
+    - "{{ kafka_platform64b_kafka_home }}/bin/kafka-topics.sh"
+    - "{{ kafka_platform64b_java_home }}/bin/java"
+    - "{{ kafka_platform64b_script_src }}"
+  register: kafka_platform64b_prerequisites
+
+- name: Require Kafka 64A binaries to be installed before platform integration
+  ansible.builtin.assert:
+    that:
+      - item.stat.isreg | default(false)
+    fail_msg: "Kafka 64A binary missing: {{ item.item }}. If only preflight passed, run 64A install and verify first."
+  loop: "{{ kafka_platform64b_prerequisites.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Check all three Kafka broker processes without restarting them
+  ansible.builtin.command:
+    argv: [systemctl, is-active, bigtop-kafka-kraft64.service]
+  delegate_to: "{{ item }}"
+  loop: [worker1, worker2, worker3]
+  register: kafka_platform64b_services
+  changed_when: false
+  failed_when: false
+
+- name: Refuse to integrate a stopped or missing Kafka cluster
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - item.stdout | trim == 'active'
+    fail_msg: "Kafka 64A service not active on {{ item.item }}. Check 64A first; Step64B does not restart brokers."
+  loop: "{{ kafka_platform64b_services.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Check Kafka quorum from already-installed worker3 CLI
+  ansible.builtin.command:
+    argv:
+      - "{{ kafka_platform64b_kafka_home }}/bin/kafka-metadata-quorum.sh"
+      - --bootstrap-server
+      - "{{ kafka_platform64b_bootstrap }}"
+      - describe
+      - --status
+  environment:
+    JAVA_HOME: "{{ kafka_platform64b_java_home }}"
+    KAFKA_HEAP_OPTS: '-Xms128m -Xmx256m'
+  register: kafka_platform64b_quorum
+  changed_when: false
+
+- name: Require live Kafka metadata quorum
+  ansible.builtin.assert:
+    that:
+      - kafka_platform64b_quorum.stdout is search('(?m)^LeaderId:\s*[123]\s*$')
+      - kafka_platform64b_quorum.stdout is search('(?m)^CurrentVoters:')
+    fail_msg: Kafka CLI cannot confirm quorum leader. Inspect 64A broker journals.
+
+- name: Explain plan does not modify services
+  ansible.builtin.debug:
+    msg:
+      - 'STEP64B_PREFLIGHT_PASS: all three Kafka systemd services active; metadata quorum available'
+      - 'mode=plan: no Grafana, OpenMetadata or Kafka changes'
+      - 'mode=apply: install read-only collector and dashboard only; no broker restart'
+      - 'OpenMetadata registration is a separate explicit local CLI action after apply'
+  when: kafka_platform64b_mode == 'plan'

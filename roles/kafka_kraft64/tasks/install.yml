@@ -1,0 +1,183 @@
+---
+- name: Ensure stable controller cluster ID from worker3 bootstrap play
+  ansible.builtin.assert:
+    that:
+      - hostvars['worker3'].kafka_kraft64_cluster_id is defined
+      - hostvars['worker3'].kafka_kraft64_cluster_id | length == 22
+    fail_msg: Missing stable cluster id from previous play. Do not format new storage.
+
+- name: Create dedicated Kafka OS service user
+  ansible.builtin.user:
+    name: "{{ kafka_kraft64_service_user }}"
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+  become: true
+
+- name: Create dedicated Kafka installation, logs and data folders
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+    state: directory
+  loop:
+    - {path: '{{ kafka_kraft64_home }}', owner: root, group: root, mode: '0755'}
+    - {path: '{{ kafka_kraft64_home }}/kafka', owner: root, group: root, mode: '0755'}
+    - {path: '{{ kafka_kraft64_home }}/jdk17', owner: root, group: root, mode: '0755'}
+    - {path: '{{ kafka_kraft64_conf_dir }}', owner: root, group: root, mode: '0755'}
+    - {path: '{{ kafka_kraft64_data_dir }}', owner: '{{ kafka_kraft64_service_user }}', group: '{{ kafka_kraft64_service_user }}', mode: '0750'}
+    - {path: '{{ kafka_kraft64_data_dir }}/metadata', owner: '{{ kafka_kraft64_service_user }}', group: '{{ kafka_kraft64_service_user }}', mode: '0750'}
+    - {path: '{{ kafka_kraft64_data_dir }}/data', owner: '{{ kafka_kraft64_service_user }}', group: '{{ kafka_kraft64_service_user }}', mode: '0750'}
+    - {path: /var/log/bigtop-kafka-kraft64, owner: '{{ kafka_kraft64_service_user }}', group: '{{ kafka_kraft64_service_user }}', mode: '0750'}
+  become: true
+
+- name: Extract verified Kafka 4.2.2 binaries from controller
+  ansible.builtin.unarchive:
+    src: "{{ kafka_kraft64_asset_dir }}/{{ kafka_kraft64_archive }}"
+    dest: "{{ kafka_kraft64_home }}/kafka"
+    extra_opts: ['--strip-components=1']
+    creates: "{{ kafka_kraft64_home }}/kafka/bin/kafka-storage.sh"
+    owner: root
+    group: root
+  become: true
+
+- name: Extract verified portable Java 17 without altering alternatives
+  ansible.builtin.unarchive:
+    src: "{{ kafka_kraft64_jdk_archive_path }}"
+    dest: "{{ kafka_kraft64_home }}/jdk17"
+    extra_opts: ['--strip-components=1']
+    creates: "{{ kafka_kraft64_home }}/jdk17/bin/java"
+    owner: root
+    group: root
+  become: true
+
+- name: Verify dedicated JVM is Java 17
+  ansible.builtin.command:
+    argv: ['{{ kafka_kraft64_home }}/jdk17/bin/java', -version]
+  register: kafka_kraft64_java_version
+  changed_when: false
+  failed_when: "'17.' not in kafka_kraft64_java_version.stderr and '17.' not in kafka_kraft64_java_version.stdout"
+
+- name: Install per-node KRaft config with stable static voters
+  ansible.builtin.template:
+    src: server.properties.j2
+    dest: "{{ kafka_kraft64_conf_dir }}/server.properties"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart dedicated Kafka KRaft lab process
+  become: true
+
+- name: Read metadata directory format marker
+  ansible.builtin.stat:
+    path: "{{ kafka_kraft64_data_dir }}/metadata/meta.properties"
+  register: kafka_kraft64_meta_marker
+  become: true
+
+- name: Read data directory format marker
+  ansible.builtin.stat:
+    path: "{{ kafka_kraft64_data_dir }}/data/meta.properties"
+  register: kafka_kraft64_data_marker
+  become: true
+
+- name: Refuse partial storage format (manual recovery necessary)
+  ansible.builtin.assert:
+    that:
+      - kafka_kraft64_meta_marker.stat.exists == kafka_kraft64_data_marker.stat.exists
+    fail_msg: Kafka storage is partially formatted; refusing to overwrite or reformat data.
+
+- name: Inspect existing metadata format marker before reusing storage
+  ansible.builtin.slurp:
+    src: "{{ kafka_kraft64_data_dir }}/metadata/meta.properties"
+  register: kafka_kraft64_meta_existing
+  when: kafka_kraft64_meta_marker.stat.exists
+  become: true
+
+- name: Inspect existing data format marker before reusing storage
+  ansible.builtin.slurp:
+    src: "{{ kafka_kraft64_data_dir }}/data/meta.properties"
+  register: kafka_kraft64_data_existing
+  when: kafka_kraft64_data_marker.stat.exists
+  become: true
+
+- name: Refuse existing storage with different cluster ID or node ID
+  ansible.builtin.assert:
+    that:
+      - "('cluster.id=' ~ hostvars['worker3'].kafka_kraft64_cluster_id) in (kafka_kraft64_meta_existing.content | b64decode)"
+      - "('node.id=' ~ (kafka_kraft64_nodes[inventory_hostname].id | string)) in (kafka_kraft64_meta_existing.content | b64decode)"
+      - "('cluster.id=' ~ hostvars['worker3'].kafka_kraft64_cluster_id) in (kafka_kraft64_data_existing.content | b64decode)"
+      - "('node.id=' ~ (kafka_kraft64_nodes[inventory_hostname].id | string)) in (kafka_kraft64_data_existing.content | b64decode)"
+    fail_msg: Persisted cluster IDs or node IDs differ; never reformat a Kafka data directory.
+  when: kafka_kraft64_meta_marker.stat.exists
+
+- name: Inspect existing files in unformatted KRaft metadata directory
+  ansible.builtin.find:
+    paths: "{{ kafka_kraft64_data_dir }}/metadata"
+    recurse: false
+    file_type: any
+  register: kafka_kraft64_unformatted_meta_files
+  when: not kafka_kraft64_meta_marker.stat.exists
+  become: true
+
+- name: Inspect existing files in unformatted KRaft topic directory
+  ansible.builtin.find:
+    paths: "{{ kafka_kraft64_data_dir }}/data"
+    recurse: false
+    file_type: any
+  register: kafka_kraft64_unformatted_data_files
+  when: not kafka_kraft64_meta_marker.stat.exists
+  become: true
+
+- name: Refuse formatting any storage directory that already contains files
+  ansible.builtin.assert:
+    that:
+      - kafka_kraft64_unformatted_meta_files.matched | int == 0
+      - kafka_kraft64_unformatted_data_files.matched | int == 0
+    fail_msg: Unformatted Kafka directories contain existing files; inspect manually before initializing.
+  when: not kafka_kraft64_meta_marker.stat.exists
+
+- name: Format only NEW and empty KRaft storage directories once
+  ansible.builtin.command:
+    argv:
+      - "{{ kafka_kraft64_home }}/kafka/bin/kafka-storage.sh"
+      - format
+      - --cluster-id
+      - "{{ hostvars['worker3'].kafka_kraft64_cluster_id }}"
+      - --config
+      - "{{ kafka_kraft64_conf_dir }}/server.properties"
+  environment:
+    JAVA_HOME: "{{ kafka_kraft64_home }}/jdk17"
+  become: true
+  become_user: "{{ kafka_kraft64_service_user }}"
+  when: not kafka_kraft64_meta_marker.stat.exists
+  changed_when: true
+
+- name: Install dedicated Kafka service unit
+  ansible.builtin.template:
+    src: bigtop-kafka-kraft64.service.j2
+    dest: "/etc/systemd/system/{{ kafka_kraft64_unit }}.service"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart dedicated Kafka KRaft lab process
+  become: true
+
+- name: Start the dedicated Kafka process without touching Hadoop or Spark
+  ansible.builtin.systemd_service:
+    name: "{{ kafka_kraft64_unit }}.service"
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+
+- name: Finish controlled restarts before checking all three brokers
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for local Kafka broker listener
+  ansible.builtin.wait_for:
+    host: "{{ kafka_kraft64_nodes[inventory_hostname].ip }}"
+    port: "{{ kafka_kraft64_client_port }}"
+    state: started
+    delay: 1
+    timeout: 90

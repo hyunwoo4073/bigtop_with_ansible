@@ -1,0 +1,6 @@
+---
+- name: Restart dedicated Kafka KRaft lab process
+  ansible.builtin.systemd_service:
+    name: "{{ kafka_kraft64_unit }}.service"
+    state: restarted
+  become: true

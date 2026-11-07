@@ -1,0 +1,4 @@
+---
+- name: Explain that Step64A uses explicit safe tasks_from entrypoints
+  ansible.builtin.debug:
+    msg: Use playbooks/64a-kafka-kraft-cluster.yml for preflight, install and verify.

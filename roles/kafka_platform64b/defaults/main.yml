@@ -1,0 +1,22 @@
+---
+kafka_platform64b_mode: plan
+kafka_platform64b_kafka_home: /opt/bigtop-kafka-kraft64/kafka
+kafka_platform64b_java_home: /opt/bigtop-kafka-kraft64/jdk17
+kafka_platform64b_bootstrap: '192.158.2.101:9092,192.158.2.102:9092,192.158.2.103:9092'
+kafka_platform64b_brokers:
+  - {name: worker1, host: '192.158.2.101', port: 9092}
+  - {name: worker2, host: '192.158.2.102', port: 9092}
+  - {name: worker3, host: '192.158.2.103', port: 9092}
+kafka_platform64b_script_src: "{{ playbook_dir | dirname }}/scripts/64b-kafka-platform.py"
+kafka_platform64b_script_dest: /usr/local/lib/bigtop-kafka64/platform64b.py
+kafka_platform64b_metrics_dir: /var/lib/prometheus/node-exporter
+kafka_platform64b_metrics_path: /var/lib/prometheus/node-exporter/kafka_platform64b.prom
+kafka_platform64b_dashboard_dir: /var/lib/grafana/dashboards
+kafka_platform64b_dashboard_file: kafka-kraft64-platform.json
+kafka_platform64b_dashboard_uid: bigtop-kafka-kraft64
+kafka_platform64b_datasource_uid: "{{ grafana_datasource_uid | default('prometheus') }}"
+kafka_platform64b_timer_enabled: false
+kafka_platform64b_service: bigtop-kafka-platform64b
+kafka_platform64b_openmetadata_url: http://192.158.2.104:8585/api
+kafka_platform64b_openmetadata_service: bigtop_kafka_kraft64
+kafka_platform64b_openmetadata_token_file: /etc/bigtop-governance/pg-catalog/bot.token
