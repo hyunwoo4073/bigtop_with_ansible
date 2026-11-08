@@ -118,3 +118,7 @@ To leave the lab without a long-running YARN workload, run `mode=stop` at the en
 - A failed/aborted stream may still have committed Iceberg changes; do not reset HDFS checkpoint or overwrite target.
 - Kafka retention is 7 days. Replaying after retention gaps is not guaranteed.
 - End of workday: when README/PROJECT_GUIDE update requested, stage ALL of that day's Ansible/scripts/tests/docs with a single Git commit, excluding `vendor/`, secrets, downloaded archives, and runtime artifacts.
+
+## 2026-11-08 운영 변경 (65-B)
+
+**이 문서 5·7단계의 Spark YARN 배치 produce/replay/verify 방식은 자원 제약으로 대체되었다.** 지금은 `docs/65-low-resource-producer-verifier.md`의 `mode=upgrade -> produce -> verify -> (stop/start) -> replay -> verify`를 적용한다. 65번 기존 `apply`(Seed)는 재실행하지 않는다.

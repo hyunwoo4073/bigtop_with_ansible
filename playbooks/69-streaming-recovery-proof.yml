@@ -1,0 +1,7 @@
+---
+- name: Step69 read-only Spark Streaming recovery evidence
+  hosts: worker3
+  gather_facts: false
+  become: false
+  roles:
+    - olist_kafka69

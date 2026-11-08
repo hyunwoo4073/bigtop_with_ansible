@@ -1,0 +1,15 @@
+[Unit]
+Description=Step67 read-only {{ olist_kafka67_source }} CDC progress exporter
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Environment=HADOOP_CONF_DIR=/etc/hadoop/conf
+Environment=SPARK_CONF_DIR=/etc/spark/conf
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/bin
+TimeoutStartSec=120
+ExecStart=/usr/bin/python3 {{ olist_kafka67_script }} --source {{ olist_kafka67_source }} --metrics-file {{ olist_kafka67_metrics_file }} --topic {{ olist_kafka67_topic }} --bootstrap {{ olist_kafka67_bootstrap }} --checkpoint {{ olist_kafka67_checkpoint }}{{ (' --hdfs-bin ' ~ olist_kafka67_hdfs_cli.stdout) if inventory_hostname == 'master' else '' }}
+PrivateTmp=true
+NoNewPrivileges=false

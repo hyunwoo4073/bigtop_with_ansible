@@ -1,0 +1,54 @@
+---
+- name: Check installed Step65 application and textfile collection directory
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: >-
+    {{ ['/var/lib/prometheus/node-exporter'] +
+       (['/opt/bigtop-iceberg/step65/olist_kafka65.py']
+        if inventory_hostname == 'master'
+        else ['/opt/bigtop-kafka-kraft64/kafka/bin/kafka-get-offsets.sh',
+              '/opt/bigtop-kafka-kraft64/jdk17/bin/java']) }}
+  register: olist_kafka67_prerequisites
+
+- name: Ensure Step65 and Kafka client prerequisites are installed
+  ansible.builtin.assert:
+    that:
+      - olist_kafka67_prerequisites.results[0].stat.isdir | default(false)
+      - (olist_kafka67_prerequisites.results[1:] | map(attribute='stat.exists') | min)
+
+- name: Resolve Hadoop HDFS CLI on master without launching Spark
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/bash
+      - -c
+      - command -v hdfs
+  become: true
+  become_user: hadoop
+  register: olist_kafka67_hdfs_cli
+  changed_when: false
+  when: inventory_hostname == 'master'
+
+- name: Verify HDFS CLI is an absolute path
+  ansible.builtin.assert:
+    that:
+      - olist_kafka67_hdfs_cli.stdout is match('^/[^ ]+$')
+  when: inventory_hostname == 'master'
+
+- name: Check Step65 committed checkpoint directory with original HDFS user
+  ansible.builtin.command:
+    argv:
+      - "{{ olist_kafka67_hdfs_cli.stdout }}"
+      - dfs
+      - -ls
+      - "{{ olist_kafka67_checkpoint }}/commits"
+  become: true
+  become_user: hadoop
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+  when: inventory_hostname == 'master'
+
+- name: Show monitoring preflight outcome
+  ansible.builtin.debug:
+    msg: 'STEP67_PREFLIGHT_PASS: {{ inventory_hostname }} role prerequisites ready'
+  when: olist_kafka67_mode == 'preflight'

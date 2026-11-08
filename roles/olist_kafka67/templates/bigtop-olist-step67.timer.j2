@@ -1,0 +1,12 @@
+[Unit]
+Description=Step67 read-only {{ olist_kafka67_source }} CDC progress collector schedule
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=60s
+AccuracySec=10s
+Persistent=false
+Unit={{ olist_kafka67_service }}.service
+
+[Install]
+WantedBy=timers.target

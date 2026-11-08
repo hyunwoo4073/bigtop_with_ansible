@@ -1,0 +1,40 @@
+---
+- name: Validate strict Step67 read-only monitoring scope
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname in ['master', 'worker3']
+      - olist_kafka67_mode in ['plan', 'preflight', 'apply', 'verify', 'enable', 'disable']
+      - olist_kafka67_topic == 'bigtop_olist_step65_cdc_v1'
+      - olist_kafka67_checkpoint == 'hdfs://master:9000/data/olist/iceberg-checkpoints/step65/v1'
+      - olist_kafka67_script == '/opt/bigtop-iceberg/step67/step67_progress.py'
+      - olist_kafka67_metrics_dir == '/var/lib/prometheus/node-exporter'
+
+- name: Select local Step67 source and independent Node Exporter file
+  ansible.builtin.set_fact:
+    olist_kafka67_source: "{{ 'spark' if inventory_hostname == 'master' else 'kafka' }}"
+    olist_kafka67_service: "{{ 'bigtop-olist-step67-spark' if inventory_hostname == 'master' else 'bigtop-olist-step67-kafka' }}"
+    olist_kafka67_metrics_file: >-
+      {{ olist_kafka67_metrics_dir +
+         ('/olist_step67_spark.prom' if inventory_hostname == 'master'
+          else '/olist_step67_kafka.prom') }}
+
+- name: Explain Step67 safe monitoring plan
+  ansible.builtin.debug:
+    msg:
+      - 'STEP67_PLAN: worker3 reads Kafka end offset, master reads Spark committed checkpoint offset.'
+      - 'Read-only clients. No YARN application, Kafka message consumption, checkpoint mutations or broker restart.'
+      - 'apply installs disabled timers; enable is explicit. Watchdog Step66 remains unchanged.'
+      - 'Checkpoint commit age is NOT microbatch execution duration; idle app may show an old commit.'
+  when: olist_kafka67_mode == 'plan'
+
+- name: Validate Step67 prerequisites
+  ansible.builtin.include_tasks: preflight.yml
+  when: olist_kafka67_mode != 'plan'
+
+- name: Deploy opt-in Step67 collectors and Grafana dashboard
+  ansible.builtin.include_tasks: install.yml
+  when: olist_kafka67_mode == 'apply'
+
+- name: Operate Step67 collection timers
+  ansible.builtin.include_tasks: operate.yml
+  when: olist_kafka67_mode in ['verify', 'enable', 'disable']

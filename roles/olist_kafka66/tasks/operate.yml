@@ -1,0 +1,96 @@
+---
+- name: Require watchdog executable staged for non-plan actions
+  ansible.builtin.stat:
+    path: "{{ olist_kafka66_wrapper }}"
+  register: olist_kafka66_wrapper_stat
+
+- name: Refuse operating before explicit Step66 apply
+  ansible.builtin.assert:
+    that:
+      - olist_kafka66_wrapper_stat.stat.isreg | default(false)
+
+- name: Explicitly arm ONLY an already RUNNING Step65 streaming application
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ olist_kafka66_control }}"
+      - arm
+  become: true
+  become_user: "{{ olist_kafka66_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+    SPARK_CONF_DIR: /etc/spark/conf
+  register: olist_kafka66_arm
+  changed_when: "'STEP66_AUTORESTART_ARMED' in olist_kafka66_arm.stdout"
+  when: olist_kafka66_mode == 'enable'
+
+- name: Enable systemd watchdog only after explicit arm
+  ansible.builtin.systemd_service:
+    name: "{{ olist_kafka66_service }}.timer"
+    state: started
+    enabled: true
+  become: true
+  when: olist_kafka66_mode == 'enable'
+
+- name: Stop watchdog timer before disarming state
+  ansible.builtin.systemd_service:
+    name: "{{ olist_kafka66_service }}.timer"
+    state: stopped
+    enabled: false
+  become: true
+  when: olist_kafka66_mode == 'disable'
+
+- name: Explicitly disarm desired state without killing the running Spark app
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ olist_kafka66_control }}"
+      - disarm
+  become: true
+  become_user: "{{ olist_kafka66_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+    SPARK_CONF_DIR: /etc/spark/conf
+  register: olist_kafka66_disarm
+  changed_when: "'STEP66_AUTORESTART_DISARMED' in olist_kafka66_disarm.stdout"
+  when: olist_kafka66_mode == 'disable'
+
+- name: Refresh node exporter metrics after explicit disable or verify
+  ansible.builtin.systemd_service:
+    name: "{{ olist_kafka66_service }}.service"
+    state: started
+  become: true
+  when: olist_kafka66_mode in ['disable', 'verify']
+
+- name: Read watchdog unit and timer states
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ olist_kafka66_service }}.timer"
+  register: olist_kafka66_timer_status
+  failed_when: false
+  changed_when: false
+
+- name: Read exact existing Step65 app status
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ olist_kafka66_control }}"
+      - status
+  become: true
+  become_user: "{{ olist_kafka66_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+    SPARK_CONF_DIR: /etc/spark/conf
+  register: olist_kafka66_app_status
+  changed_when: false
+  failed_when: olist_kafka66_mode != 'disable' and olist_kafka66_app_status.rc != 0
+
+- name: Print Step66 health and manual stop safety
+  ansible.builtin.debug:
+    msg:
+      - "STEP66_TIMER: {{ olist_kafka66_timer_status.stdout | default('unknown') }}"
+      - "{{ olist_kafka66_app_status.stdout | default('unknown') }}"
+      - '65 stop writes desired=stopped before YARN kill; no automatic restart.'
+      - "Prometheus textfile: {{ olist_kafka66_metrics_file }}"

@@ -1,0 +1,6 @@
+---
+- name: Step66 opt-in Spark Streaming watchdog and Grafana
+  hosts: master
+  gather_facts: false
+  roles:
+    - role: olist_kafka66

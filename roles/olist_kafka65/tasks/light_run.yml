@@ -1,0 +1,211 @@
+---
+- name: Require lightweight Step65 CLI staged on master
+  ansible.builtin.stat:
+    path: "{{ olist_kafka65_script_dir }}/step65_light.py"
+  register: olist_kafka65_light_stat
+
+- name: Refuse lightweight operation without mode upgrade
+  ansible.builtin.assert:
+    that:
+      - olist_kafka65_light_stat.stat.isreg | default(false)
+    fail_msg: First run -e olist_kafka65_mode=upgrade to install Step65 low-resource tools.
+
+- name: Detect legacy Spark publisher or verifier jobs that may still be queued
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ olist_kafka65_script_dir }}/step65_light.py"
+      - --mode
+      - guard-yarn
+  become: true
+  become_user: "{{ olist_kafka65_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+  when: olist_kafka65_mode in ['produce', 'replay', 'reconcile', 'verify']
+
+- name: Read immutable Step65 seed proof for safe publication
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -cat
+      - /data/olist/iceberg-validation/step65/v1/_SEED_REPORT.json
+  become: true
+  become_user: "{{ olist_kafka65_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: olist_kafka65_light_seed
+  changed_when: false
+  when: olist_kafka65_mode in ['produce', 'replay', 'reconcile']
+
+- name: Check optional immutable Step65 publish and apply proofs
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -test
+      - -e
+      - "/data/olist/iceberg-validation/step65/v1/_{{ item }}_REPORT.json"
+  loop:
+    - PRODUCE
+    - APPLY
+  become: true
+  become_user: "{{ olist_kafka65_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: olist_kafka65_light_proof_exists
+  changed_when: false
+  failed_when: olist_kafka65_light_proof_exists.rc not in [0, 1]
+  when: olist_kafka65_mode in ['produce', 'replay', 'reconcile']
+
+- name: Read existing immutable evidence without changing HDFS
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -cat
+      - "/data/olist/iceberg-validation/step65/v1/_{{ item }}_REPORT.json"
+  loop:
+    - PRODUCE
+    - APPLY
+  become: true
+  become_user: "{{ olist_kafka65_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: olist_kafka65_light_known_proofs
+  changed_when: false
+  when:
+    - olist_kafka65_mode in ['produce', 'replay', 'reconcile']
+    - (olist_kafka65_light_proof_exists.results | selectattr('item', 'equalto', item) | first).rc == 0
+
+- name: Build immutable evidence envelope for Kafka-only publisher
+  ansible.builtin.set_fact:
+    olist_kafka65_light_envelope: >-
+      {{
+        {'seed': olist_kafka65_light_seed.stdout | from_json,
+         'produce': ((olist_kafka65_light_known_proofs.results | selectattr('item', 'equalto', 'PRODUCE') | first).stdout | from_json)
+                    if (olist_kafka65_light_proof_exists.results | selectattr('item', 'equalto', 'PRODUCE') | first).rc == 0 else none,
+         'apply': ((olist_kafka65_light_known_proofs.results | selectattr('item', 'equalto', 'APPLY') | first).stdout | from_json)
+                  if (olist_kafka65_light_proof_exists.results | selectattr('item', 'equalto', 'APPLY') | first).rc == 0 else none}
+      }}
+  when: olist_kafka65_mode in ['produce', 'replay', 'reconcile']
+
+- name: Send or reconcile CDC events via worker3 Kafka CLI without YARN
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ olist_kafka65_script_dir }}/step65_light.py"
+      - --mode
+      - "{{ olist_kafka65_mode }}"
+      - --bootstrap
+      - "{{ olist_kafka65_bootstrap }}"
+    stdin: "{{ olist_kafka65_light_envelope | to_json }}"
+  delegate_to: worker3
+  register: olist_kafka65_light_publish
+  changed_when: >-
+    ('STEP65_LIGHT_PRODUCE_PASS' in olist_kafka65_light_publish.stderr)
+    or ('STEP65_LIGHT_REPLAY_PASS' in olist_kafka65_light_publish.stderr)
+  when: olist_kafka65_mode in ['produce', 'replay', 'reconcile']
+
+- name: Store first successful producer proof immutably in HDFS
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ olist_kafka65_script_dir }}/step65_light.py"
+      - --mode
+      - store-proof
+    stdin: "{{ olist_kafka65_light_publish.stdout | trim }}"
+  become: true
+  become_user: "{{ olist_kafka65_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: olist_kafka65_light_store
+  changed_when: "'STEP65_LIGHT_PRODUCE_PROOF_WRITTEN' in olist_kafka65_light_store.stdout"
+  when: olist_kafka65_mode in ['produce', 'reconcile']
+
+- name: Show Kafka-only event operation result
+  ansible.builtin.debug:
+    msg:
+      - "{{ olist_kafka65_light_publish.stderr_lines }}"
+      - "{{ olist_kafka65_light_store.stdout_lines if olist_kafka65_mode != 'replay' else [] }}"
+  when: olist_kafka65_mode in ['produce', 'replay', 'reconcile']
+
+- name: Read Kafka end offset from the existing worker3 broker CLI
+  ansible.builtin.command:
+    argv:
+      - /opt/bigtop-kafka-kraft64/kafka/bin/kafka-get-offsets.sh
+      - --bootstrap-server
+      - "{{ olist_kafka65_bootstrap }}"
+      - --topic
+      - "{{ olist_kafka65_topic }}"
+      - --time
+      - '-1'
+  environment:
+    JAVA_HOME: /opt/bigtop-kafka-kraft64/jdk17
+    KAFKA_HEAP_OPTS: '-Xms128m -Xmx256m'
+  register: olist_kafka65_light_end_offset
+  delegate_to: worker3
+  changed_when: false
+  when: olist_kafka65_mode == 'verify'
+
+- name: Verify Iceberg CDC via Trino and committed HDFS checkpoint without Spark
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ olist_kafka65_script_dir }}/step65_light.py"
+      - --mode
+      - verify
+      - --offset-line
+      - "{{ olist_kafka65_light_end_offset.stdout | trim }}"
+  become: true
+  become_user: "{{ olist_kafka65_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: olist_kafka65_light_verify
+  changed_when: false
+  when: olist_kafka65_mode == 'verify'
+
+- name: Announce YARN-free Step65 cross-engine validation
+  ansible.builtin.debug:
+    msg: "{{ olist_kafka65_light_verify.stdout_lines }}"
+  when: olist_kafka65_mode == 'verify'
+
+- name: Read immutable Step65 evidence for local Trino cross-engine check
+  ansible.builtin.command:
+    argv:
+      - hdfs
+      - dfs
+      - -cat
+      - "/data/olist/iceberg-validation/step65/v1/_{{ item }}_REPORT.json"
+  loop:
+    - SEED
+    - PRODUCE
+    - APPLY
+  become: true
+  become_user: "{{ olist_kafka65_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: olist_kafka65_all_proofs
+  changed_when: false
+  when: olist_kafka65_mode == 'verify'
+
+- name: Prepare local controller evidence directory
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../artifacts"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  become: false
+  when: olist_kafka65_mode == 'verify'
+
+- name: Export Step65 immutable proof copies for local Trino verifier
+  ansible.builtin.copy:
+    content: "{{ item.stdout | trim }}
+"
+    dest: "{{ playbook_dir }}/../artifacts/65-kafka-cdc-{{ item.item | lower }}.json"
+    mode: '0644'
+  loop: "{{ olist_kafka65_all_proofs.results }}"
+  delegate_to: localhost
+  become: false
+  when: olist_kafka65_mode == 'verify'

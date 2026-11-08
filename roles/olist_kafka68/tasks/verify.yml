@@ -1,0 +1,36 @@
+---
+- name: Ensure dedicated Step68 rules and dashboard were installed
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ olist_kafka68_rule_file }}"
+    - "{{ olist_kafka68_dashboard_file }}"
+  register: olist_kafka68_deployed
+
+- name: Refuse verifying missing Step68 artifacts
+  ansible.builtin.assert:
+    that: olist_kafka68_deployed.results | selectattr('stat.exists', 'equalto', false) | list | length == 0
+    fail_msg: Step68 artifacts not installed; run mode=apply first.
+
+- name: Validate installed Step68 rule file syntax
+  ansible.builtin.command:
+    argv: [/usr/bin/promtool, check, rules, "{{ olist_kafka68_rule_file }}"]
+  changed_when: false
+
+- name: Validate installed Step68 dashboard JSON
+  ansible.builtin.command:
+    argv: [/usr/bin/python3, -m, json.tool, "{{ olist_kafka68_dashboard_file }}"]
+  changed_when: false
+  no_log: true
+
+- name: Verify Prometheus actually loaded Step68 rule group and current source metrics
+  ansible.builtin.script: >-
+    {{ role_path }}/files/step68_verify.py
+    --url {{ olist_kafka68_prometheus_url }}
+    --stale-seconds {{ olist_kafka68_collector_stale_seconds }}
+  changed_when: false
+  register: olist_kafka68_live_result
+
+- name: Print Step68 verification output
+  ansible.builtin.debug:
+    var: olist_kafka68_live_result.stdout_lines

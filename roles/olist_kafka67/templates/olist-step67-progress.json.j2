@@ -1,0 +1,273 @@
+{
+  "uid": "bigtop-olist-step67",
+  "title": "Olist Step67 - Kafka / Spark committed offset progress",
+  "tags": [
+    "bigtop",
+    "olist",
+    "kafka",
+    "spark",
+    "step67"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "CDC remaining offset gap",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "{{ olist_kafka67_datasource_uid }}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "sum(clamp_min(sum by (topic, partition) (bigtop_olist_step67_kafka_end_offset) - on (topic, partition) sum by (topic, partition) (bigtop_olist_step67_spark_committed_offset), 0))",
+          "refId": "A",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Kafka latest offset",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "{{ olist_kafka67_datasource_uid }}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "sum(bigtop_olist_step67_kafka_end_offset)",
+          "refId": "A",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Spark committed offset",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "{{ olist_kafka67_datasource_uid }}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "sum(bigtop_olist_step67_spark_committed_offset)",
+          "refId": "A",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Last committed microbatch ID",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "{{ olist_kafka67_datasource_uid }}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "bigtop_olist_step67_spark_committed_batch_id",
+          "refId": "A",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Collectors healthy by source",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "{{ olist_kafka67_datasource_uid }}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "targets": [
+        {
+          "expr": "bigtop_olist_step67_collector_success",
+          "refId": "A",
+          "legendFormat": "{% raw %}{{source}} {{instance}}{% endraw %}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Kafka end vs Spark committed",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "{{ olist_kafka67_datasource_uid }}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "targets": [
+        {
+          "expr": "bigtop_olist_step67_kafka_end_offset or bigtop_olist_step67_spark_committed_offset",
+          "refId": "A",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Remaining CDC offset gap (history)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "{{ olist_kafka67_datasource_uid }}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "targets": [
+        {
+          "expr": "sum(clamp_min(sum by (topic, partition) (bigtop_olist_step67_kafka_end_offset) - on (topic, partition) sum by (topic, partition) (bigtop_olist_step67_spark_committed_offset), 0))",
+          "refId": "A",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Commit age in seconds (idle can be normal)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "{{ olist_kafka67_datasource_uid }}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "targets": [
+        {
+          "expr": "time() - bigtop_olist_step67_spark_last_commit_timestamp_seconds",
+          "refId": "A",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Step66 watchdog RUNNING",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "{{ olist_kafka67_datasource_uid }}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 21
+      },
+      "targets": [
+        {
+          "expr": "bigtop_olist_step66_running",
+          "refId": "A",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

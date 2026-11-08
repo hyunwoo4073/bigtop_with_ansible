@@ -1,0 +1,105 @@
+---
+- name: Create dedicated Step67 read-only collector directory
+  ansible.builtin.file:
+    path: "{{ olist_kafka67_script_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Install read-only Kafka and Spark progress collector
+  ansible.builtin.copy:
+    src: step67_progress.py
+    dest: "{{ olist_kafka67_script }}"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
+- name: Install Step67 node-specific oneshot unit
+  ansible.builtin.template:
+    src: bigtop-olist-step67.service.j2
+    dest: "/etc/systemd/system/{{ olist_kafka67_service }}.service"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  register: olist_kafka67_unit
+
+- name: Install disabled opt-in Step67 timer
+  ansible.builtin.template:
+    src: bigtop-olist-step67.timer.j2
+    dest: "/etc/systemd/system/{{ olist_kafka67_service }}.timer"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  register: olist_kafka67_timer_unit
+
+- name: Reload systemd after Step67 unit changes
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  become: true
+  when: olist_kafka67_unit.changed or olist_kafka67_timer_unit.changed
+
+- name: Check previously enabled Step67 timer
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-enabled
+      - "{{ olist_kafka67_service }}.timer"
+  register: olist_kafka67_previous_timer
+  failed_when: false
+  changed_when: false
+
+- name: Leave timer disabled for new installation only
+  ansible.builtin.systemd_service:
+    name: "{{ olist_kafka67_service }}.timer"
+    state: stopped
+    enabled: false
+  become: true
+  when: olist_kafka67_previous_timer.stdout not in ['enabled', 'enabled-runtime']
+
+- name: Verify Grafana dashboard infrastructure exists on worker3
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  delegate_to: worker3
+  loop:
+    - /etc/grafana/provisioning/dashboards/platform.yml
+    - /etc/grafana/provisioning/datasources/prometheus.yml
+    - "{{ olist_kafka67_dashboard_dir }}"
+  register: olist_kafka67_grafana_paths
+  when: inventory_hostname == 'worker3'
+
+- name: Require existing Grafana provisioning without modifying it
+  ansible.builtin.assert:
+    that:
+      - olist_kafka67_grafana_paths.results[0].stat.isreg | default(false)
+      - olist_kafka67_grafana_paths.results[1].stat.isreg | default(false)
+      - olist_kafka67_grafana_paths.results[2].stat.isdir | default(false)
+  when: inventory_hostname == 'worker3'
+
+- name: Install Step67 dashboard to existing Grafana provider
+  ansible.builtin.template:
+    src: olist-step67-progress.json.j2
+    dest: "{{ olist_kafka67_dashboard_dir }}/olist-step67-progress.json"
+    owner: grafana
+    group: grafana
+    mode: '0644'
+  become: true
+  when: inventory_hostname == 'worker3'
+
+- name: Validate rendered Step67 Grafana dashboard JSON
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -m
+      - json.tool
+      - "{{ olist_kafka67_dashboard_dir }}/olist-step67-progress.json"
+  changed_when: false
+  when: inventory_hostname == 'worker3'
+
+- name: Explain Step67 installed but disarmed
+  ansible.builtin.debug:
+    msg: 'STEP67_APPLY_PASS: {{ inventory_hostname }} read-only collector installed; timer not auto-enabled'

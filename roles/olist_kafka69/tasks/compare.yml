@@ -1,0 +1,16 @@
+---
+- name: Compare before/after Prometheus and HDFS evidence without touching workloads
+  ansible.builtin.script: >-
+    {{ role_path }}/files/step69_evidence.py compare
+    --before {{ olist_kafka69_evidence_dir }}/baseline-progress.json
+    --after {{ olist_kafka69_evidence_dir }}/after-progress.json
+    --checkpoint-before {{ olist_kafka69_evidence_dir }}/baseline-checkpoint.json
+    --checkpoint-after {{ olist_kafka69_evidence_dir }}/after-checkpoint.json
+    --require-input-advance {{ olist_kafka69_require_input_advance | bool | ternary('true', 'false') }}
+    --require-drained {{ olist_kafka69_require_drained | bool | ternary('true', 'false') }}
+  changed_when: false
+  register: olist_kafka69_comparison
+
+- name: Print Step69 comparison details
+  ansible.builtin.debug:
+    var: olist_kafka69_comparison.stdout_lines

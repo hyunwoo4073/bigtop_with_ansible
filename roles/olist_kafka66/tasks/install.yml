@@ -1,0 +1,128 @@
+---
+- name: Install updated Step65 controller with shared manual-stop recovery guard
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../roles/olist_kafka65/files/step65_yarn_control.py"
+    dest: "{{ olist_kafka66_control }}"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
+- name: Install root watchdog metrics wrapper
+  ansible.builtin.copy:
+    src: step66_watchdog.py
+    dest: "{{ olist_kafka66_wrapper }}"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
+- name: Create dedicated Node Exporter textfile directory if missing
+  ansible.builtin.file:
+    path: "{{ olist_kafka66_metrics_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Install watchdog systemd oneshot service
+  ansible.builtin.template:
+    src: bigtop-olist-step66-watchdog.service.j2
+    dest: "/etc/systemd/system/{{ olist_kafka66_service }}.service"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  register: olist_kafka66_service_unit
+
+- name: Install disabled 60-second watchdog systemd timer
+  ansible.builtin.template:
+    src: bigtop-olist-step66-watchdog.timer.j2
+    dest: "/etc/systemd/system/{{ olist_kafka66_service }}.timer"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  register: olist_kafka66_timer_unit
+
+- name: Reload systemd unit files
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  become: true
+  when: olist_kafka66_service_unit.changed or olist_kafka66_timer_unit.changed
+
+- name: Check if watchdog timer was already enabled before this apply
+  ansible.builtin.command:
+    argv: [systemctl, is-enabled, '{{ olist_kafka66_service }}.timer']
+  register: olist_kafka66_previous_timer
+  changed_when: false
+  failed_when: false
+
+- name: Leave new watchdog timer disabled on initial installation
+  ansible.builtin.systemd_service:
+    name: "{{ olist_kafka66_service }}.timer"
+    state: stopped
+    enabled: false
+  become: true
+  when: olist_kafka66_previous_timer.stdout not in ['enabled', 'enabled-runtime']
+
+- name: Detect existing Grafana dashboard provider on worker3
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  delegate_to: worker3
+  loop:
+    - /etc/grafana/provisioning/dashboards/platform.yml
+    - /etc/grafana/provisioning/datasources/prometheus.yml
+    - "{{ olist_kafka66_dashboard_dir }}"
+  register: olist_kafka66_grafana_paths
+
+- name: Require existing dashboard infrastructure (no replacement)
+  ansible.builtin.assert:
+    that:
+      - olist_kafka66_grafana_paths.results[0].stat.isreg | default(false)
+      - olist_kafka66_grafana_paths.results[1].stat.isreg | default(false)
+      - olist_kafka66_grafana_paths.results[2].stat.isdir | default(false)
+
+- name: Read installed Grafana provisioner and datasource
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  loop:
+    - /etc/grafana/provisioning/dashboards/platform.yml
+    - /etc/grafana/provisioning/datasources/prometheus.yml
+  delegate_to: worker3
+  register: olist_kafka66_provisioning
+
+- name: Require existing matching dashboard and data source
+  ansible.builtin.assert:
+    that:
+      - (olist_kafka66_provisioning.results[0].content | b64decode | from_yaml).providers[0].options.path == olist_kafka66_dashboard_dir
+      - (olist_kafka66_provisioning.results[1].content | b64decode | from_yaml).datasources[0].uid == olist_kafka66_datasource_uid
+
+- name: Install independent Step66 Grafana dashboard
+  ansible.builtin.template:
+    src: olist-step66-streaming-watchdog.json.j2
+    dest: "{{ olist_kafka66_dashboard_dir }}/{{ olist_kafka66_dashboard_file }}"
+    owner: grafana
+    group: grafana
+    mode: '0644'
+  delegate_to: worker3
+  become: true
+
+- name: Verify rendered Grafana dashboard JSON
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -m
+      - json.tool
+      - "{{ olist_kafka66_dashboard_dir }}/{{ olist_kafka66_dashboard_file }}"
+  delegate_to: worker3
+  changed_when: false
+
+- name: Explain explicit opt-in requirement and monitoring visibility
+  ansible.builtin.debug:
+    msg:
+      - 'STEP66_APPLY_PASS: new timer INSTALLED BUT DISABLED.'
+      - 'Enable only after app is RUNNING: -e olist_kafka66_mode=enable.'
+      - 'Node exporter on master must use textfile directory; Prometheus must scrape it.'
+      - 'Dashboard: http://127.0.0.1:23000/d/bigtop-olist-step66/'

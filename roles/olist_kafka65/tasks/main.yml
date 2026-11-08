@@ -3,7 +3,7 @@
   ansible.builtin.assert:
     that:
       - inventory_hostname == 'master'
-      - olist_kafka65_mode in ['plan', 'preflight', 'apply', 'start', 'status', 'stop', 'produce', 'replay', 'verify']
+      - olist_kafka65_mode in ['plan', 'preflight', 'apply', 'start', 'status', 'stop', 'produce', 'replay', 'verify', 'upgrade', 'reconcile']
       - olist_kafka65_topic == 'bigtop_olist_step65_cdc_v1'
       - olist_kafka65_rest_uri == 'http://192.158.2.103:9001/iceberg/'
       - olist_kafka65_app == '/opt/bigtop-iceberg/step65/olist_kafka65.py'
@@ -13,19 +13,23 @@
   ansible.builtin.debug:
     msg:
       - 'STEP65_PLAN_ONLY: new topic/table/checkpoint, no Step64 or Gold changes.'
-      - 'Use preflight -> apply(seed) -> topic create -> start -> produce -> verify.'
+      - 'Existing Step65: upgrade (no reseed) -> produce/reconcile -> verify; no extra Spark batch apps.'
       - 'stop -> start preserves HDFS checkpoint; replay -> verify must keep same snapshot.'
       - 'App stays on YARN until stopped; automatic restart/watchdog is not enabled.'
   when: olist_kafka65_mode == 'plan'
 
 - name: Check Step65 prerequisites without mutating the platform
   ansible.builtin.include_tasks: preflight.yml
-  when: olist_kafka65_mode in ['preflight', 'apply', 'start', 'produce', 'replay', 'verify']
+  when: olist_kafka65_mode in ['preflight', 'apply', 'start', 'produce', 'replay', 'verify', 'upgrade', 'reconcile']
 
 - name: Install Step65 files and seed isolated table
   ansible.builtin.include_tasks: apply.yml
   when: olist_kafka65_mode == 'apply'
 
-- name: Run Step65 YARN lifecycle or Spark validation stage
+- name: Stage low-resource Step65 CLI without touching running Spark
+  ansible.builtin.include_tasks: light_install.yml
+  when: olist_kafka65_mode in ['apply', 'upgrade']
+
+- name: Run Step65 YARN lifecycle or lightweight validation stage
   ansible.builtin.include_tasks: run.yml
-  when: olist_kafka65_mode in ['start', 'status', 'stop', 'produce', 'replay', 'verify']
+  when: olist_kafka65_mode in ['start', 'status', 'stop', 'produce', 'replay', 'verify', 'reconcile']

@@ -1,0 +1,29 @@
+---
+- name: Validate safe Step68 mode and parameters
+  ansible.builtin.assert:
+    that:
+      - olist_kafka68_mode in ['plan', 'preflight', 'apply', 'verify']
+      - olist_kafka68_collector_stale_seconds | int >= 180
+      - olist_kafka68_lag_threshold | int >= 0
+    fail_msg: Step68 mode/threshold invalid; no change performed.
+
+- name: Print read-only Step68 plan
+  ansible.builtin.debug:
+    msg:
+      - "STEP68_PLAN: mode={{ olist_kafka68_mode }}"
+      - "Prometheus rules (new file only) -> {{ olist_kafka68_rule_file }}"
+      - "Grafana dashboard (new file only) -> {{ olist_kafka68_dashboard_file }}"
+      - "No Step65/Step67 restart; no Kafka/HDFS/Iceberg writes."
+  when: olist_kafka68_mode == 'plan'
+
+- name: Step68 preflight
+  ansible.builtin.include_tasks: preflight.yml
+  when: olist_kafka68_mode in ['preflight', 'apply', 'verify']
+
+- name: Step68 additive deployment
+  ansible.builtin.include_tasks: apply.yml
+  when: olist_kafka68_mode == 'apply'
+
+- name: Step68 read-only live verification
+  ansible.builtin.include_tasks: verify.yml
+  when: olist_kafka68_mode == 'verify'

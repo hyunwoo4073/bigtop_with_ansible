@@ -1,0 +1,11 @@
+---
+olist_kafka67_mode: plan
+olist_kafka67_topic: bigtop_olist_step65_cdc_v1
+olist_kafka67_bootstrap: '192.158.2.101:9092,192.158.2.102:9092,192.158.2.103:9092'
+olist_kafka67_checkpoint: 'hdfs://master:9000/data/olist/iceberg-checkpoints/step65/v1'
+olist_kafka67_script_dir: /opt/bigtop-iceberg/step67
+olist_kafka67_script: /opt/bigtop-iceberg/step67/step67_progress.py
+olist_kafka67_metrics_dir: /var/lib/prometheus/node-exporter
+olist_kafka67_dashboard_dir: /var/lib/grafana/dashboards
+olist_kafka67_dashboard_uid: bigtop-olist-step67
+olist_kafka67_datasource_uid: "{{ grafana_datasource_uid | default('prometheus') }}"

@@ -1,6 +1,6 @@
 # Bigtop Data Platform — 상세 아키텍처·운영·Playbook 가이드
 
-> **문서 범위:** 2026-11-07까지 01~65번(64-A/B/C 포함). 기존 Olist HDFS/Parquet(45~52), Iceberg 실습과 REST Catalog·Trino·Gold WAP/수동 릴리스(53~60), Iceberg 관측/정비/CDC(61~63), Kafka KRaft/Web UI 및 Kafka CDC(64), 상시 Streaming 시도(65)를 포함한다. **65번 최종 처리는 자원 부족으로 미검증 상태다.**  
+> **문서 범위:** 2026-11-08까지 01~69번(64-A/B/C 및 65-B 포함). Olist HDFS/Parquet·Iceberg(45~63), Kafka KRaft/CDC(64), 상시 Streaming의 경량 Producer/Verifier(65), Watchdog(66), Kafka/Spark Progress(67), Lag/Alert(68), 읽기 전용 복구 증빙 및 정상 재기동 시험(69)까지 포함한다. **미완료 Batch 장애 재처리와 Replay 재실행을 통한 멱등성 실증은 남아 있다.**
 > **빠른 개요:** [프로젝트 README](../README.md)  
 > **이 문서의 목적:** 처음 보는 사람이 왜 이 플랫폼을 구축했는지, 각 서버와 컴포넌트가 왜 필요한지, 어떤 Playbook이 무엇을 바꾸는지, 일상 운영·복구·다음 개발을 어떻게 이어갈지 이해하도록 한다.
 
@@ -20,7 +20,7 @@
 - **64-A Kafka 실측:** Kafka 4.2.2 3노드 KRaft 설치 후 `STEP64A_KAFKA_CLI_JAVA17_OK`·`STEP64A_KAFKA_PRODUCE_CONSUME_PASS`, RF3/ISR3/minISR2 로그 확인. 초기 9093 충돌을 피하려 Controller 포트 19093 적용.
 - **64-B/64-C:** 64-B Kafka 3서비스 active·Metadata Quorum·`STEP64B_PREFLIGHT_PASS` 실제 로그와 모드 변수 수정 이후 사용자 확인. Kafbat UI는 사용자 화면/기능 질문이 있었으나 64-C의 `verify` 성공 로그는 별도 제공되지 않았다. 64-C의 최초 9개 테스트 중 1개는 프로젝트 전역 `.jar/.tar` 존재를 잘못 실패 처리하는 테스트 결함이므로 이 문서 묶음에 수정본을 포함한다.
 - **64 CDC:** `AvailableNow` Kafka→Spark→Iceberg→Trino 통과를 사용자 확인. 520행(유효512/삭제8) 결과.
-- **65 상시 Streaming:** 65번 Seed 준비와 전용 Kafka Topic 생성, YARN `olist-iceberg-kafka65-continuous` RUNNING이 확인됐다. 이후 `produce`/`verify`가 별도 Spark 앱으로 제출돼 Queue의 실제 자원 부족으로 ACCEPTED 대기. **65번 CDC 최종 521행·Offset/Checkpoint·재기동·replay는 PASS 미확인**.
+- **65~69 Streaming 운영:** 과거 `produce/verify` 별도 Spark 앱은 자원 부족으로 YARN `ACCEPTED` 대기했으나, 65-B 경량 Kafka CLI + Trino/HDFS Verifier 도입 후 521/512/9, Kafka End/Checkpoint=24, Snapshot 불변을 실제 검증했다. Step67 메트릭 수집/Step68 Lag 관측/Step69 안정성 비교도 통과했다. 단, 실제 미완료 Batch 재처리 및 새 YARN App `RUNNING` 최종 확인은 미완료다.
 - **아직 별도 확인 필요:** 48번/51번 Timer 활성화, 38/43/44번, Kafka 64-B Timer/메타데이터 주기 실행, Kafbat 64-C 실배포 verify, Gravitino/HDFS/DB 백업 복원.
 - **HA 범위:** 단일 NameNode/ResourceManager 기반의 실습 구성이며 HA를 구축했다고 주장하지 않는다.
 
@@ -262,39 +262,41 @@ Ansible Inventory ──► (32) PostgreSQL platform_hosts / platform_service_in
 **릴리스 경계:** 59번 WAP는 **Gold 하나**만 fast_forward한다. 58번 7개 테이블을 원자적으로 공개하거나, 모든 직접 SQL 조회자를 ACL로 차단하는 구성은 아니다. 60번은 실패 차단·중복 실행 제어를 추가한 **단일 컨트롤러** 오케스트레이션이다. 다른 경로로 직접 59번 Publish를 실행하면 60번 runner의 `flock` 잠금을 공유하지 않는다.
 
 
-### 2.8 Kafka KRaft/관측/Web UI와 CDC 실행 경로 (61~65)
+### 2.8 Kafka KRaft/관측/Web UI와 CDC 운영 경로 (61~69)
 
 ```text
-61 Iceberg 58/59 8 assets -> OpenMetadata 8 Containers/8 Lineage -> Grafana release dashboard
-62 shared.olist62_ops.maintenance_smoke (isolated compaction / snapshot rollback)
-63 shared.olist63_* CDC smoke (516 rows; live 512/tombstones 4)
+61 58/59 Iceberg 8 assets → OpenMetadata 8 Lineage → Grafana release dashboard
+62 별도 Iceberg maintenance table (compaction / snapshot rollback)
+63 별도 Iceberg CDC MERGE (516 rows; live 512 / tombstones 4)
 
 worker1:9092 ─┐
 worker2:9092 ─┼── Kafka 4.2.2 KRaft 3 brokers + 3 controllers (:19093)
-worker3:9092 ─┘                │                       │
-                     64-B CLI Collector                 64-C Kafbat UI
-                     worker3 .prom → Prometheus         metadata Docker :18081
-                             → Grafana                 토픽/Partition/Group 조회
-                                      │
-                                      ▼
-64: CDC Topic -> Spark AvailableNow -> Iceberg shared.olist64_kafka.fact_cdc_stream_v1
-                                       (520 rows; live 512 / tombstones 8)
-                                      │ read-only seed
-                                      ▼
-65: 별도 Topic -> Spark Structured Streaming (YARN continuous, 10s trigger)
-                   -> foreachBatch seq-guarded MERGE
-                   -> shared.olist65_stream.fact_cdc_running_v1
-                   -> HDFS Checkpoint (/data/olist/iceberg-checkpoints/step65/v1)
-                   -> Trino verification (목표 521 rows: 미완료)
+worker3:9092 ─┘         │                            └─ Kafbat UI metadata :18081
+                       │
+64 CDC Topic → Spark AvailableNow → Iceberg 520 rows (live 512 / tombstones 8)
+                       │
+65 Topic bigtop_olist_step65_cdc_v1 (Kafka End Offset 24)
+        ↓
+   Spark Structured Streaming (master submit, YARN cluster, 10s trigger)
+        ↓ foreachBatch seq-guarded MERGE
+   shared.olist65_stream.fact_cdc_running_v1 (521 / 512 live / 9 tombstones)
+        + HDFS checkpoint /data/olist/iceberg-checkpoints/step65/v1
+        + Step65-B: worker3 lightweight Kafka publisher, Trino/HDFS verifier
+        + Step66: master opt-in watchdog (자원 부족 시 중복 submit 보호)
+                       │
+67 master Spark Commit / worker3 Kafka End (Node Exporter textfile, 60s timer)
+        ↓
+68 Prometheus recording/alert rules + Grafana (topic/partition Offset Lag)
+        ↓
+69 worker3 baseline/after Prometheus JSON + HDFS offsets/commits 목록 비교
 ```
 
-- **Kafka 계층:** 64-A 전용 Java17(`/opt/bigtop-kafka-kraft64/jdk17`)을 사용한다. `:9092`는 broker, `:19093`은 KRaft controller. 기존 Alertmanager와의 충돌 때문에 Controller 포트를 변경했다. worker3의 실제 `:9093` 점유 서비스는 `sudo ss -lntp`로 확인한다.
-- **메시지/메타데이터:** Kafka Topic RF3/minISR2, combined broker/controller 3노드. KRaft controller quorum과 HDFS/YARN HA는 독립적이다. 작은 VM 공동 설치는 CPU/RAM 경합이 발생한다.
-- **64-B:** CLI Quorum/Topic 검사 → Node Exporter 텍스트파일 `kafka_platform64b.prom` → Prometheus/Grafana `bigtop-kafka-kraft64`; OpenMetadata Messaging Service 등록은 별도의 수동 `--mode metadata`. Timer 기본 비활성.
-- **64-C:** Kafbat UI v1.5.0을 `metadata` VM Docker 내부에서 Kafka 3 broker에 연결. Readonly UI는 Kafka ACL이 아니다. Consumer Group Lag 조회와 Prometheus/Alertmanager의 **주기적 Lag 수집·알림**은 별개이며 후자는 미구성.
-- **64:** Kafka Connector JAR는 Spark3.5.6용으로 고정해 오프라인 재사용한다. 유한 `AvailableNow` 스트리밍은 통과했다고 사용자 확인했다.
-- **65:** 상시 Streaming 한 개와 경량 producer/verification으로 역할 분리하는 것이 현재 클러스터 자원 규모에 적절하다. 현재 패키지의 `produce`/`verify`/`replay`는 **별도 `spark-submit --deploy-mode cluster`** 이므로 Streaming이 RUNNING일 때 YARN `ACCEPTED`가 생길 수 있다. `start` 성공만으로 최종 데이터 정합성·replay 성공을 선언하지 않는다.
-
+- **Kafka 계층:** 64-A는 별도 Java17(`/opt/bigtop-kafka-kraft64/jdk17`)을 사용한다. `:9092`는 broker, `:19093`은 KRaft controller. 기존 Alertmanager와 포트 충돌을 피해 Controller를 `:19093`으로 변경했다. Kafka quorum과 HDFS/YARN HA는 독립적이다.
+- **65-B:** 과거 `produce`/`verify` Spark 배치가 YARN `ACCEPTED`에 머물던 자원 병목을 제거하려고 worker3 Kafka CLI + master Trino/HDFS 검증으로 분리했다. 2026-11-08 `STEP65_LIGHT_VERIFY_PASS: 521/512/9 checkpoint=24 kafka_end=24 snapshot=7676611440228973561` 확인. 별도 Spark 검증 앱을 추가로 제출하지 않는다.
+- **66:** master의 단일 지정 app 보호형 Watchdog. `apply`는 서비스와 비활성 Timer를 설치하며, `enable`을 명시해야 자동 감시를 켠다. `ACCEPTED`/`SUBMITTED` 상태에선 중복 제출 방지, 수동 stop 의도 반영, 장애 복구 빈도 제한 설계. **실제 enable/자동 복구 동작 증빙은 이 문서 기준 미확인**이다.
+- **67:** master는 Step65 HDFS `commits/offsets`에서 *committed* Offset/Batch를 수집하고, worker3는 Kafka End Offset을 수집한다. 양쪽 Textfile Collector 60초 Timer 활성 및 Prometheus `node-exporter` Target 수집/Success=1 확인. Spark systemd Unit 템플릿의 Jinja2 줄바꿈 오류는 수정·재배포했다.
+- **68:** Kafka와 Spark 수집 `instance`가 달라 `(topic,partition)` 기준 PromQL 결합. Offset Lag=0, 신규 Recording/Alert Rule과 Grafana는 사용자 apply/verify 확인. Alertmanager 라우팅/알림 실제 전달은 별도 확인한다. 일반 Kafka Consumer Group Lag와 구분한다.
+- **69:** Prometheus Offset과 HDFS `offsets/commits/` file listing을 읽기 전용 JSON으로 수집·비교한다. 최근 baseline/after에서 Offset `24→24`, Batch `2→2`, Lag 0, `COMPARE_PASS`. 정상 Step65 stop/start와 Iceberg/Trino 검증을 별도로 수행했으나 **미완료 Micro-batch 재처리 또는 Exactly Once 실증은 아니다**.
 
 ## 3. 컴포넌트 선정 이유 / 설치 위치 / 책임
 
@@ -391,7 +393,11 @@ bigtop-cluster-ansible/
 │   ├── kafka_platform64b/                            # 64-B metrics/OpenMetadata
 │   ├── kafka_ui64c/                                  # 64-C Kafbat
 │   ├── olist_iceberg_kafka64/                         # 64 Kafka/AvailableNow CDC
-│   └── olist_kafka65/                                 # 65 continuous streaming
+│   ├── olist_kafka65/                                 # 65 continuous + lightweight verification
+│   ├── olist_kafka66/                                 # 66 watchdog opt-in
+│   ├── olist_kafka67/                                 # 67 Kafka/Spark progress collection
+│   ├── olist_kafka68/                                 # 68 Prometheus Rule/Grafana
+│   └── olist_kafka69/                                 # 69 recovery evidence
 ├── vendor/iceberg/, vendor/iceberg-rest/, vendor/trino57/, vendor/kafka64/, vendor/kafka-broker64/ # 다운로드 바이너리, Git 제외
 ├── artifacts/                        # 실행 JSON 증빙/보고서, Git 제외
 ├── collections/requirements.yml     # community.postgresql 등 Collection
@@ -537,7 +543,7 @@ bigtop-cluster-ansible/
 **적용 Role:** `roles/iceberg_rest_catalog`, `roles/trino_iceberg_rest`, `roles/olist_iceberg_materialization`, `roles/olist_iceberg_wap`, `roles/olist_iceberg_release60`. **실행 자료:** `vendor/`(다운로드 바이너리), `artifacts/`(런타임 JSON 증빙)은 소스가 아니므로 기본 Git 제외. 고정 버전, JDK 아카이브 SHA-256, REST/RBAC·메모리 주의사항은 각 `docs/55*`~`docs/60*` 문서를 참고한다.
 
 
-### 5.10 Iceberg 관리(61~63), Kafka 플랫폼/CDC(64-A/B/C, 64), 상시 운영(65)
+### 5.10 Iceberg 관리(61~63), Kafka 플랫폼/CDC(64-A/B/C, 64), 상시 운영·관측(65~69)
 
 | Playbook | 대상 | 주요 실행 모드 / 역할 | 경계·현재 상태 |
 |---|---|---|---|
@@ -548,7 +554,11 @@ bigtop-cluster-ansible/
 | `64b-kafka-platform-integration.yml` | worker3 | 기본 `plan`, `apply`, `verify` | Read-only Kafka 수집기, Grafana, OpenMetadata 명시 등록; Broker 무재시작 |
 | `64c-kafka-web-ui.yml` | metadata | 기본 `plan`, `apply`, `verify` | Kafbat UI Docker, 읽기 전용. 사용자 화면 언급, `verify` 성공 로그 별도 확인 |
 | `64-olist-kafka-iceberg-cdc.yml` | master (+ broker 검사) | `preflight`, `seed`, `produce`, `ingest`, `verify` | `AvailableNow` 단발성 CDC, 사용자 PASS(520행) |
-| `65-kafka-streaming-operations.yml` | master | `preflight`, `apply`, `start/status/stop`, `produce/replay/verify` | **상시 app RUNNING, produce/verify ACCEPTED 대기; 최종 PASS 미확인** |
+| `65-kafka-streaming-operations.yml` | master/worker3 CLI | `preflight`, `upgrade`, `start/status/stop`, `produce/replay/reconcile/verify` | **Step65 경량 Verify PASS:** 521/512/9, Kafka/Checkpoint=24, Snapshot 불변. Replay 2회차 Guard는 발행 전 차단됨 |
+| `66-kafka-streaming-watchdog.yml` | master, worker3 Dashboard | `plan/preflight/apply/status/verify/enable/disable` | 지정 Step65 앱만 감시, 자동 복구는 Opt-in. 설치/enable·실장애 자동 복구 결과 별도 확인 |
+| `67-kafka-spark-progress.yml` | master, worker3 | `plan/preflight/apply/verify/enable/disable` | 양쪽 수집 서비스·60초 Timer 활성 및 Prometheus 양쪽 Target 실제 관측 PASS |
+| `68-streaming-health.yml` | worker3 | `plan/preflight/apply/verify` | 사용자 배포·검증 확인, Prometheus recording/alert rules 및 Grafana, 실제 알림 전달 미검증 |
+| `69-streaming-recovery-proof.yml` | worker3 (HDFS는 master 위임) | `plan/preflight/baseline/after/compare` | 증빙 저장/비교 PASS; 실제 stop/start와 결합한 체크포인트 안정성 확인, 미완료 Batch 복구 미검증 |
 
 각 새 단계는 `roles/<role>/defaults/main.yml`에서 설정과 전용 경로를 명시한다. `64-A/B`는 설치 오류 수정 패치가 적용된 최종 파일을 기준으로 보고, 구버전 ZIP의 9093 Controller 포트/`when` Undefined 조건을 다시 덮어쓰지 않는다. 64-C 전역 바이너리 탐지 단위 테스트 문제도 수정본으로 관리한다.
 
@@ -735,57 +745,51 @@ sudo journalctl -u bigtop-olist-iceberg-release60.service -n 100 --no-pager
 - 그 외 단계의 원격 실행에서 `-e ansible_connection=local`을 전체 호스트에 강제하지 않는다.
 
 
-### 6.8 64-A~65 명령 및 단계별 검증 (worker3 기준)
+### 6.8 64-A~69 명령 및 단계별 검증 (worker3 기준)
 
-> **중요:** 상태 조회와 실제 변경 명령을 구분한다. Broker는 정상 기동·Smoke PASS 상태이므로 **64-A `install` 재실행이나 스토리지 포맷을 루틴으로 수행하지 않는다**. 65번 전용 토픽은 이미 생성된 것으로 관찰되며 같은 이벤트의 `produce` 재제출 여부를 먼저 확인한다.
+> 이미 동작하는 Kafka Broker, HDFS 체크포인트 및 Iceberg 데이터를 재초기화하지 않는다. `plan/preflight/verify/status/compare`는 확인용; `start/stop/produce/replay/enable/apply`는 대상 변경이 발생할 수 있는 별도 실행이다.
 
 ```bash
 cd ~/bigtop-cluster-ansible
 
-# Kafka 3-broker/KRaft read-only verification
+# Kafka KRaft 설치 상태 (읽기 전용)
 .venv/bin/ansible-playbook -i inventory/hosts.ini playbooks/64a-kafka-kraft-cluster.yml -e kafka_kraft64_mode=verify
 
-# 64-B metrics health (CLI 수집기 별도 기동 시에는 CPU/CLI 부하 관찰)
-.venv/bin/ansible-playbook -i inventory/hosts.ini playbooks/64b-kafka-platform-integration.yml -e kafka_platform64b_mode=verify
-sudo journalctl -u bigtop-kafka-platform64b.service -n 80 --no-pager
-
-# 64-C Kafbat Docker app read-only health verification
-.venv/bin/ansible-playbook -i inventory/hosts.ini playbooks/64c-kafka-web-ui.yml -e kafka_ui64c_mode=verify
-
-# 65: 현재 Streaming 앱 확인 — 반복 start/produce 금지
+# 65: App 상태 + Trino/HDFS commit/offset + snapshot (경량 Verify)
 .venv/bin/ansible-playbook -i inventory/hosts.ini playbooks/65-kafka-streaming-operations.yml -e olist_kafka65_mode=status
+.venv/bin/ansible-playbook -i inventory/hosts.ini playbooks/65-kafka-streaming-operations.yml -e olist_kafka65_mode=verify
+
+# 66: Watchdog 상태; enable은 옵트인, 자동 복구 테스트를 일상 점검으로 수행하지 않음
+.venv/bin/ansible-playbook -i inventory/hosts.ini playbooks/66-kafka-streaming-watchdog.yml -e olist_kafka66_mode=status
+
+# 67: Kafka End & Spark Committed Offset 수동 수집/검증
+.venv/bin/ansible-playbook -i inventory/hosts.ini playbooks/67-kafka-spark-progress.yml -e olist_kafka67_mode=verify
+
+# 68: Recording/Alert Rules + Grafana 배포 상태 검증
+.venv/bin/ansible-playbook -i inventory/hosts.ini playbooks/68-streaming-health.yml -e olist_kafka68_mode=verify
+
+# 69: 기존 불변 JSON 비교. 새 실험에는 별도의 evidence_dir을 지정한다.
+.venv/bin/ansible-playbook -i inventory/hosts.ini playbooks/69-streaming-recovery-proof.yml \
+  -e olist_kafka69_mode=compare \
+  -e "olist_kafka69_evidence_dir=$PWD/artifacts/step69/restart-20261108-181312"
 ```
 
-#### 65번 `ACCEPTED` 및 자원 부족 대응
+#### 65-B 경량 검증 및 정상 종료·재기동 실제 관찰 (2026-11-08)
 
-사용자가 YARN UI에서 `olist-iceberg-kafka65-continuous=RUNNING`, `olist-kafka65-produce=ACCEPTED`를 확인했고 `verify`도 상시 앱 실행 중 `ACCEPTED`에 머문다고 보고했다. 사용자는 해당 원인이 **자원 부족이라고 확인**했다. 따라서 큐 정책 탓으로 단정하거나 `DefaultResourceCalculator`의 일반 동작만으로 설명하지 않는다. 실제 `batch` 큐의 AM limit·메모리·vCore·노드별 할당량을 함께 조사한다.
+- 최초 520행 Seed → Step65 CDC 반영 521행(512 Live, 9 Tombstones). `STEP65_LIGHT_VERIFY_PASS`, checkpoint=24, kafka_end=24, snapshot=`7676611440228973561` 확인. HDFS `_SEED_REPORT/_PRODUCE_REPORT/_APPLY_REPORT` 기존 증빙을 읽었다.
+- Step65 `stop`: `application_1794117087936_0002` 정상 중지와 `STEP65_CHECKPOINT_PRESERVED` 출력. Step65 `start`: `application_1794117087936_0003` 제출 성공. 직후 `status`는 **ACCEPTED**였으므로 *당시 `RUNNING` 전환은 로그에 미포함*. 후속 Step65 Verify, Step67 수집, Step69 비교가 PASS였다는 사실과 구분한다.
+- Replay 실행은 `STEP65_LIGHT_FAILED: Replay permitted only once from initial 12 offsets; current end=24`로 **보호 조건에서 거부**. 추가 Replay를 증명하기 위해 guard 조건을 제거하거나 토픽/HDFS checkpoint를 초기화하지 않는다. 초기 12개 이후 12개 기록은 존재하지만, 그 이유를 Offset 숫자만으로 확정하지 않는다.
+- Step69 독립 `baseline/after` 증빙 저장 및 `COMPARE_PASS`: `kafka=24→24`, `spark=24→24`, HDFS `offsets/commits` Batch `2→2`. 입력 증가 없이 실행한 검증으로, 결과는 **관찰된 무회귀/안정성**이지 *강제 장애 중 in-flight Batch 복구* 증명이 아니다.
+- Step69 파일은 기본 `artifacts/step69/after-progress.json` 경로의 덮어쓰기를 거부한다. 이미 해당 파일이 존재할 경우 `-e "olist_kafka69_evidence_dir=$PWD/artifacts/step69/run-<unique>"`로 새 디렉터리 지정 후 Baseline/After를 새로 수집한다. Git에는 어떤 증빙 JSON도 커밋하지 않는다.
 
 ```bash
-# Hadoop CLI를 실행할 수 있는 master에서
-# 현재 작업 ID를 먼저 파악한 다음 필요한 작업만 확인
-yarn application -list -appStates RUNNING,ACCEPTED
-yarn queue -status batch
-yarn node -list -showDetails
-yarn application -status <APPLICATION_ID>
+# master/worker3 메트릭·타이머 간격 확인
+ssh master 'systemctl list-timers --all "bigtop-olist-step67-*" --no-pager'
+systemctl list-timers --all 'bigtop-olist-step67-*' --no-pager
+curl -fsSG http://127.0.0.1:9090/api/v1/query --data-urlencode 'query=bigtop_olist_step68_offset_lag'
 ```
 
-- **즉시 처리:** `produce`가 실제 YARN에 이미 제출되어 있다면 재제출 금지. 더 이상 필요 없는 **65 verify 대기 앱만** 정확한 ID로 확인해 취소할 수 있다. Streaming을 종료해야 한다면 Role의 **정확한 앱 ID 검증이 있는 `mode=stop`**을 사용하고 HDFS 체크포인트/토픽/테이블을 보존한다.
-- **임시 시퀀스:** 스트리밍 중지 → 기존 `produce`가 `FINISHED`가 되는지 확인 → 스트리밍 `start` 재실행 → 데이터 반영 확인 → 필요하면 중지 후 Spark 기반 `verify` 실행. 다만 이 시퀀스는 **상시 Streaming 중 병렬 Produce/Verify**라는 원래 요구를 입증하지는 못한다.
-- **근본 수정(다음 세션):** `produce/replay`를 worker3의 Java17 Kafka CLI 또는 별도 경량 Python client에서 수행하게 하여 **YARN 제출 제거**. `verify`는 Trino SQL 데이터 일치, Kafka end offset, HDFS `commits/offsets` 비교, Iceberg Snapshot 증빙을 YARN Spark 없이 검사할 수 있도록 리팩터링. 원본 65번 검증이 만든 HDFS 불변 증빙 파일 경로·형식과 호환성을 유지한다.
-- **미완료 판정:** `521 total / 512 live / 9 tombstones`, restart 후 같은 checkpoint 재사용, replay 이후 **메시지가 커밋 Offset에 포함되면서 Iceberg snapshot이 안 바뀜**을 모두 확인해야 65 PASS. 원격 로그·UI의 최신 상태는 아직 수집되지 않았다.
-
-```bash
-# 제어 명령 (기존 앱이 존재하는지 상태 조회 후 실행)
-.venv/bin/ansible-playbook -i inventory/hosts.ini \
-  playbooks/65-kafka-streaming-operations.yml -e olist_kafka65_mode=stop
-
-# HDFS checkpoint는 절대 삭제하지 않는다. 필요 시 기동 전 RAM/Queue 확인.
-.venv/bin/ansible-playbook -i inventory/hosts.ini \
-  playbooks/65-kafka-streaming-operations.yml -e olist_kafka65_mode=start
-```
-
-`Spark Structured Streaming`은 Kafka source offset을 HDFS checkpoint에 기록하므로 **Kafbat Consumer Group Lag 화면의 수치만으로 소비 완료를 판정하지 않는다.** Offset/Commit 파일과 YARN 스트리밍 진행 로그를 결합한다. Kafka 메시지와 Iceberg 커밋 사이에 분산 Exactly-once 트랜잭션이 없으므로 `foreachBatch` 재실행을 가정한 `event_seq > last_event_seq` 멱등 MERGE가 필요하다.
-
+**주기 실행과 실패 처리는 구분:** Step66은 YARN 앱 중단 감시·통제된 자동 복구용이지만 실제 활성/복구 시험 결과는 미확인이다. Step67 Timer는 60초 간격 실제 실행, Step68은 기록·경고 규칙 로드 확인, Step69는 사용자 입력에 따른 읽기 전용 증빙 저장만 수행한다.
 
 ## 7. 주요 API, Web UI와 서비스 점검
 
@@ -1041,6 +1045,8 @@ Spark read/write 이벤트의 자동 추적과는 별개의 **SQL View 기반 Po
 9. Gravitino REST(:9001)·PostgreSQL Catalog DB, Trino(:8080) 상태 및 Iceberg SQL 샘플 조회.
 10. v3 최신 Quality/Approval, 58~59번 HDFS 증빙, 60번 One-shot 실행 이력(`STEP60_PIPELINE_PASS`) 확인.
 11. Snapshot 파일 수·retention 계획 및 metadata/Gravitino DB 백업 상태 별도 확인.
+12. Kafka/Spark Step67 `collector_success`, Step68 Offset Lag/Rule Health, Step65 YARN 상태, Step66 Watchdog opt-in 여부 확인.
+13. 장애 복구 훈련 중 수집한 Step69 증빙은 `artifacts/step69/`에 격리해 보관하며, 실행 로그로 검증 범위를 명시한다.
 
 ```bash
 # worker3: 일상
@@ -1122,7 +1128,7 @@ sudo journalctl -u bigtop-trino57 -n 100 --no-pager
 | 56번 Role Lint 32건 | 변수/`register`의 role-prefix 규칙 미준수 | `iceberg_rest_catalog_*` 접두사로 통일; `vendor/` 기존 존재는 오류가 아님 |
 | 58번 `Couldn't find Iceberg configuration for catalog hdfs://...` | Spark REST Catalog에 물리 `warehouse` URI를 전달해 Gravitino가 Catalog 식별자로 해석 | Spark의 `spark.sql.catalog.shared.warehouse`를 제거하고 서버 관리 Warehouse 사용; YARN Driver 로그 확인 |
 
-### 10.4 2026-11-07 Kafka/Streaming 실제 오류와 교정
+### 10.4 2026-11-07~08 Kafka/Streaming 실제 오류와 교정
 
 | 이슈 | 확인된 원인 | 안전한 대응 / 재발 방지 |
 |---|---|---|
@@ -1134,7 +1140,10 @@ sudo journalctl -u bigtop-trino57 -n 100 --no-pager
 | 64-B `kafka_platform64b_mode undefined` | `include_role`의 default가 Playbook 외부 `when`에 노출되지 않음 | `(kafka_platform64b_mode | default('plan'))` 적용; default Plan 무변경 유지 |
 | 64-C `test_not_committing_binaries FAIL` | `ROOT.rglob('*')`가 기존 vendor JAR를 탐지해 오탐 | 새 UI Role 내부만 검사하도록 단위 테스트 수정; 기존 vendor 삭제 금지 |
 | 65 Topic does not exist | `bigtop_olist_step65_cdc_v1` 생성 전 start | worker3에서 `bash scripts/65-kafka-topic.sh create/describe`, RF3/minISR2/ISR3 확인 |
-| 65 `produce`/`verify` YARN `ACCEPTED` | RUNNING Streaming이 자원을 점유한 2-worker 소형 YARN 클러스터에 추가 Driver/AM/Executor를 할당할 자원이 부족 | 중복 Spark 제출 방지, 경량 Producer+Trino/HDFS Verifier 분리. `start` 성공을 CDC PASS로 오인 금지 |
+| 65 `produce`/`verify` YARN `ACCEPTED` | RUNNING Streaming이 자원을 점유한 2-worker 소형 YARN 클러스터에 추가 Driver/AM/Executor를 할당할 자원이 부족 | **65-B 경량 Kafka CLI/Trino/HDFS Verifier 적용·검증 완료**, 별도 Spark 제출 회피 |
+| 67 `hdfsTimeoutStartSec=120` 실행 실패 | Jinja2 Service `ExecStart` 끝의 조건문과 다음 Unit 설정 사이 줄바꿈 소실 | Template 원본의 `TimeoutStartSec`을 독립 줄로 두고 `--hdfs-bin` 인자를 inline 조건식으로 렌더링; `apply→verify` 양 노드 PASS |
+| 69 After 재수집 `File exists` | 증빙 JSON 불변 저장 정책으로 동일 `after-progress.json` 경로 덮어쓰기 거부 | 기존 파일 보존; 실행별 새 `olist_kafka69_evidence_dir` 사용 |
+| 65 Replay 재실행 `current end=24` 거부 | 최초 12 Offset 이후 한 번만 Replay 허용하는 안전 Guard 조건 | 조건 제거/Offset 초기화 금지. 이전 Replay 증빙 검토 또는 새 격리 Step70 시나리오 사용 |
 
 
 ## 11. 보안·운영 경계
@@ -1146,7 +1155,7 @@ sudo journalctl -u bigtop-trino57 -n 100 --no-pager
 - **OpenMetadata·Gravitino·Trino HTTP:** 현재 VM 간 평문 내부 REST/HTTP를 사용한다. 내부 접근만 허용하고, 향후 내부 사용자 인증/TLS, 데이터 정책 및 프록시 배치를 단계적으로 검증한다. Gravitino Standalone에는 완성된 테이블 단위 인증·권한 체계가 없다.
 - **PostgreSQL reader:** 메타데이터 수집 용도로만 사용하되 DB `SELECT` 권한은 행 데이터까지 읽을 수 있으므로 비밀번호를 강하게 보호한다.
 - **Data Classification:** 태그나 용어를 생성했다고 해서 자동으로 민감정보 탐지·마스킹·DB 접근제어가 이뤄지는 것은 아니다.
-- **Git 제외 대상:** `inventory/hosts.ini`, `inventory/group_vars/all.yml`, SSH 개인키, 실제 `.env`, JWT, DB 비밀번호, DB 덤프/백업, `vendor/` (JDK/JAR/서버 아카이브), `artifacts/` (58~60 검증 결과), Olist 원본, 실행 로그, 임시 ZIP/패치 번들, 캐시·테스트 결과. `git status --short`를 확인한다.
+- **Git 제외 대상:** `inventory/hosts.ini`, `inventory/group_vars/all.yml`, SSH 개인키, 실제 `.env`, JWT, DB 비밀번호, DB 덤프/백업, `vendor/` (JDK/JAR/서버 아카이브), `artifacts/` (Step69 포함 모든 실행 증빙), Olist 원본, 실행 로그, 임시 ZIP/패치 번들, `__pycache__/`·`*.pyc`, `.venv/`, 캐시·테스트 결과. `git status --short` 및 `git diff --cached`를 확인한다.
 - **모니터링 UI 바로가기:** 중앙 콘솔에 링크를 표시하는 기능은 브라우저 접근 제어를 우회하거나 실제 서비스 포트를 재설정하는 기능이 아니다.
 - **문서의 IP/포트:** 실습 환경 정보로 취급하고 운영 환경의 공개용 README에는 필요 시 일반화한다.
 
@@ -1183,7 +1192,11 @@ sudo journalctl -u bigtop-trino57 -n 100 --no-pager
 | Kafka 메트릭·OpenMetadata(64-B) | **Preflight 실측, 후속 사용자 확인** | CLI collector/dashboard 및 명시적 Messaging Service 등록; timer/실제 등록 상태 별도 확인 |
 | Kafka Kafbat Web UI(64-C) | **사용자 UI 언급, 최종 검증 로그 미제공** | Docker :18081, 읽기 전용; 최초 8/9 테스트 실패는 잘못된 전역 바이너리 검사로 수정본 동봉 |
 | Kafka AvailableNow Iceberg CDC(64) | **사용자 통과 확인** | 520행(유효512/삭제8), 체크포인트 유지, Gold와 분리 |
-| 상시 Kafka Spark Iceberg CDC(65) | **부분 진행; 최종 미완료** | Seed/Start, Streaming RUNNING; 별도 Spark produce/verify가 YARN ACCEPTED. 521행·replay 검증 미확인 |
+| Kafka Spark Iceberg CDC(65/65-B) | **경량 Verify PASS; 재기동 후 데이터 불변 확인** | 521/512/9, Kafka End=Checkpoint=24, Snapshot 7676611440228973561; 별도 YARN 배치 없이 확인. 새 App RUNNING 최종 확인은 별도 |
+| Spark/YARN Watchdog(66) | **구현·테스트 준비; 실제 동작 미확인** | 의도 상태/중복 submit 방지/타이머 opt-in 설계. enable 여부·자동 복구 테스트 기록 미제공 |
+| Kafka/Spark Progress(67) | **설치·Timer·Prometheus PASS** | master/worker3 oneshot PASS, 60초 `active/waiting`, 양쪽 collector_success=1 |
+| Streaming Lag/Alerts(68) | **사용자 Apply/Verify 확인** | Recording/Alert Rule + Grafana 설치 보고, Offset Lag=0. Alertmanager 전달 실증 별도 |
+| Recovery Evidence(69) | **baseline/after/compare PASS** | stop/start 후 24→24, Batch 2→2, Iceberg 521/512/9 Snapshot 불변. 미완료 Batch 재처리 미검증 |
 
 | 범용 Spark OpenLineage Listener / 컬럼 계보 | **미구축** | 51번 파일 단위 계보와 구분 |
 | 내부 사용자별 Catalog/Trino RBAC·강제 승인 후 조회 | **미구축** | REST/Trino는 구축됐지만 BI 소비자 접근 강제, multi-table 공개 정책은 아직 없음 |
@@ -1193,13 +1206,13 @@ sudo journalctl -u bigtop-trino57 -n 100 --no-pager
 | Gravitino Catalog DB·Iceberg HDFS Metadata 백업·복구 | **운영 검증 필요** | Web Console PostgreSQL 논리 백업 대상과 구분 |
 | 실운영 인증·TLS·RBAC | 미구축 또는 보강 필요 | 실습용 Basic Auth·Bot 토큰 중심 |
 
-### 12.2 다음 세션의 우선순위 (65번 자원 제약 확인 후)
+### 12.2 다음 세션 우선순위 (69번 읽기 전용 복구 증빙 이후)
 
-1. **65-A / 65 개선(우선):** 기존 Spark 기반 `produce/replay`를 worker3 경량 Kafka Producer로 교체, `verify`를 Trino+HDFS checkpoint/Offset/Snapshot 검사로 분리하여 **상시 스트리밍 하나만 YARN에 남기는 구조**로 변경한다. Kafka Broker 3대, Gravitino, Iceberg Gold, 64번 검증 결과는 재설치하지 않는다.
-2. **현재 YARN 작업 정리:** `yarn application -list`로 RUNNING/ACCEPTED 정확한 Application ID 및 중복 제출 여부 확인. 필요 없는 verify만 취소하고 produce 완료 여부 확인. 65 stream stop/start는 체크포인트와 Iceberg 데이터를 유지한다.
-3. **65 정합성·장애 복구 PASS:** 520행 seed → CDC 12 메시지 / 4 PK → 521행(유효512/삭제9) 최종 상태·Trino 일치, 커밋 Offset과 Kafka end offset 비교, stop/start 후 checkpoint 복구, replay 이후 snapshot 불변성.
-4. **운영 지표/안정성:** Queue `batch` AM·Executor 할당 및 노드별 RAM/CPU 정량화, Kafka Consumer Lag/JMX 및 Alertmanager 룰 추가 여부 검토. 현재 Kafka CLI 수집은 실제 Consumer Lag·JVM Heap·GC 측정과 구별한다.
-5. **중장기 데이터 플랫폼:** 신규 Olist 유입을 위한 진짜 CDC source 및 데이터 버전, 실운영 인증/권한, Golden Data 릴리스 포인터/멀티테이블 소비 일관성, Catalog/Postgres/OpenMetadata 및 HDFS 백업/복구, 38/43/44·48/51 Timer 검증.
+1. **65/66 상태 확정:** 새 YARN App `application_1794117087936_0003`이 `RUNNING`에 전환되었는지, Step66 Watchdog Timer가 명시적으로 enable됐는지 상태 재조회. 타이머 설치·자동 복구 성공을 혼동하지 않는다.
+2. **Step70 격리된 CDC 재처리·멱등성 검증:** 기존 65 Guard 우회 없이 **별도 Topic, Checkpoint, Iceberg 테이블**과 재현 가능한 Insert/Update/Delete·중복·역순 CDC 이벤트. 미완료 Batch의 장애 후 재실행, Kafka End/Committed Offset 변화, Iceberg PK+Version 최종 상태와 Snapshot 검증을 분리한다.
+3. **68 Alertmanager 전달 시험:** Prometheus Rule이 존재하는 것과 실제 Alertmanager Receiver 전달은 다르다. 누락 수집, 지속 Lag 조건을 통제된 테스트로 검증하고 운영 경보 임계값을 조정한다.
+4. **운영 리소스/복구 정책:** YARN Queue·AM/Executor 할당, Gravitino/PostgreSQL/OpenMetadata 및 Iceberg Metadata 백업/복구, 내부 계정별 SQL 권한·감사, Gold 다중 테이블 릴리스 일관성.
+5. **미검증 초기 기능:** 38번 원격 백업, 43 분류, 44 View 계보, 48/51 Timer 등 기존 미완료 항목의 실제 VM 검증.
 
 ## 13. 문서 유지보수 규칙
 
@@ -1234,8 +1247,9 @@ sudo journalctl -u bigtop-trino57 -n 100 --no-pager
 - `docs/63-olist-iceberg-incremental-{apply,architecture}.md` — 합성 CDC MERGE.
 - `docs/64a-kafka-kraft-{apply,architecture}.md`, `docs/64b-kafka-platform-{apply,architecture}.md`, `docs/64c-kafka-web-ui-{apply,architecture}.md` — Kafka 설치/운영/UI.
 - `docs/64-olist-kafka-iceberg-{apply,architecture}.md`, `docs/65-kafka-streaming-{apply,architecture}.md` — Kafka CDC·상시 스트리밍/복구.
-- `docs/65-resource-and-recovery-notes.md` — 65번의 YARN 자원 경합, 미완료 판정, 다음 세션 인계.
+- `docs/65-resource-and-recovery-notes.md` — 2026-11-07 당시 YARN 자원 경합 및 미완료 이력을 기록한 과거 문서(현재 상태는 이 가이드·65-B 문서 기준).
+- `docs/65-low-resource-producer-verifier.md`, `docs/66-kafka-streaming-watchdog.md`, `docs/68-streaming-health.md`, `docs/69-streaming-recovery-proof.md` — 오늘 추가·확인한 Streaming 경량화, Watchdog, 관측, 복구 증빙 상세 문서.
 
 ---
 
-**요약(2026-11-07):** 이 프로젝트는 5대 VM에서 HDFS/YARN/Spark 배치, Iceberg/Gravitino/Trino 공유 Lakehouse, Gold WAP, OpenMetadata/Prometheus/Grafana 관측을 연결하고 Kafka 4.2.2 KRaft 3노드 및 Kafka→Spark→Iceberg CDC 64번까지 검증했다. **65번은 상시 YARN Streaming이 실행되지만 경합 자원 부족으로 produce/verify가 대기하여 완료가 아니다.** 다음 작업은 Kafka 설치를 반복하는 것이 아니라 **경량 Producer/Verifier 분리와 체크포인트 재기동/replay 증빙**이다.
+**요약(2026-11-08):** 5대 VM 내부망 기반 HDFS/YARN/Spark, Iceberg/Gravitino/Trino, Gold WAP, OpenMetadata/Prometheus/Grafana, Kafka 4.2.2 KRaft를 통합하고 Step65 경량 Kafka 발행/검증 및 데이터 정합성(521/512/9)을 확인했다. Step67 수집기 60초 Timer/Prometheus, Step68 Lag/Alert Rule 사용자 적용 확인, Step69 정상 종료·재시작 후 Offset/Checkpoint/Trino 안정성 비교까지 진행했다. **새 App `RUNNING` 상태, Step66 자동 복구와 Step68 실제 알림 전달, 미완료 Batch 재처리 및 재차 Replay 멱등성은 다음 단계 확인 대상**이다.

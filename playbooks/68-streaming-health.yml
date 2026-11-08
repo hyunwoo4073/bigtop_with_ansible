@@ -1,0 +1,7 @@
+---
+- name: Step68 Olist Kafka Spark Streaming health and lag monitoring
+  hosts: worker3
+  gather_facts: false
+  become: true
+  roles:
+    - olist_kafka68

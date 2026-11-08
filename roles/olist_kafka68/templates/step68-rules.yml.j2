@@ -1,0 +1,108 @@
+# Step68 dedicated rule file. Does not modify Step65/Step67 or prior alert groups.
+groups:
+  - name: bigtop-olist-step68
+    interval: 1m
+    rules:
+      - record: bigtop_olist_step68_offset_lag
+        expr: |
+          max by (topic, partition) (bigtop_olist_step67_kafka_end_offset)
+          - on (topic, partition)
+          max by (topic, partition) (bigtop_olist_step67_spark_committed_offset)
+
+      - record: bigtop_olist_step68_collector_age_seconds
+        expr: |
+          time() - max by (source) (bigtop_olist_step67_last_run_timestamp_seconds)
+
+      - record: bigtop_olist_step68_spark_commit_age_seconds
+        expr: |
+          time() - max(bigtop_olist_step67_spark_last_commit_timestamp_seconds)
+
+      - alert: BigtopOlistStep68CollectorFailed
+        expr: |
+          min by (source) (bigtop_olist_step67_collector_success) == 0
+        for: 2m
+        labels:
+          severity: warning
+          component: step68
+        annotations:
+          summary: Step67 read-only collector reported failure
+          description: Inspect the relevant Step67 oneshot service journal.
+
+      - alert: BigtopOlistStep68CollectorMissing
+        expr: |
+          absent(bigtop_olist_step67_collector_success{source="spark"})
+          or absent(bigtop_olist_step67_collector_success{source="kafka"})
+        for: 3m
+        labels:
+          severity: warning
+          component: step68
+        annotations:
+          summary: Missing Step67 collector metrics
+          description: Check Node Exporter scrape/target and textfile collector paths.
+
+      - alert: BigtopOlistStep68CollectorStale
+        expr: |
+          bigtop_olist_step68_collector_age_seconds > {{ olist_kafka68_collector_stale_seconds }}
+        for: 2m
+        labels:
+          severity: warning
+          component: step68
+        annotations:
+          summary: Step67 collector last successful observation is stale
+          description: Check the Step67 systemd timer and last_run_timestamp_seconds.
+
+      - alert: BigtopOlistStep68StreamingLag
+        expr: |
+          bigtop_olist_step68_offset_lag > {{ olist_kafka68_lag_threshold }}
+        for: {{ olist_kafka68_lag_for }}
+        labels:
+          severity: warning
+          component: step68
+        annotations:
+          summary: Sustained Kafka-to-Spark committed offset lag
+          description: A positive offset delta persisted; inspect input and progress freshness.
+
+      - alert: BigtopOlistStep68SparkPartitionMissing
+        expr: |
+          max by (topic, partition) (bigtop_olist_step67_kafka_end_offset)
+          unless on (topic, partition)
+          max by (topic, partition) (bigtop_olist_step67_spark_committed_offset)
+        for: 5m
+        labels:
+          severity: warning
+          component: step68
+        annotations:
+          summary: Kafka partition has no corresponding Spark committed offset metric
+          description: Verify checkpoint parsing and partition assignment before treating lag as zero.
+
+      - alert: BigtopOlistStep68CommittedAhead
+        expr: |
+          bigtop_olist_step68_offset_lag < 0
+        for: 5m
+        labels:
+          severity: warning
+          component: step68
+        annotations:
+          summary: Spark committed offset exceeds observed Kafka end offset
+          description: Investigate topic truncation, source freshness and offset parsing.
+
+      - alert: BigtopOlistStep68StreamingStalled
+        expr: |
+          (
+            max by (topic, partition) (
+              delta(bigtop_olist_step67_kafka_end_offset[{{ olist_kafka68_stall_window }}])
+            ) > 0
+          )
+          and on (topic, partition)
+          (
+            max by (topic, partition) (
+              delta(bigtop_olist_step67_spark_committed_offset[{{ olist_kafka68_stall_window }}])
+            ) <= 0
+          )
+        for: {{ olist_kafka68_stall_for }}
+        labels:
+          severity: warning
+          component: step68
+        annotations:
+          summary: Kafka input grew while Spark committed offset did not advance
+          description: Possible stalled stream; confirm running application and checkpoint freshness.

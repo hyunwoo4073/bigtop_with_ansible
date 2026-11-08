@@ -1,0 +1,13 @@
+---
+# Safe by default: no changes unless mode=apply.
+olist_kafka68_mode: plan
+olist_kafka68_prometheus_url: http://127.0.0.1:9090
+olist_kafka68_prometheus_config: /etc/prometheus/prometheus.yml
+olist_kafka68_rule_file: /etc/prometheus/rules/bigtop-olist-step68.yml
+olist_kafka68_dashboard_file: /var/lib/grafana/dashboards/bigtop-olist-step68.json
+olist_kafka68_grafana_provider_file: /etc/grafana/provisioning/dashboards/platform.yml
+olist_kafka68_collector_stale_seconds: 240
+olist_kafka68_lag_threshold: 0
+olist_kafka68_lag_for: 5m
+olist_kafka68_stall_window: 10m
+olist_kafka68_stall_for: 5m
