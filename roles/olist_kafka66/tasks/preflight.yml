@@ -1,0 +1,56 @@
+---
+- name: Inspect existing Step65 installation and monitoring folder
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /opt/bigtop-iceberg/step65/olist_kafka65.py
+    - /var/lib/bigtop-olist-step65
+    - /opt/bigtop-iceberg/step65/step65_yarn_control.py
+  register: olist_kafka66_step65_stat
+
+- name: Require original Step65 seed and lifecycle installation
+  ansible.builtin.assert:
+    that:
+      - olist_kafka66_step65_stat.results[0].stat.isreg | default(false)
+      - olist_kafka66_step65_stat.results[1].stat.isdir | default(false)
+      - olist_kafka66_step65_stat.results[2].stat.isreg | default(false)
+
+- name: Resolve YARN and spark-submit paths as existing Step65 user
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/bash
+      - -c
+      - 'command -v yarn && command -v spark-submit'
+  become: true
+  become_user: "{{ olist_kafka66_user }}"
+  register: olist_kafka66_client_paths
+  changed_when: false
+
+- name: Require both YARN and Spark client binaries
+  ansible.builtin.assert:
+    that:
+      - olist_kafka66_client_paths.stdout_lines | length == 2
+      - olist_kafka66_client_paths.stdout_lines[0] is match('^/')
+      - olist_kafka66_client_paths.stdout_lines[1] is match('^/')
+
+- name: Check YARN command can contact ResourceManager
+  ansible.builtin.command:
+    argv:
+      - yarn
+      - application
+      - -list
+      - -appStates
+      - RUNNING,ACCEPTED
+  become: true
+  become_user: "{{ olist_kafka66_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+    SPARK_CONF_DIR: /etc/spark/conf
+  changed_when: false
+  register: olist_kafka66_rm_check
+  when: olist_kafka66_mode != 'disable'
+
+- name: Explain observations without enabling recovery
+  ansible.builtin.debug:
+    msg: 'STEP66_PREFLIGHT_PASS: Step65 present and YARN ResourceManager reachable'
+  when: olist_kafka66_mode == 'preflight'

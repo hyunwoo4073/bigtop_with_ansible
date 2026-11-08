@@ -1,0 +1,13 @@
+---
+# Observation only. These modes do not start/stop/replay Spark or write Kafka/HDFS/Iceberg.
+olist_kafka69_mode: plan # plan | preflight | baseline | after | compare
+olist_kafka69_topic: bigtop_olist_step65_cdc_v1
+olist_kafka69_prometheus_url: http://127.0.0.1:9090
+olist_kafka69_checkpoint: hdfs://master:9000/data/olist/iceberg-checkpoints/step65/v1
+olist_kafka69_hdfs_bin: /usr/bin/hdfs
+olist_kafka69_hdfs_user: hadoop
+olist_kafka69_stale_seconds: 240
+olist_kafka69_evidence_dir: "{{ playbook_dir }}/../artifacts/step69"
+# Require observed new input and full catchup only during a deliberate, controlled replay test.
+olist_kafka69_require_input_advance: false
+olist_kafka69_require_drained: false

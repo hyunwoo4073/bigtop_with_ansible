@@ -1,0 +1,31 @@
+---
+- name: Validate read-only Step69 scope
+  ansible.builtin.assert:
+    that:
+      - olist_kafka69_mode in ['plan', 'preflight', 'baseline', 'after', 'compare']
+      - olist_kafka69_stale_seconds | int >= 120
+      - olist_kafka69_topic | length > 0
+      - olist_kafka69_checkpoint is match('^hdfs://[^ ]+/[^ ]+$')
+      - olist_kafka69_evidence_dir | length > 0
+    fail_msg: Invalid Step69 parameters; refusing to run.
+
+- name: Explain Step69 plan
+  ansible.builtin.debug:
+    msg:
+      - "STEP69_PLAN mode={{ olist_kafka69_mode }}"
+      - "Read Prometheus {{ olist_kafka69_prometheus_url }} and checkpoint {{ olist_kafka69_checkpoint }}"
+      - "Evidence saved only locally on worker3 at {{ olist_kafka69_evidence_dir }}"
+      - "No Spark restart/stop, no Kafka production, no HDFS checkpoint write or deletion."
+  when: olist_kafka69_mode == 'plan'
+
+- name: Run read-only Step69 preflight
+  ansible.builtin.include_tasks: preflight.yml
+  when: olist_kafka69_mode in ['preflight', 'baseline', 'after']
+
+- name: Capture read-only Step69 evidence
+  ansible.builtin.include_tasks: capture.yml
+  when: olist_kafka69_mode in ['baseline', 'after']
+
+- name: Compare preserved Step69 observations
+  ansible.builtin.include_tasks: compare.yml
+  when: olist_kafka69_mode == 'compare'

@@ -1,0 +1,12 @@
+[Unit]
+Description=Step66 opted-in YARN Spark Streaming watchdog periodic check
+
+[Timer]
+OnBootSec=60s
+OnUnitInactiveSec=60s
+AccuracySec=10s
+Unit={{ olist_kafka66_service }}.service
+Persistent=false
+
+[Install]
+WantedBy=timers.target

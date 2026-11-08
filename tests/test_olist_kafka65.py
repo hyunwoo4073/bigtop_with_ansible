@@ -174,7 +174,7 @@ class Step65Tests(unittest.TestCase):
         self.assertIn('STEP65_SPARK_KAFKA_ICEBERG_TRINO_PASS', text)
 
     def test_step65_evidence_export_paths_are_local(self):
-        text = (ROOT / 'roles/olist_kafka65/tasks/run.yml').read_text()
+        text = (ROOT / 'roles/olist_kafka65/tasks/light_run.yml').read_text()
         self.assertIn('delegate_to: localhost', text)
         self.assertIn('65-kafka-cdc-', text)
         self.assertIn("olist_kafka65_mode == 'verify'", text)

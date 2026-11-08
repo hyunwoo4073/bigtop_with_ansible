@@ -1,0 +1,75 @@
+{
+  "id": null,
+  "uid": "bigtop-olist-step68-health",
+  "title": "Olist Step68 | Kafka-Spark Streaming Health",
+  "tags": ["bigtop", "olist", "step68", "kafka", "spark", "streaming"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-6h", "to": "now"},
+  "annotations": {"list": []},
+  "templating": {"list": []},
+  "panels": [
+    {
+      "id": 1,
+      "title": "Committed Offset Lag by Topic / Partition",
+      "type": "timeseries",
+      "datasource": null,
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 0},
+      "targets": [{"refId": "A", "expr": "bigtop_olist_step68_offset_lag", "legendFormat": "{% raw %}{{topic}} p{{partition}}{% endraw %}"}],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 2,
+      "title": "Kafka End vs Spark Committed Offset",
+      "type": "timeseries",
+      "datasource": null,
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {"refId": "A", "expr": "bigtop_olist_step67_kafka_end_offset", "legendFormat": "{% raw %}Kafka {{topic}} p{{partition}}{% endraw %}"},
+        {"refId": "B", "expr": "bigtop_olist_step67_spark_committed_offset", "legendFormat": "{% raw %}Spark {{topic}} p{{partition}}{% endraw %}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 3,
+      "title": "Collector Last Run Age (seconds)",
+      "type": "timeseries",
+      "datasource": null,
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 9},
+      "targets": [{"refId": "A", "expr": "bigtop_olist_step68_collector_age_seconds", "legendFormat": "{% raw %}{{source}}{% endraw %}"}],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}}
+    },
+    {
+      "id": 4,
+      "title": "Spark Last Committed Batch Age (seconds)",
+      "type": "timeseries",
+      "datasource": null,
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 9},
+      "targets": [{"refId": "A", "expr": "bigtop_olist_step68_spark_commit_age_seconds", "legendFormat": "Spark committed batch age"}],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
+    },
+    {
+      "id": 5,
+      "title": "Collector Success (1=success, 0=failure)",
+      "type": "timeseries",
+      "datasource": null,
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 18},
+      "targets": [{"refId": "A", "expr": "bigtop_olist_step67_collector_success", "legendFormat": "{% raw %}{{source}}{% endraw %}"}],
+      "fieldConfig": {"defaults": {"min": 0, "max": 1}, "overrides": []}
+    },
+    {
+      "id": 6,
+      "title": "Step68 Firing/Pending Alerts",
+      "type": "table",
+      "datasource": null,
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 18},
+      "targets": [{"refId": "A", "expr": "ALERTS{alertname=~\"BigtopOlistStep68.*\"}", "format": "table", "instant": true}],
+      "fieldConfig": {"defaults": {}, "overrides": []}
+    }
+  ]
+}

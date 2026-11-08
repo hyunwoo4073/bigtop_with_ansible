@@ -1,0 +1,51 @@
+---
+- name: Check Prometheus and Grafana prerequisites on worker3
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ olist_kafka68_prometheus_config }}"
+    - /usr/bin/promtool
+    - /etc/prometheus/rules
+    - "{{ olist_kafka68_grafana_provider_file }}"
+    - /var/lib/grafana/dashboards
+  register: olist_kafka68_prereq
+
+- name: Refuse deployment unless existing infrastructure is present
+  ansible.builtin.assert:
+    that: olist_kafka68_prereq.results | selectattr('stat.exists', 'equalto', false) | list | length == 0
+    fail_msg: Missing worker3 Prometheus or Grafana prerequisite; install with existing platform roles first.
+
+- name: Read existing Prometheus config without changing it
+  ansible.builtin.slurp:
+    src: "{{ olist_kafka68_prometheus_config }}"
+  register: olist_kafka68_config_raw
+
+- name: Extract configured rule_files glob patterns
+  ansible.builtin.set_fact:
+    olist_kafka68_rule_patterns: "{{ (olist_kafka68_config_raw.content | b64decode | from_yaml).rule_files | default([], true) }}"
+
+- name: Assert Step68 file will be loaded by existing rule_files
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - 'import fnmatch,json,sys; sys.exit(0 if any(fnmatch.fnmatchcase(sys.argv[1], p) for p in json.loads(sys.argv[2])) else 1)'
+      - "{{ olist_kafka68_rule_file }}"
+      - "{{ olist_kafka68_rule_patterns | to_json }}"
+  changed_when: false
+
+- name: Check existing Prometheus configuration before deploying Step68
+  ansible.builtin.command:
+    argv: [/usr/bin/promtool, check, config, "{{ olist_kafka68_prometheus_config }}"]
+  changed_when: false
+
+- name: Verify Prometheus ready endpoint
+  ansible.builtin.uri:
+    url: "{{ olist_kafka68_prometheus_url }}/-/ready"
+    status_code: 200
+    timeout: 15
+  register: olist_kafka68_prom_ready
+
+- name: Print preflight result
+  ansible.builtin.debug:
+    msg: "STEP68_PREFLIGHT_PASS: existing rule_files patterns={{ olist_kafka68_rule_patterns }}"

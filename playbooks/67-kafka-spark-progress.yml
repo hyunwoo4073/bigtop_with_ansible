@@ -1,0 +1,6 @@
+---
+- name: Step67 read-only Kafka and committed Spark Streaming progress monitoring
+  hosts: master,worker3
+  gather_facts: false
+  roles:
+    - role: olist_kafka67

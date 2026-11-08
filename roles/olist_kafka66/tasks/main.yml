@@ -1,0 +1,33 @@
+---
+- name: Validate Step66 strict guardrails
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == 'master'
+      - olist_kafka66_mode in ['plan', 'preflight', 'apply', 'enable', 'disable', 'status', 'verify']
+      - olist_kafka66_control == '/opt/bigtop-iceberg/step65/step65_yarn_control.py'
+      - olist_kafka66_wrapper == '/opt/bigtop-iceberg/step65/step66_watchdog.py'
+      - olist_kafka66_user == 'hadoop'
+      - olist_kafka66_metrics_dir == '/var/lib/prometheus/node-exporter'
+    fail_msg: Step66 must never operate outside the Step65 streaming application.
+
+- name: Print safe Step66 plan
+  ansible.builtin.debug:
+    msg:
+      - 'STEP66_PLAN: monitor ONLY Step65 exact YARN application and hadoop owner.'
+      - 'apply installs a DISABLED systemd timer and optional Grafana dashboard.'
+      - 'enable requires current app RUNNING; 65 stop disables auto-recovery.'
+      - 'Missing app grace=120s; max 3 restart attempts/1h; ACCEPTED is not killed.'
+      - 'No Kafka, Spark checkpoint, Iceberg or existing service state is reset.'
+  when: olist_kafka66_mode == 'plan'
+
+- name: Validate existing Step65 artifacts and service prerequisites
+  ansible.builtin.include_tasks: preflight.yml
+  when: olist_kafka66_mode in ['preflight', 'apply', 'enable', 'disable', 'status', 'verify']
+
+- name: Install disabled watchdog and Grafana dashboard
+  ansible.builtin.include_tasks: install.yml
+  when: olist_kafka66_mode == 'apply'
+
+- name: Operate explicit watchdog activation or inspection
+  ansible.builtin.include_tasks: operate.yml
+  when: olist_kafka66_mode in ['enable', 'disable', 'status', 'verify']

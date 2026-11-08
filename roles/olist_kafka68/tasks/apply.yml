@@ -1,0 +1,66 @@
+---
+- name: Create temporary rule file for validation before installation
+  ansible.builtin.tempfile:
+    state: file
+    suffix: .step68.yml
+  register: olist_kafka68_staging
+
+- name: Validate and install only dedicated Step68 artifacts
+  block:
+    - name: Render Step68 rule file into temporary staging path
+      ansible.builtin.template:
+        src: step68-rules.yml.j2
+        dest: "{{ olist_kafka68_staging.path }}"
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Syntax check Step68 rules before installing
+      ansible.builtin.command:
+        argv: [/usr/bin/promtool, check, rules, "{{ olist_kafka68_staging.path }}"]
+      changed_when: false
+
+    - name: Install only the dedicated Step68 Prometheus rules file
+      ansible.builtin.copy:
+        src: "{{ olist_kafka68_staging.path }}"
+        remote_src: true
+        dest: "{{ olist_kafka68_rule_file }}"
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Reload Prometheus after Step68 rules update
+
+    - name: Check full Prometheus configuration including Step68 rules
+      ansible.builtin.command:
+        argv: [/usr/bin/promtool, check, config, "{{ olist_kafka68_prometheus_config }}"]
+      changed_when: false
+
+    - name: Install dedicated Step68 dashboard without touching Step67
+      ansible.builtin.template:
+        src: step68-dashboard.json.j2
+        dest: "{{ olist_kafka68_dashboard_file }}"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Validate Step68 dashboard JSON on remote node
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -m
+          - json.tool
+          - "{{ olist_kafka68_dashboard_file }}"
+      changed_when: false
+      no_log: true
+  always:
+    - name: Remove temporary Step68 rule file
+      ansible.builtin.file:
+        path: "{{ olist_kafka68_staging.path }}"
+        state: absent
+
+- name: Apply queued rules reload without restarting Prometheus
+  ansible.builtin.meta: flush_handlers
+
+- name: Print Step68 deployment result
+  ansible.builtin.debug:
+    msg: 'STEP68_APPLY_PASS: dedicated rules/dashboard deployed; use mode=verify for live validation.'

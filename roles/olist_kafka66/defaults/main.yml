@@ -1,0 +1,14 @@
+---
+olist_kafka66_mode: plan
+olist_kafka66_user: hadoop
+olist_kafka66_app_name: olist-iceberg-kafka65-continuous
+olist_kafka66_control: /opt/bigtop-iceberg/step65/step65_yarn_control.py
+olist_kafka66_wrapper: /opt/bigtop-iceberg/step65/step66_watchdog.py
+olist_kafka66_service: bigtop-olist-step66-watchdog
+olist_kafka66_metrics_dir: /var/lib/prometheus/node-exporter
+olist_kafka66_metrics_file: /var/lib/prometheus/node-exporter/olist_step66_watchdog.prom
+olist_kafka66_dashboard_dir: /var/lib/grafana/dashboards
+olist_kafka66_dashboard_file: olist-step66-streaming-watchdog.json
+olist_kafka66_dashboard_uid: bigtop-olist-step66
+olist_kafka66_datasource_uid: "{{ grafana_datasource_uid | default('prometheus') }}"
+olist_kafka66_broker: 192.158.2.103

@@ -1,0 +1,45 @@
+---
+- name: Read Kafka and Spark progress from Prometheus without modifying state
+  ansible.builtin.script: >-
+    {{ role_path }}/files/step69_evidence.py check
+    --url {{ olist_kafka69_prometheus_url }}
+    --topic {{ olist_kafka69_topic }}
+    --stale-seconds {{ olist_kafka69_stale_seconds }}
+  changed_when: false
+  register: olist_kafka69_progress_check
+
+- name: Read Step65 HDFS offsets directory as original Hadoop user
+  ansible.builtin.command:
+    argv:
+      - "{{ olist_kafka69_hdfs_bin }}"
+      - dfs
+      - -ls
+      - "{{ olist_kafka69_checkpoint }}/offsets"
+  delegate_to: master
+  become: true
+  become_user: "{{ olist_kafka69_hdfs_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+  register: olist_kafka69_hdfs_offsets
+
+- name: Read Step65 HDFS commits directory as original Hadoop user
+  ansible.builtin.command:
+    argv:
+      - "{{ olist_kafka69_hdfs_bin }}"
+      - dfs
+      - -ls
+      - "{{ olist_kafka69_checkpoint }}/commits"
+  delegate_to: master
+  become: true
+  become_user: "{{ olist_kafka69_hdfs_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+  register: olist_kafka69_hdfs_commits
+
+- name: Print safe Step69 preflight result
+  ansible.builtin.debug:
+    msg:
+      - "STEP69_PREFLIGHT_PASS: Prometheus Step67 metrics healthy; HDFS offsets/commits list accessible"
+      - "HDFS listing is read-only; contents and highest batch will be validated during compare"

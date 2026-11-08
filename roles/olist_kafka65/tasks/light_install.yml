@@ -1,0 +1,36 @@
+---
+- name: Create isolated Step65 script directory on Kafka controller host
+  ansible.builtin.file:
+    path: "{{ olist_kafka65_script_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  delegate_to: worker3
+  become: true
+
+- name: Copy lightweight Step65 CLI to Spark submission master
+  ansible.builtin.copy:
+    src: step65_light.py
+    dest: "{{ olist_kafka65_script_dir }}/step65_light.py"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
+- name: Stage self-contained Step65 fixture and lightweight publisher on worker3
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ olist_kafka65_script_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - olist_kafka65.py
+    - step65_light.py
+  delegate_to: worker3
+  become: true
+
+- name: Announce lightweight Step65 tools staged without Spark or restarts
+  ansible.builtin.debug:
+    msg: 'STEP65_LIGHT_TOOLS_READY: worker3 Kafka CLI, master Trino/HDFS verifier; YARN Spark unchanged'

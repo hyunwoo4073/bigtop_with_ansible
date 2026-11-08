@@ -1,0 +1,15 @@
+[Unit]
+Description=Step66 guarded YARN Spark streaming application watchdog
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Environment=HADOOP_CONF_DIR=/etc/hadoop/conf
+Environment=SPARK_CONF_DIR=/etc/spark/conf
+Environment=PYSPARK_PYTHON=/usr/bin/python3
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 {{ olist_kafka66_wrapper }} --metrics-file {{ olist_kafka66_metrics_file }} --yarn-bin {{ olist_kafka66_client_paths.stdout_lines[0] }} --spark-bin {{ olist_kafka66_client_paths.stdout_lines[1] }}
+TimeoutStartSec=360
+NoNewPrivileges=false

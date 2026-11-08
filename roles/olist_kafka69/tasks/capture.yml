@@ -1,0 +1,33 @@
+---
+- name: Choose immutable evidence suffix for this read-only capture
+  ansible.builtin.set_fact:
+    olist_kafka69_capture_tag: "{{ 'baseline' if olist_kafka69_mode == 'baseline' else 'after' }}"
+
+- name: Create local Step69 evidence directory on worker3
+  ansible.builtin.file:
+    path: "{{ olist_kafka69_evidence_dir }}"
+    state: directory
+    mode: '0700'
+
+- name: Capture Prometheus metrics to a local JSON artifact
+  ansible.builtin.script: >-
+    {{ role_path }}/files/step69_evidence.py capture
+    --url {{ olist_kafka69_prometheus_url }}
+    --topic {{ olist_kafka69_topic }}
+    --stale-seconds {{ olist_kafka69_stale_seconds }}
+    --output {{ olist_kafka69_evidence_dir }}/{{ olist_kafka69_capture_tag }}-progress.json
+  changed_when: true
+  register: olist_kafka69_progress_capture
+
+- name: Preserve HDFS checkpoint file listings locally (no HDFS writes)
+  ansible.builtin.copy:
+    dest: "{{ olist_kafka69_evidence_dir }}/{{ olist_kafka69_capture_tag }}-checkpoint.json"
+    mode: '0600'
+    content: "{{ {'checkpoint': olist_kafka69_checkpoint, 'captured_at': now(utc=true).isoformat(), 'offsets_ls': olist_kafka69_hdfs_offsets.stdout, 'commits_ls': olist_kafka69_hdfs_commits.stdout} | to_nice_json }}\n"
+
+- name: Print preserved Step69 evidence
+  ansible.builtin.debug:
+    msg:
+      - "STEP69_{{ olist_kafka69_capture_tag | upper }}_PASS"
+      - "{{ olist_kafka69_evidence_dir }}/{{ olist_kafka69_capture_tag }}-progress.json"
+      - "{{ olist_kafka69_evidence_dir }}/{{ olist_kafka69_capture_tag }}-checkpoint.json"

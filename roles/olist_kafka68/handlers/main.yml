@@ -1,0 +1,5 @@
+---
+- name: Reload Prometheus after Step68 rules update
+  ansible.builtin.service:
+    name: prometheus
+    state: reloaded
