@@ -92,8 +92,20 @@
 - name: Add Kafbat shortcut only if absent without deleting existing links
   ansible.builtin.copy:
     dest: "{{ web_console_kafka_links_json }}"
-    content: "{{ {'links': web_console_kafka_existing_links + [ {'title':'Kafbat Kafka UI', 'group':'Kafka', 'host':'metadata', 'service':'kafbat-ui', 'url':web_console_kafka_kafbat_url} ]} | to_nice_json }}
-"
+    content: >-
+      {{
+        {
+          'links': web_console_kafka_existing_links + [
+            {
+              'title': 'Kafbat Kafka UI',
+              'group': 'Kafka',
+              'host': 'metadata',
+              'service': 'kafbat-ui',
+              'url': web_console_kafka_kafbat_url
+            }
+          ]
+        } | to_nice_json
+      }}
     owner: root
     group: root
     mode: '0644'

@@ -43,7 +43,12 @@
 
 - name: List active YARN applications before single-Spark execution
   ansible.builtin.command:
-    argv: [yarn, application, -list, -appStates, SUBMITTED,ACCEPTED,RUNNING]
+    argv:
+      - yarn
+      - application
+      - -list
+      - -appStates
+      - 'SUBMITTED,ACCEPTED,RUNNING'
   environment:
     HADOOP_CONF_DIR: /etc/hadoop/conf
   register: olist_kafka72_active_apps
