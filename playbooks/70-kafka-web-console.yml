@@ -1,0 +1,7 @@
+---
+- name: Step70 read-only Kafka integration into existing Bigtop Web Console
+  hosts: worker3
+  gather_facts: false
+  become: false
+  roles:
+    - role: web_console_kafka

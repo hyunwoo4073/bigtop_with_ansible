@@ -1,0 +1,7 @@
+---
+- name: Step71 isolated end-to-end CDC correctness and replay proof
+  hosts: master
+  gather_facts: false
+  become: false
+  roles:
+    - role: olist_kafka71

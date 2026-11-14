@@ -1,0 +1,48 @@
+---
+- name: Locate master Spark/Iceberg dependencies without modifying state
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  loop: "{{ olist_kafka71_spark_jars }}"
+  register: olist_kafka71_master_libs
+
+- name: Require existing Step65-tested Spark dependencies
+  ansible.builtin.assert:
+    that:
+      - olist_kafka71_master_libs.results | selectattr('stat.isreg', 'defined') | selectattr('stat.isreg') | list | length == olist_kafka71_master_libs.results | length
+    fail_msg: Missing Spark/Iceberg jar on master; do not install or upgrade dependencies implicitly.
+
+- name: Locate Kafka CLI and Java on worker3
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  loop:
+    - "{{ olist_kafka71_kafka_bin }}/kafka-topics.sh"
+    - "{{ olist_kafka71_kafka_bin }}/kafka-console-producer.sh"
+    - "{{ olist_kafka71_kafka_bin }}/kafka-get-offsets.sh"
+    - "{{ olist_kafka71_java_home }}/bin/java"
+  delegate_to: worker3
+  register: olist_kafka71_broker_libs
+
+- name: Require dedicated worker3 Kafka CLI
+  ansible.builtin.assert:
+    that:
+      - olist_kafka71_broker_libs.results | selectattr('stat.isreg', 'defined') | selectattr('stat.isreg') | list | length == olist_kafka71_broker_libs.results | length
+    fail_msg: Step71 Kafka CLI or pinned Java17 missing on worker3.
+
+- name: Check HDFS checkpoint root access as original user
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -ls, /data/olist/iceberg-checkpoints]
+  become: true
+  become_user: "{{ olist_kafka71_hadoop_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+
+- name: Announce Step71 readiness
+  ansible.builtin.debug:
+    msg: STEP71_PREFLIGHT_PASS

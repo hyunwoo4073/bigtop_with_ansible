@@ -1,0 +1,7 @@
+---
+- name: Step72 isolated crash-after-Iceberg-merge and Spark checkpoint recovery proof
+  hosts: master
+  gather_facts: false
+  become: false
+  roles:
+    - role: olist_kafka72

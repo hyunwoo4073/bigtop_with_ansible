@@ -1,0 +1,76 @@
+---
+- name: Check Step70 Kafka read-only overview API
+  ansible.builtin.uri:
+    url: "{{ web_console_kafka_internal_url }}/api/ops/kafka/overview"
+    status_code: 200
+    return_content: true
+  register: web_console_kafka_overview_result
+  changed_when: false
+
+- name: Validate API contract and expected static Kafka probes
+  ansible.builtin.assert:
+    that:
+      - web_console_kafka_overview_result.json.ok | bool
+      - web_console_kafka_overview_result.json.read_only | bool
+      - web_console_kafka_overview_result.json.streaming.topic == 'bigtop_olist_step65_cdc_v1'
+      - web_console_kafka_overview_result.json.brokers is sequence
+    fail_msg: 'Step70 Kafka overview schema mismatch'
+
+- name: Check Step70 Topic list endpoint (read-only Kafka CLI)
+  ansible.builtin.uri:
+    url: "{{ web_console_kafka_internal_url }}/api/ops/kafka/topics"
+    status_code: 200
+    return_content: true
+    timeout: 30
+  register: web_console_kafka_topics_result
+  changed_when: false
+
+- name: Check Step70 Consumer Group list endpoint (read-only Kafka CLI)
+  ansible.builtin.uri:
+    url: "{{ web_console_kafka_internal_url }}/api/ops/kafka/groups"
+    status_code: 200
+    return_content: true
+    timeout: 30
+  register: web_console_kafka_groups_result
+  changed_when: false
+
+- name: Verify Topic and Consumer Group list API contracts
+  ansible.builtin.assert:
+    that:
+      - web_console_kafka_topics_result.json.read_only | bool
+      - web_console_kafka_groups_result.json.read_only | bool
+      - web_console_kafka_topics_result.json.total is number
+      - web_console_kafka_groups_result.json.total is number
+
+- name: Verify public Web Console still rejects anonymous API requests
+  ansible.builtin.uri:
+    url: "{{ web_console_kafka_public_url }}/api/ops/kafka/overview"
+    status_code: 401
+  changed_when: false
+
+- name: Verify Kafka brokers are registered in the existing Services API
+  ansible.builtin.uri:
+    url: "{{ web_console_kafka_internal_url }}/api/status"
+    status_code: 200
+    return_content: true
+  register: web_console_kafka_services_status
+  changed_when: false
+
+- name: Require three original Kafka KRaft systemd services to appear read-only
+  ansible.builtin.assert:
+    that:
+      - web_console_kafka_services_status.json.components | selectattr('group', 'equalto', 'Kafka') | list | length == 3
+      - web_console_kafka_services_status.json.components | selectattr('group', 'equalto', 'Kafka') | map(attribute='host') | sort | list == ['worker1', 'worker2', 'worker3']
+      - web_console_kafka_services_status.json.components | selectattr('group', 'equalto', 'Kafka') | map(attribute='service') | unique | list == ['bigtop-kafka-kraft64']
+      - web_console_kafka_services_status.json.components | selectattr('group', 'equalto', 'Kafka') | selectattr('read_only', 'equalto', true) | list | length == 3
+    fail_msg: 'Step70 Kafka must be registered under Services as three read-only systemd brokers'
+
+- name: Show Services integration verification result
+  ansible.builtin.debug:
+    msg: 'STEP70_KAFKA_SERVICES_PASS: worker1/worker2/worker3, bigtop-kafka-kraft64, read-only'
+
+- name: Step70 verification passed
+  ansible.builtin.debug:
+    msg:
+      - 'STEP70_VERIFY_PASS: Kafka registered under Services; APIs, metadata, and proxy auth verified'
+      - 'Broker TCP reachability is not a Kafka ISR or leader health check'

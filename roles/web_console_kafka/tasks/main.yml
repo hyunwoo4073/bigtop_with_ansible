@@ -1,0 +1,27 @@
+---
+- name: Validate strict Step70 mode
+  ansible.builtin.assert:
+    that:
+      - web_console_kafka_mode in ['plan', 'preflight', 'apply', 'verify']
+      - web_console_kafka_internal_url == 'http://127.0.0.1:18090'
+      - web_console_kafka_links_json == '/etc/bigtop-web-console/service-ui-links.json'
+    fail_msg: Step70 may only install read-only Kafka Web Console integration on worker3.
+
+- name: Show Step70 deployment plan
+  ansible.builtin.debug:
+    msg:
+      - 'STEP70_PLAN_ONLY: existing Nginx auth and services preserved'
+      - 'preflight -> apply -> verify; no Kafka producer, admin mutations, or Spark lifecycle actions'
+  when: web_console_kafka_mode == 'plan'
+
+- name: Validate Step70 installation prerequisites
+  ansible.builtin.include_tasks: preflight.yml
+  when: web_console_kafka_mode in ['preflight', 'apply', 'verify']
+
+- name: Install Step70 extension
+  ansible.builtin.include_tasks: apply.yml
+  when: web_console_kafka_mode == 'apply'
+
+- name: Validate read-only Kafka Web Console API
+  ansible.builtin.include_tasks: verify.yml
+  when: web_console_kafka_mode in ['apply', 'verify']

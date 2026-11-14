@@ -37,6 +37,10 @@ JOURNAL_LINES = 160
 
 app = FastAPI(title="Bigtop Web Console API")
 
+# Step70: isolated read-only Kafka router; no streaming lifecycle actions.
+from kafka_ops70 import router as kafka_ops70_router
+app.include_router(kafka_ops70_router)
+
 
 COMPONENTS = [
     {"group": "HDFS", "component": "NameNode", "host": "master", "service": "hadoop-hdfs-namenode"},
@@ -46,6 +50,9 @@ COMPONENTS = [
     {"group": "YARN", "component": "NodeManager", "host": "worker1", "service": "hadoop-yarn-nodemanager"},
     {"group": "YARN", "component": "NodeManager", "host": "worker2", "service": "hadoop-yarn-nodemanager"},
     {"group": "Spark", "component": "History Server", "host": "master", "service": "spark-history-server"},
+    {"group": "Kafka", "component": "Broker 1", "host": "worker1", "service": "bigtop-kafka-kraft64", "read_only": True},
+    {"group": "Kafka", "component": "Broker 2", "host": "worker2", "service": "bigtop-kafka-kraft64", "read_only": True},
+    {"group": "Kafka", "component": "Broker 3", "host": "worker3", "service": "bigtop-kafka-kraft64", "read_only": True},
     {"group": "Monitoring", "component": "Prometheus", "host": "worker3", "service": "prometheus"},
     {"group": "Monitoring", "component": "Grafana", "host": "worker3", "service": "grafana-server"},
     {"group": "Monitoring", "component": "Alertmanager", "host": "worker3", "service": "prometheus-alertmanager"},
@@ -823,6 +830,10 @@ def run_component_lifecycle(component_id_value: str, action: str) -> Dict:
         raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
 
     component = find_component(component_id_value)
+    # Existing Kafka KRaft brokers are exposed in Services for observation only.
+    # Never allow the generic lifecycle endpoint to mutate these critical nodes.
+    if component.get("read_only"):
+        raise HTTPException(status_code=403, detail="Read-only Kafka service: use the Kafka operational runbook for lifecycle changes")
     service = component["service"]
     host = component["host"]
     expected_state = "inactive" if action == "stop" else "active"

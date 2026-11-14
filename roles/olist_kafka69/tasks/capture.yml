@@ -23,7 +23,15 @@
   ansible.builtin.copy:
     dest: "{{ olist_kafka69_evidence_dir }}/{{ olist_kafka69_capture_tag }}-checkpoint.json"
     mode: '0600'
-    content: "{{ {'checkpoint': olist_kafka69_checkpoint, 'captured_at': now(utc=true).isoformat(), 'offsets_ls': olist_kafka69_hdfs_offsets.stdout, 'commits_ls': olist_kafka69_hdfs_commits.stdout} | to_nice_json }}\n"
+    content: >-
+      {{
+        {
+          'checkpoint': olist_kafka69_checkpoint,
+          'captured_at': now(utc=true).isoformat(),
+          'offsets_ls': olist_kafka69_hdfs_offsets.stdout,
+          'commits_ls': olist_kafka69_hdfs_commits.stdout
+        } | to_nice_json
+      }}
 
 - name: Print preserved Step69 evidence
   ansible.builtin.debug:

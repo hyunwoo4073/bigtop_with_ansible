@@ -1,0 +1,65 @@
+---
+- name: Confirm isolated Step71 Spark script deployed before running
+  ansible.builtin.stat:
+    path: "{{ olist_kafka71_app }}"
+  register: olist_kafka71_script
+
+- name: Require explicit Step71 apply
+  ansible.builtin.assert:
+    that:
+      - olist_kafka71_script.stat.isreg | default(false)
+    fail_msg: Step71 app is absent. Execute olist_kafka71_mode=apply first.
+
+- name: Require immutable baseline before replay
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -test, -e, "{{ olist_kafka71_baseline }}"]
+  become: true
+  become_user: "{{ olist_kafka71_hadoop_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+  when: olist_kafka71_mode in ['replay', 'verify_replay']
+
+- name: Publish only the guarded isolated CDC fixture
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ olist_kafka71_worker_dir }}/step71_publish.py"
+      - --mode
+      - "{{ olist_kafka71_mode }}"
+      - --bootstrap
+      - "{{ olist_kafka71_bootstrap }}"
+      - --kafka-bin
+      - "{{ olist_kafka71_kafka_bin }}"
+  environment:
+    JAVA_HOME: "{{ olist_kafka71_java_home }}"
+    KAFKA_HEAP_OPTS: '-Xmx256m'
+  delegate_to: worker3
+  register: olist_kafka71_publish_result
+  changed_when: true
+  when: olist_kafka71_mode in ['publish', 'replay']
+
+- name: Report guarded Kafka publication result
+  ansible.builtin.debug:
+    msg: "{{ olist_kafka71_publish_result.stdout_lines }}"
+  when: olist_kafka71_mode in ['publish', 'replay']
+
+- name: Process or verify Step71 via single-use Spark YARN application
+  ansible.builtin.command:
+    argv: "{{ olist_kafka71_spark_submit + ['--mode', olist_kafka71_mode] }}"
+  become: true
+  become_user: "{{ olist_kafka71_hadoop_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+    SPARK_CONF_DIR: /etc/spark/conf
+    PYSPARK_PYTHON: /usr/bin/python3
+  register: olist_kafka71_spark_result
+  changed_when: "olist_kafka71_mode in ['run', 'baseline']"
+  when: olist_kafka71_mode in ['run', 'verify', 'baseline', 'verify_replay']
+
+- name: Report Step71 Spark phase completion
+  ansible.builtin.debug:
+    msg:
+      - "STEP71_SPARK_PHASE_COMPLETED: {{ olist_kafka71_mode }} (spark-submit exit=0)"
+      - "{{ (olist_kafka71_spark_result.stdout | default(''))[-900:] }}"
+  when: olist_kafka71_mode in ['run', 'verify', 'baseline', 'verify_replay']

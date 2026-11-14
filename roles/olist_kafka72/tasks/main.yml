@@ -1,0 +1,32 @@
+---
+- name: Enforce fixed Step72 isolation boundaries and mode
+  ansible.builtin.assert:
+    that:
+      - olist_kafka72_mode in ['plan', 'preflight', 'apply', 'publish', 'fault', 'inspect_fault', 'recover', 'verify']
+      - olist_kafka72_topic == 'bigtop_olist_step72_crash_v1'
+      - olist_kafka72_target == 'shared.olist72_recovery.fact_cdc_crash_v1'
+      - olist_kafka72_checkpoint == 'hdfs://master:9000/data/olist/iceberg-checkpoints/step72/v1'
+      - olist_kafka72_fault_proof == '/data/olist/iceberg-validation/step72/v1/_AFTER_MERGE_FAULT.json'
+      - olist_kafka72_recovery_proof == '/data/olist/iceberg-validation/step72/v1/_RECOVERY_VERIFIED.json'
+    fail_msg: Refusing to touch any non-Step72 assets.
+
+- name: Show explicit Step72 execution plan
+  ansible.builtin.debug:
+    msg:
+      - 'STEP72_PLAN_ONLY: preflight -> apply -> publish -> fault -> inspect_fault -> recover -> verify'
+      - 'Stop Step65 streaming yourself before any Step72 Spark job; this role never stops other apps.'
+      - 'fault is an intentional nonzero YARN Spark application AFTER Iceberg MERGE and BEFORE Spark checkpoint commit.'
+      - 'Never remove Kafka offsets, HDFS checkpoint, or Iceberg snapshots; proof files are immutable.'
+  when: olist_kafka72_mode == 'plan'
+
+- name: Check Step72 prerequisites and exclusive Spark slot
+  ansible.builtin.include_tasks: preflight.yml
+  when: olist_kafka72_mode in ['preflight', 'apply', 'publish', 'fault', 'inspect_fault', 'recover', 'verify']
+
+- name: Install Step72-only resources
+  ansible.builtin.include_tasks: apply.yml
+  when: olist_kafka72_mode == 'apply'
+
+- name: Execute Step72 CDC recovery stage
+  ansible.builtin.include_tasks: execute.yml
+  when: olist_kafka72_mode in ['publish', 'fault', 'inspect_fault', 'recover', 'verify']

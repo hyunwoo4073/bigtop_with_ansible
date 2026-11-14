@@ -1,0 +1,30 @@
+---
+- name: Require explicit Step71 scope and phase
+  ansible.builtin.assert:
+    that:
+      - olist_kafka71_mode in ['plan', 'preflight', 'apply', 'publish', 'run', 'verify', 'baseline', 'replay', 'verify_replay']
+      - olist_kafka71_topic == 'bigtop_olist_step71_cdc_v1'
+      - olist_kafka71_target == 'shared.olist71_cdc.fact_cdc_consistency_v1'
+      - olist_kafka71_checkpoint == 'hdfs://master:9000/data/olist/iceberg-checkpoints/step71/v1'
+      - olist_kafka71_baseline == '/data/olist/iceberg-validation/step71/v1/_BASELINE_SNAPSHOT.json'
+    fail_msg: Step71 must use its isolated topic, target, checkpoint and immutable baseline.
+
+- name: Explain isolated Step71 operation
+  ansible.builtin.debug:
+    msg:
+      - 'STEP71_PLAN_ONLY: initial 9 CDC records, duplicate and stale sequences, then replay 9 identical records'
+      - 'Only Step71 Topic/Iceberg table/checkpoint/HDFS baseline may be changed.'
+      - 'Order: preflight, apply, publish, run, verify, baseline, replay, run, verify_replay'
+  when: olist_kafka71_mode == 'plan'
+
+- name: Check Step71 prerequisites
+  ansible.builtin.include_tasks: preflight.yml
+  when: olist_kafka71_mode in ['preflight', 'apply', 'publish', 'run', 'verify', 'baseline', 'replay', 'verify_replay']
+
+- name: Install isolated Step71 assets and initialize empty table and topic
+  ansible.builtin.include_tasks: apply.yml
+  when: olist_kafka71_mode == 'apply'
+
+- name: Run isolated Step71 CDC phase
+  ansible.builtin.include_tasks: execute.yml
+  when: olist_kafka71_mode in ['publish', 'run', 'verify', 'baseline', 'replay', 'verify_replay']
