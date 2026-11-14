@@ -1,0 +1,69 @@
+---
+olist_kafka71_mode: plan
+olist_kafka71_bootstrap: '192.158.2.101:9092,192.158.2.102:9092,192.158.2.103:9092'
+olist_kafka71_topic: bigtop_olist_step71_cdc_v1
+olist_kafka71_target: shared.olist71_cdc.fact_cdc_consistency_v1
+olist_kafka71_checkpoint: hdfs://master:9000/data/olist/iceberg-checkpoints/step71/v1
+olist_kafka71_baseline: /data/olist/iceberg-validation/step71/v1/_BASELINE_SNAPSHOT.json
+olist_kafka71_master_dir: /opt/bigtop-iceberg/step71
+olist_kafka71_worker_dir: /opt/bigtop-iceberg/step71
+olist_kafka71_app: /opt/bigtop-iceberg/step71/step71_cdc.py
+olist_kafka71_iceberg_jar: /opt/bigtop-iceberg/iceberg-spark-runtime-3.5_2.12-1.10.1.jar
+olist_kafka71_jar_dir: /opt/bigtop-iceberg/kafka64
+olist_kafka71_kafka_bin: /opt/bigtop-kafka-kraft64/kafka/bin
+olist_kafka71_java_home: /opt/bigtop-kafka-kraft64/jdk17
+olist_kafka71_rest_uri: http://192.158.2.103:9001/iceberg/
+olist_kafka71_hadoop_user: hadoop
+olist_kafka71_queue: batch
+olist_kafka71_jars:
+  - spark-sql-kafka-0-10_2.12-3.5.6.jar
+  - spark-token-provider-kafka-0-10_2.12-3.5.6.jar
+  - kafka-clients-3.4.1.jar
+  - commons-pool2-2.11.1.jar
+  - jsr305-3.0.0.jar
+olist_kafka71_spark_jars:
+  - /opt/bigtop-iceberg/iceberg-spark-runtime-3.5_2.12-1.10.1.jar
+  - /opt/bigtop-iceberg/kafka64/spark-sql-kafka-0-10_2.12-3.5.6.jar
+  - /opt/bigtop-iceberg/kafka64/spark-token-provider-kafka-0-10_2.12-3.5.6.jar
+  - /opt/bigtop-iceberg/kafka64/kafka-clients-3.4.1.jar
+  - /opt/bigtop-iceberg/kafka64/commons-pool2-2.11.1.jar
+  - /opt/bigtop-iceberg/kafka64/jsr305-3.0.0.jar
+olist_kafka71_spark_submit:
+  - spark-submit
+  - --master
+  - yarn
+  - --deploy-mode
+  - cluster
+  - --name
+  - olist-step71-cdc-consistency
+  - --queue
+  - "{{ olist_kafka71_queue }}"
+  - --driver-memory
+  - 768m
+  - --executor-memory
+  - 768m
+  - --executor-cores
+  - '1'
+  - --num-executors
+  - '1'
+  - --jars
+  - "{{ olist_kafka71_spark_jars | join(',') }}"
+  - --conf
+  - spark.yarn.submit.waitAppCompletion=true
+  - --conf
+  - spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+  - --conf
+  - spark.sql.catalog.shared=org.apache.iceberg.spark.SparkCatalog
+  - --conf
+  - spark.sql.catalog.shared.type=rest
+  - --conf
+  - "spark.sql.catalog.shared.uri={{ olist_kafka71_rest_uri }}"
+  - --conf
+  - spark.sql.shuffle.partitions=4
+  - --conf
+  - spark.sql.session.timeZone=UTC
+  - --conf
+  - spark.pyspark.python=/usr/bin/python3
+  - "{{ olist_kafka71_app }}"
+  - --bootstrap
+  - "{{ olist_kafka71_bootstrap }}"

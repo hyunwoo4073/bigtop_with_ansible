@@ -13,6 +13,7 @@ import FunctionalHealthPanel from './FunctionalHealthPanel.jsx'
 import './incident-runbook.css'
 import IncidentDemoPanel from './IncidentDemoPanel.jsx'
 import './incident-demo.css'
+import KafkaOperationsView from './KafkaOperationsView.jsx'
 
 const API = {
   async serviceAction(componentId, action) {
@@ -437,6 +438,7 @@ function App() {
             )}
 
             {view === 'services' && (
+              <>
               <ServicesView
                 components={filteredComponents}
                 query={query}
@@ -455,6 +457,8 @@ function App() {
                 uiLinks={uiLinks}
                 onOpenUI={openServiceUI}
               />
+              {groupFilter === 'Kafka' && <KafkaOperationsView uiLinks={uiLinks} />}
+              </>
             )}
 
             {view === 'grid' && (
@@ -487,6 +491,7 @@ function App() {
             )}
 
             {view === 'inventory' && <InventoryView />}
+
 
             {view === 'action-history' && (
               <ActionHistoryView />
@@ -694,12 +699,13 @@ function ServicesView({ components, query, setQuery, filter, setFilter, groupFil
                 <button className="btn tiny" onClick={() => onOpenUI(component)}>Open UI ↗</button>
               )}
               <button className="btn tiny" onClick={() => onLogs(component)}>Logs</button>
-              {component.status === 'UP' ? (
+              {!component.read_only && (component.status === 'UP' ? (
                 <button className="btn tiny warning" onClick={() => onStop(component)}>Stop</button>
               ) : (
                 <button className="btn tiny success" onClick={() => onStart(component)}>Start</button>
-              )}
-              <button className="btn tiny danger" onClick={() => onRestart(component)}>Restart</button>
+              ))}
+              {!component.read_only && <button className="btn tiny danger" onClick={() => onRestart(component)}>Restart</button>}
+              {component.read_only && <span className="k70-readonly-label">Read only</span>}
             </div>
           </button>
         ))}
@@ -831,7 +837,7 @@ function IncidentsView({ issues, components, onSelect, onLogs, onRestart, onView
                 <button className="btn tiny primary" type="button" disabled={!hasRunbook} onClick={() => onViewRunbook(issue)}>Runbook</button>
                 <button className="btn tiny" type="button" disabled={!component} onClick={() => onSelect(component, 'Overview')}>Details</button>
                 <button className="btn tiny" type="button" disabled={!component} onClick={() => onLogs(component)}>Logs</button>
-                <button className="btn tiny danger" type="button" disabled={!component} onClick={() => onRestart(component)}>Restart</button>
+                {component && !component.read_only && <button className="btn tiny danger" type="button" onClick={() => onRestart(component)}>Restart</button>}
               </div>
             </div>
           )
@@ -959,6 +965,7 @@ function DetailPanel({ selected, detailTab, setDetailTab, output, rawOutput, log
                   <button className="btn" onClick={() => onLogs(selected)}>Run</button>
                 </div>
 
+                {!selected.read_only && <>
                 <div className="action-card success-action">
                   <div>
                     <strong>Start Service</strong>
@@ -982,6 +989,8 @@ function DetailPanel({ selected, detailTab, setDetailTab, output, rawOutput, log
                   </div>
                   <button className="btn danger" onClick={() => onRestart(selected)}>Restart</button>
                 </div>
+                </>}
+                {selected.read_only && <div className="action-card"><div><strong>Read-only service</strong><span>Kafka 브로커 제어는 클러스터 영향 때문에 이 화면에서 제공하지 않습니다.</span></div></div>}
               </div>
 
               <pre className="log-viewer compact">{rawOutput}</pre>

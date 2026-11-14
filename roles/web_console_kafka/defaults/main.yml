@@ -1,0 +1,12 @@
+---
+web_console_kafka_mode: plan  # plan | preflight | apply | verify
+web_console_kafka_dir: /opt/bigtop-web-console
+web_console_kafka_user: bae
+web_console_kafka_app: /opt/bigtop-web-console/app.py
+web_console_kafka_frontend_dir: /opt/bigtop-web-console/frontend-src
+web_console_kafka_service: bigtop-web-console
+web_console_kafka_internal_url: http://127.0.0.1:18090
+web_console_kafka_public_url: http://127.0.0.1:1337
+web_console_kafka_cli: /opt/bigtop-kafka-kraft64/kafka/bin/kafka-topics.sh
+web_console_kafka_links_json: /etc/bigtop-web-console/service-ui-links.json
+web_console_kafka_kafbat_url: http://metadata:18081

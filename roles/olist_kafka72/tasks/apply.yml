@@ -1,0 +1,106 @@
+---
+- name: Create isolated Step72 Spark application directory
+  ansible.builtin.file:
+    path: "{{ olist_kafka72_master_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Install Step72 Spark application on master
+  ansible.builtin.copy:
+    src: step72_cdc.py
+    dest: "{{ olist_kafka72_app }}"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
+- name: Parse Step72 Python source without generating root-only pycache
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - "compile(open('{{ olist_kafka72_app }}', encoding='utf-8').read(), '{{ olist_kafka72_app }}', 'exec')"
+  changed_when: false
+
+- name: Create isolated worker3 publisher directory
+  ansible.builtin.file:
+    path: "{{ olist_kafka72_worker_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  delegate_to: worker3
+  become: true
+
+- name: Install dedicated Step72 Kafka publisher and fixture
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ olist_kafka72_worker_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop: [step72_cdc.py, step72_publish.py]
+  delegate_to: worker3
+  become: true
+
+- name: Create only the isolated Step72 Kafka topic
+  ansible.builtin.command:
+    argv:
+      - "{{ olist_kafka72_kafka_bin }}/kafka-topics.sh"
+      - --bootstrap-server
+      - "{{ olist_kafka72_bootstrap }}"
+      - --create
+      - --if-not-exists
+      - --topic
+      - "{{ olist_kafka72_topic }}"
+      - --partitions
+      - '1'
+      - --replication-factor
+      - '3'
+  environment:
+    JAVA_HOME: "{{ olist_kafka72_java_home }}"
+    KAFKA_HEAP_OPTS: '-Xmx256m'
+  delegate_to: worker3
+  register: olist_kafka72_topic_create
+  changed_when: "'Created topic' in olist_kafka72_topic_create.stdout"
+
+- name: Inspect Step72 topic shape
+  ansible.builtin.command:
+    argv:
+      - "{{ olist_kafka72_kafka_bin }}/kafka-topics.sh"
+      - --bootstrap-server
+      - "{{ olist_kafka72_bootstrap }}"
+      - --describe
+      - --topic
+      - "{{ olist_kafka72_topic }}"
+  environment:
+    JAVA_HOME: "{{ olist_kafka72_java_home }}"
+    KAFKA_HEAP_OPTS: '-Xmx256m'
+  delegate_to: worker3
+  changed_when: false
+  register: olist_kafka72_topic_descriptor
+
+- name: Guard independent single-partition RF3 test topic
+  ansible.builtin.assert:
+    that:
+      - "'PartitionCount: 1' in olist_kafka72_topic_descriptor.stdout"
+      - "'ReplicationFactor: 3' in olist_kafka72_topic_descriptor.stdout"
+    fail_msg: Dedicated test topic has unexpected configuration.
+
+- name: Initialize only Step72 Iceberg table with a one-shot Spark application
+  ansible.builtin.command:
+    argv: "{{ olist_kafka72_spark_submit + ['--mode', 'init'] }}"
+  become: true
+  become_user: "{{ olist_kafka72_hadoop_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+    SPARK_CONF_DIR: /etc/spark/conf
+    PYSPARK_PYTHON: /usr/bin/python3
+  changed_when: true
+
+- name: Report isolated Step72 initialization completed
+  ansible.builtin.debug:
+    msg: STEP72_APPLY_PASS

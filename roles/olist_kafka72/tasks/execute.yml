@@ -1,0 +1,177 @@
+---
+- name: Require Step72 Spark application staged by apply
+  ansible.builtin.stat:
+    path: "{{ olist_kafka72_app }}"
+    get_checksum: false
+    get_mime: false
+  register: olist_kafka72_installed
+
+- name: Prevent Step72 operation before installation
+  ansible.builtin.assert:
+    that:
+      - olist_kafka72_installed.stat.isreg | default(false)
+    fail_msg: Step72 is not installed; run apply first.
+
+- name: Publish isolated nine-message CDC fixture exactly once
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ olist_kafka72_worker_dir }}/step72_publish.py"
+      - --mode
+      - publish
+      - --bootstrap
+      - "{{ olist_kafka72_bootstrap }}"
+      - --kafka-bin
+      - "{{ olist_kafka72_kafka_bin }}"
+  delegate_to: worker3
+  environment:
+    JAVA_HOME: "{{ olist_kafka72_java_home }}"
+    KAFKA_HEAP_OPTS: '-Xmx256m'
+  changed_when: true
+  register: olist_kafka72_publish
+  when: olist_kafka72_mode == 'publish'
+
+- name: Show guarded Step72 publication result
+  ansible.builtin.debug:
+    msg: "{{ olist_kafka72_publish.stdout_lines }}"
+  when: olist_kafka72_mode == 'publish'
+
+- name: Run Step72 fault injection (expected YARN application failure)
+  ansible.builtin.command:
+    argv: "{{ olist_kafka72_spark_submit + ['--mode', 'fault'] }}"
+  become: true
+  become_user: "{{ olist_kafka72_hadoop_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+    SPARK_CONF_DIR: /etc/spark/conf
+    PYSPARK_PYTHON: /usr/bin/python3
+  register: olist_kafka72_fault_result
+  failed_when: false
+  changed_when: true
+  when: olist_kafka72_mode == 'fault'
+
+- name: Confirm Spark application actually failed
+  ansible.builtin.assert:
+    that:
+      - olist_kafka72_fault_result.rc != 0
+    fail_msg: Fault mode unexpectedly succeeded. Do not advance to recovery.
+  when: olist_kafka72_mode == 'fault'
+
+- name: Read immutable after-merge fault proof
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -cat, "{{ olist_kafka72_fault_proof }}"]
+  become: true
+  become_user: "{{ olist_kafka72_hadoop_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: olist_kafka72_fault_marker
+  changed_when: false
+  when: olist_kafka72_mode in ['fault', 'inspect_fault', 'recover', 'verify']
+
+- name: Assert fault proof represents committed Iceberg merge of batch zero
+  ansible.builtin.assert:
+    that:
+      - (olist_kafka72_fault_marker.stdout | from_json).phase == 'after_iceberg_merge_before_spark_batch_commit'
+      - (olist_kafka72_fault_marker.stdout | from_json).batch_id | int == 0
+      - (olist_kafka72_fault_marker.stdout | from_json).rows | int == 3
+      - (olist_kafka72_fault_marker.stdout | from_json).topic == olist_kafka72_topic
+      - (olist_kafka72_fault_marker.stdout | from_json).table == olist_kafka72_target
+      - (olist_kafka72_fault_marker.stdout | from_json).checkpoint == olist_kafka72_checkpoint
+      - (olist_kafka72_fault_marker.stdout | from_json).sha256 | length == 64
+    fail_msg: Missing or invalid post-Iceberg-merge crash proof. Do not recover.
+  when: olist_kafka72_mode in ['fault', 'inspect_fault', 'recover', 'verify']
+
+- name: Inspect original failed batch's Spark commit file
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -test, -e, "{{ olist_kafka72_checkpoint }}/commits/0"]
+  become: true
+  become_user: "{{ olist_kafka72_hadoop_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: olist_kafka72_batch_commit
+  failed_when: false
+  changed_when: false
+  when: olist_kafka72_mode in ['fault', 'inspect_fault', 'recover']
+
+- name: Ensure Spark did not commit the failed batch
+  ansible.builtin.assert:
+    that:
+      - olist_kafka72_batch_commit.rc == 1
+    fail_msg: Spark already committed batch zero or HDFS returned an error; stop the test.
+  when: olist_kafka72_mode in ['fault', 'inspect_fault', 'recover']
+
+- name: Inspect failed batch's Spark offsets file
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -test, -e, "{{ olist_kafka72_checkpoint }}/offsets/0"]
+  become: true
+  become_user: "{{ olist_kafka72_hadoop_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+  when: olist_kafka72_mode in ['fault', 'inspect_fault', 'recover']
+
+- name: Show expected fault injection evidence passed
+  ansible.builtin.debug:
+    msg: >-
+      STEP72_FAULT_PROOF_PASS: Iceberg MERGE committed; Spark offsets/0 exists,
+      Spark commits/0 absent; retry must process same batch.
+  when: olist_kafka72_mode in ['fault', 'inspect_fault']
+
+- name: Recover Step72 using the SAME persistent checkpoint
+  ansible.builtin.command:
+    argv: "{{ olist_kafka72_spark_submit + ['--mode', 'recover'] }}"
+  become: true
+  become_user: "{{ olist_kafka72_hadoop_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+    SPARK_CONF_DIR: /etc/spark/conf
+    PYSPARK_PYTHON: /usr/bin/python3
+  changed_when: true
+  when: olist_kafka72_mode == 'recover'
+
+- name: Report Step72 retry application finished
+  ansible.builtin.debug:
+    msg: STEP72_RECOVER_PASS
+  when: olist_kafka72_mode == 'recover'
+
+- name: Verify exact Kafka/Spark checkpoint and immutable Iceberg snapshot
+  ansible.builtin.command:
+    argv: "{{ olist_kafka72_spark_submit + ['--mode', 'verify'] }}"
+  become: true
+  become_user: "{{ olist_kafka72_hadoop_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+    SPARK_CONF_DIR: /etc/spark/conf
+    PYSPARK_PYTHON: /usr/bin/python3
+  changed_when: false
+  when: olist_kafka72_mode == 'verify'
+
+- name: Read signed-off immutable Step72 recovery proof
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -cat, "{{ olist_kafka72_recovery_proof }}"]
+  become: true
+  become_user: "{{ olist_kafka72_hadoop_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+  register: olist_kafka72_final_evidence
+  when: olist_kafka72_mode == 'verify'
+
+- name: Require final rows, Kafka offset, checkpoint offset and snapshot equivalence
+  ansible.builtin.assert:
+    that:
+      - (olist_kafka72_final_evidence.stdout | from_json).phase == 'recovery_verified'
+      - (olist_kafka72_final_evidence.stdout | from_json).kafka_end | int == 9
+      - (olist_kafka72_final_evidence.stdout | from_json).committed_end | int == 9
+      - (olist_kafka72_final_evidence.stdout | from_json).rows | int == 3
+      - (olist_kafka72_final_evidence.stdout | from_json).live | int == 2
+      - (olist_kafka72_final_evidence.stdout | from_json).tombstones | int == 1
+      - (olist_kafka72_final_evidence.stdout | from_json).snapshot == (olist_kafka72_fault_marker.stdout | from_json).snapshot
+      - (olist_kafka72_final_evidence.stdout | from_json).sha256 == (olist_kafka72_fault_marker.stdout | from_json).sha256
+    fail_msg: Recovery proof did not meet crash-boundary invariants.
+  when: olist_kafka72_mode == 'verify'
+
+- name: Report Step72 crash boundary proof successful
+  ansible.builtin.debug:
+    msg: STEP72_VERIFY_PASS
+  when: olist_kafka72_mode == 'verify'

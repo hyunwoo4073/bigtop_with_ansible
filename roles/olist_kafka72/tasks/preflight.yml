@@ -1,0 +1,65 @@
+---
+- name: Find installed Spark and Iceberg JARs on master (existence only)
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+    get_mime: false
+  loop: "{{ olist_kafka72_spark_jars }}"
+  register: olist_kafka72_master_jars
+
+- name: Ensure Step72 Spark dependencies are available
+  ansible.builtin.assert:
+    that:
+      - olist_kafka72_master_jars.results | selectattr('stat.isreg', 'defined') | selectattr('stat.isreg') | list | length == olist_kafka72_master_jars.results | length
+    fail_msg: Missing one or more Step65-tested local Spark JARs.
+
+- name: Check dedicated worker3 Kafka executables
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+    get_mime: false
+  loop:
+    - "{{ olist_kafka72_kafka_bin }}/kafka-topics.sh"
+    - "{{ olist_kafka72_kafka_bin }}/kafka-console-producer.sh"
+    - "{{ olist_kafka72_kafka_bin }}/kafka-get-offsets.sh"
+    - "{{ olist_kafka72_java_home }}/bin/java"
+  delegate_to: worker3
+  register: olist_kafka72_worker_cli
+
+- name: Require existing Kafka CLI without package installs
+  ansible.builtin.assert:
+    that:
+      - olist_kafka72_worker_cli.results | selectattr('stat.isreg', 'defined') | selectattr('stat.isreg') | list | length == olist_kafka72_worker_cli.results | length
+    fail_msg: Required Kafka tools are missing on worker3.
+
+- name: Check Step72 HDFS parent accessibility as Hadoop user
+  ansible.builtin.command:
+    argv: [hdfs, dfs, -test, -d, /data/olist/iceberg-checkpoints]
+  become: true
+  become_user: "{{ olist_kafka72_hadoop_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  changed_when: false
+
+- name: List active YARN applications before single-Spark execution
+  ansible.builtin.command:
+    argv: [yarn, application, -list, -appStates, SUBMITTED,ACCEPTED,RUNNING]
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: olist_kafka72_active_apps
+  changed_when: false
+  when: olist_kafka72_mode in ['preflight', 'apply', 'fault', 'recover', 'verify']
+
+- name: Refuse to queue another Spark application on resource-constrained VMs
+  ansible.builtin.assert:
+    that:
+      - "'SPARK' not in olist_kafka72_active_apps.stdout"
+    fail_msg: >-
+      Existing Spark YARN app detected. On this 5-VM lab only one app can run.
+      Stop Step65 using its original lifecycle playbook and verify YARN idle,
+      then retry. Step72 will never stop or kill other apps automatically.
+  when: olist_kafka72_mode in ['preflight', 'apply', 'fault', 'recover', 'verify']
+
+- name: Report Step72 read-only preflight
+  ansible.builtin.debug:
+    msg: STEP72_PREFLIGHT_PASS

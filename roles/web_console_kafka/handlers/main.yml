@@ -1,0 +1,6 @@
+---
+- name: Restart Step70 Web Console
+  ansible.builtin.service:
+    name: "{{ web_console_kafka_service }}"
+    state: restarted
+  become: true

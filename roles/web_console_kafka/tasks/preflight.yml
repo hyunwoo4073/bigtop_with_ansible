@@ -1,0 +1,28 @@
+---
+- name: Check existing Web Console and Kafka executable locations
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ web_console_kafka_app }}"
+    - "{{ web_console_kafka_frontend_dir }}/package.json"
+    - "{{ web_console_kafka_frontend_dir }}/node_modules/.bin/vite"
+    - "{{ web_console_kafka_cli }}"
+    - "{{ web_console_kafka_links_json }}"
+  register: web_console_kafka_prereq
+
+- name: Require already deployed Web Console, Kafka CLI and service links
+  ansible.builtin.assert:
+    that:
+      - web_console_kafka_prereq.results | map(attribute='stat.exists') | list | min
+    fail_msg: 'Preflight failure: existing Web Console, Vite, Kafka CLI, or UI shortcuts missing. Do not auto-install dependencies.'
+
+- name: Check existing internal FastAPI health
+  ansible.builtin.uri:
+    url: "{{ web_console_kafka_internal_url }}/api/health"
+    status_code: 200
+    return_content: true
+  changed_when: false
+
+- name: Report preflight pass
+  ansible.builtin.debug:
+    msg: STEP70_PREFLIGHT_PASS

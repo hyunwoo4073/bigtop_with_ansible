@@ -1,0 +1,108 @@
+---
+- name: Create isolated master application directory
+  ansible.builtin.file:
+    path: "{{ olist_kafka71_master_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Stage isolated Spark CDC application on master
+  ansible.builtin.copy:
+    src: step71_cdc.py
+    dest: "{{ olist_kafka71_app }}"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
+- name: Validate Spark application syntax (without creating __pycache__)
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - "import ast,sys; p=sys.argv[1]; ast.parse(open(p, encoding='utf-8').read(), filename=p)"
+      - "{{ olist_kafka71_app }}"
+  changed_when: false
+
+- name: Create isolated worker3 publisher directory
+  ansible.builtin.file:
+    path: "{{ olist_kafka71_worker_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  delegate_to: worker3
+  become: true
+
+- name: Stage dedicated Kafka publisher and pure fixture module on worker3
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ olist_kafka71_worker_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop: [step71_cdc.py, step71_publish.py]
+  delegate_to: worker3
+  become: true
+
+- name: Create isolated Kafka topic without changing other topics
+  ansible.builtin.command:
+    argv:
+      - "{{ olist_kafka71_kafka_bin }}/kafka-topics.sh"
+      - --bootstrap-server
+      - "{{ olist_kafka71_bootstrap }}"
+      - --create
+      - --if-not-exists
+      - --topic
+      - "{{ olist_kafka71_topic }}"
+      - --partitions
+      - '1'
+      - --replication-factor
+      - '3'
+  environment:
+    JAVA_HOME: "{{ olist_kafka71_java_home }}"
+    KAFKA_HEAP_OPTS: '-Xmx256m'
+  delegate_to: worker3
+  register: olist_kafka71_topic_create
+  changed_when: "'Created topic' in olist_kafka71_topic_create.stdout"
+
+- name: Read dedicated Kafka topic descriptor
+  ansible.builtin.command:
+    argv:
+      - "{{ olist_kafka71_kafka_bin }}/kafka-topics.sh"
+      - --bootstrap-server
+      - "{{ olist_kafka71_bootstrap }}"
+      - --describe
+      - --topic
+      - "{{ olist_kafka71_topic }}"
+  environment:
+    JAVA_HOME: "{{ olist_kafka71_java_home }}"
+    KAFKA_HEAP_OPTS: '-Xmx256m'
+  delegate_to: worker3
+  register: olist_kafka71_topic_descr
+  changed_when: false
+
+- name: Require single-partition triple-replicated fixture topic
+  ansible.builtin.assert:
+    that:
+      - "'PartitionCount: 1' in olist_kafka71_topic_descr.stdout"
+      - "'ReplicationFactor: 3' in olist_kafka71_topic_descr.stdout"
+    fail_msg: Step71 topic metadata differs; do not publish to unexpected topic.
+
+- name: Create Step71-owned empty Iceberg target (Spark YARN only)
+  ansible.builtin.command:
+    argv: "{{ olist_kafka71_spark_submit + ['--mode', 'init'] }}"
+  become: true
+  become_user: "{{ olist_kafka71_hadoop_user }}"
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+    SPARK_CONF_DIR: /etc/spark/conf
+    PYSPARK_PYTHON: /usr/bin/python3
+  register: olist_kafka71_init
+  changed_when: true
+
+- name: Announce Step71 isolated topic and target readiness
+  ansible.builtin.debug:
+    msg: STEP71_APPLY_PASS

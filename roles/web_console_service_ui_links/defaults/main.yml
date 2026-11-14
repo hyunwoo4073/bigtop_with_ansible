@@ -16,6 +16,11 @@ web_console_service_ui_links_items:
     host: master
     service: spark-history-server
     url: http://master:18080
+  - title: Kafbat Kafka UI
+    group: Kafka
+    host: metadata
+    service: kafbat-ui
+    url: http://metadata:18081
   - title: Prometheus
     group: Monitoring
     host: worker3

@@ -1,0 +1,105 @@
+---
+- name: Install dedicated read-only Kafka router module
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../roles/web_console/files/kafka_ops70.py"
+    dest: "{{ web_console_kafka_dir }}/kafka_ops70.py"
+    owner: "{{ web_console_kafka_user }}"
+    group: "{{ web_console_kafka_user }}"
+    mode: '0644'
+  become: true
+  register: web_console_kafka_api_module
+  notify: Restart Step70 Web Console
+
+- name: Validate staged Python router syntax
+  ansible.builtin.command:
+    cmd: "python3 -m py_compile {{ web_console_kafka_dir }}/kafka_ops70.py"
+  changed_when: false
+
+- name: Copy only Step70 frontend files to existing deployed React source
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../roles/web_console/files/frontend/src/{{ item }}"
+    dest: "{{ web_console_kafka_frontend_dir }}/src/{{ item }}"
+    owner: "{{ web_console_kafka_user }}"
+    group: "{{ web_console_kafka_user }}"
+    mode: '0644'
+  loop:
+    - main.jsx
+    - KafkaOperationsView.jsx
+    - kafka-operations.css
+  become: true
+  register: web_console_kafka_frontend_source
+
+- name: Back up existing frontend dist before rebuilding changed assets
+  ansible.builtin.command:
+    cmd: "cp -a {{ web_console_kafka_frontend_dir }}/dist {{ web_console_kafka_frontend_dir }}/dist.pre-step70"
+    creates: "{{ web_console_kafka_frontend_dir }}/dist.pre-step70"
+  become: true
+  become_user: "{{ web_console_kafka_user }}"
+  when: web_console_kafka_frontend_source is changed
+
+- name: Build existing React app with Kafka view (only on source changes)
+  ansible.builtin.command:
+    cmd: npm run build
+    chdir: "{{ web_console_kafka_frontend_dir }}"
+  become: true
+  become_user: "{{ web_console_kafka_user }}"
+  register: web_console_kafka_build
+  changed_when: web_console_kafka_build.rc == 0
+  when: web_console_kafka_frontend_source is changed
+  notify: Restart Step70 Web Console
+
+- name: Stage FastAPI source generated from updated original template
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../roles/web_console/templates/app.py.j2"
+    dest: "{{ web_console_kafka_app }}.step70-candidate"
+    owner: "{{ web_console_kafka_user }}"
+    group: "{{ web_console_kafka_user }}"
+    mode: '0644'
+  become: true
+
+- name: Validate FastAPI generated Python syntax before replacing running file
+  ansible.builtin.command:
+    cmd: "python3 -m py_compile {{ web_console_kafka_app }}.step70-candidate"
+  changed_when: false
+
+- name: Replace backend with validated updated original template
+  ansible.builtin.copy:
+    src: "{{ web_console_kafka_app }}.step70-candidate"
+    dest: "{{ web_console_kafka_app }}"
+    remote_src: true
+    owner: "{{ web_console_kafka_user }}"
+    group: "{{ web_console_kafka_user }}"
+    mode: '0644'
+  become: true
+  notify: Restart Step70 Web Console
+
+- name: Read installed UI links (must preserve other shortcuts)
+  ansible.builtin.slurp:
+    src: "{{ web_console_kafka_links_json }}"
+  register: web_console_kafka_links_raw
+  become: true
+
+- name: Decode existing UI link list
+  ansible.builtin.set_fact:
+    web_console_kafka_existing_links: "{{ (web_console_kafka_links_raw.content | b64decode | from_json).links }}"
+
+- name: Validate UI link list is a list
+  ansible.builtin.assert:
+    that:
+      - web_console_kafka_existing_links is sequence
+      - web_console_kafka_existing_links is not string
+
+- name: Add Kafbat shortcut only if absent without deleting existing links
+  ansible.builtin.copy:
+    dest: "{{ web_console_kafka_links_json }}"
+    content: "{{ {'links': web_console_kafka_existing_links + [ {'title':'Kafbat Kafka UI', 'group':'Kafka', 'host':'metadata', 'service':'kafbat-ui', 'url':web_console_kafka_kafbat_url} ]} | to_nice_json }}
+"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  when: >-
+    web_console_kafka_existing_links | selectattr('service', 'equalto', 'kafbat-ui') | list | length == 0
+
+- name: Flush pending Step70 restart before read-only verification
+  ansible.builtin.meta: flush_handlers
