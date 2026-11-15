@@ -1,0 +1,6 @@
+---
+- name: Step76 guarded offhost copy of existing logical backup artifacts
+  hosts: worker3
+  gather_facts: false
+  roles:
+    - role: olist_metadata76_offhost

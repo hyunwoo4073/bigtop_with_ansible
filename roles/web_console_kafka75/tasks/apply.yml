@@ -1,0 +1,77 @@
+---
+- name: Deploy dedicated Kafka cluster health router first
+  ansible.builtin.copy:
+    src: '{{ playbook_dir }}/../roles/web_console/files/kafka_ops75.py'
+    dest: '{{ web_console_kafka75_dir }}/kafka_ops75.py'
+    owner: '{{ web_console_kafka75_user }}'
+    group: '{{ web_console_kafka75_user }}'
+    mode: '0644'
+    backup: true
+  become: true
+  notify: Restart Step75 Web Console
+
+- name: Deploy existing Step70 router with additive Step75 registration
+  ansible.builtin.copy:
+    src: '{{ playbook_dir }}/../roles/web_console/files/kafka_ops70.py'
+    dest: '{{ web_console_kafka75_dir }}/kafka_ops70.py'
+    owner: '{{ web_console_kafka75_user }}'
+    group: '{{ web_console_kafka75_user }}'
+    mode: '0644'
+    backup: true
+  become: true
+  notify: Restart Step75 Web Console
+
+- name: Check Python router syntax without creating __pycache__
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - >-
+        from pathlib import Path;
+        root = Path('{{ web_console_kafka75_dir }}');
+        [compile((root / name).read_text(), name, 'exec')
+        for name in ('kafka_ops70.py', 'kafka_ops75.py')]
+  changed_when: false
+
+- name: Copy only Step75 React files and existing patched Kafka view
+  ansible.builtin.copy:
+    src: '{{ playbook_dir }}/../roles/web_console/files/frontend/src/{{ item }}'
+    dest: '{{ web_console_kafka75_frontend_dir }}/src/{{ item }}'
+    owner: '{{ web_console_kafka75_user }}'
+    group: '{{ web_console_kafka75_user }}'
+    mode: '0644'
+    backup: true
+  loop:
+    - KafkaHealthPanel75.jsx
+    - kafka-health75.css
+    - KafkaOperationsView.jsx
+  become: true
+  register: web_console_kafka75_frontend_copy
+
+- name: Back up existing dist before first Step75 build
+  ansible.builtin.command:
+    cmd: >-
+      cp -a {{ web_console_kafka75_frontend_dir }}/dist
+      {{ web_console_kafka75_frontend_dir }}/dist.pre-step75
+    creates: '{{ web_console_kafka75_frontend_dir }}/dist.pre-step75'
+  become: true
+  become_user: '{{ web_console_kafka75_user }}'
+  when: web_console_kafka75_frontend_copy is changed
+
+- name: Rebuild existing React Web Console only when source changed
+  ansible.builtin.command:
+    cmd: npm run build
+    chdir: '{{ web_console_kafka75_frontend_dir }}'
+  become: true
+  become_user: '{{ web_console_kafka75_user }}'
+  register: web_console_kafka75_build
+  changed_when: web_console_kafka75_build.rc == 0
+  when: web_console_kafka75_frontend_copy is changed
+  notify: Restart Step75 Web Console
+
+- name: Flush Web Console restart after files and build are ready
+  ansible.builtin.meta: flush_handlers
+
+- name: Report Step75 deployment done; verification is a separate mode
+  ansible.builtin.debug:
+    msg: 'STEP75_APPLY_PASS'

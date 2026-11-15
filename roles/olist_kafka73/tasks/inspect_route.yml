@@ -1,0 +1,39 @@
+---
+- name: Read existing Alertmanager configuration privately
+  ansible.builtin.uri:
+    url: "{{ olist_kafka73_alertmanager_url }}/api/v2/status"
+    return_content: true
+    status_code: 200
+    timeout: 12
+  register: olist_kafka73_am_status
+  no_log: true
+
+- name: Parse Alertmanager routing tree privately
+  ansible.builtin.set_fact:
+    olist_kafka73_am_cfg: "{{ olist_kafka73_am_status.json.config.original | from_yaml }}"
+  no_log: true
+
+- name: Show sanitized Alertmanager route matchers and receivers
+  ansible.builtin.debug:
+    msg:
+      root_receiver: "{{ olist_kafka73_am_cfg.route.receiver }}"
+      route_tree: "{{ olist_kafka73_am_cfg.route }}"
+      receiver_names: "{{ olist_kafka73_am_cfg.receivers | map(attribute='name') | list }}"
+      note: Only route labels and receiver names are shown; secrets and endpoints are omitted.
+
+- name: Show sanitized notification integration settings
+  ansible.builtin.debug:
+    msg:
+      name: "{{ item.name }}"
+      slack_configs: "{{ item.slack_configs | default([]) | length }}"
+      webhook_configs: "{{ item.webhook_configs | default([]) | length }}"
+      email_configs: "{{ item.email_configs | default([]) | length }}"
+      pagerduty_configs: "{{ item.pagerduty_configs | default([]) | length }}"
+      note: Check send_resolved inside receiver configuration before claiming resolved notification.
+  loop: "{{ olist_kafka73_am_cfg.receivers }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Report sanitized route inspection completion
+  ansible.builtin.debug:
+    msg: STEP73_ROUTE_INSPECT_PASS

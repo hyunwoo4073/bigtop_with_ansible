@@ -1,0 +1,51 @@
+---
+- name: Require explicit Step76 D4 phase and backup ID
+  ansible.builtin.assert:
+    that:
+      - olist_metadata76_es_mode in ['preflight', 'configure', 'snapshot', 'restore', 'verify']
+      - olist_metadata76_es_backup_id is match('^[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}$')
+    fail_msg: Step76 D4 accepts only the existing Step76 backup ID and named modes.
+
+- name: Require approval for Elasticsearch-only restart
+  ansible.builtin.assert:
+    that:
+      - olist_metadata76_es_allow_restart | bool
+    fail_msg: Configure recreates only the Elasticsearch container. Set STEP76_ALLOW_ES_RESTART=YES.
+  when: olist_metadata76_es_mode == 'configure'
+
+- name: Require approval for isolated test index restore
+  ansible.builtin.assert:
+    that:
+      - olist_metadata76_es_allow_restore | bool
+    fail_msg: Restore creates a temporary Elasticsearch index. Set STEP76_ALLOW_ES_RESTORE=YES.
+  when: olist_metadata76_es_mode == 'restore'
+
+- name: Ensure protected Step76 tool location exists
+  ansible.builtin.file:
+    path: /usr/local/libexec
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Stage controlled Elasticsearch snapshot operations
+  ansible.builtin.copy:
+    src: step76_es_remote.py
+    dest: '{{ olist_metadata76_es_script_path }}'
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Execute exact Step76 Elasticsearch proof phase
+  ansible.builtin.command:
+    argv:
+      - python3
+      - '{{ olist_metadata76_es_script_path }}'
+      - '{{ olist_metadata76_es_mode }}'
+      - '{{ olist_metadata76_es_backup_id }}'
+  register: olist_metadata76_es_result
+  changed_when: olist_metadata76_es_mode in ['configure', 'snapshot', 'restore']
+
+- name: Display sanitized Elasticsearch proof result
+  ansible.builtin.debug:
+    var: olist_metadata76_es_result.stdout_lines

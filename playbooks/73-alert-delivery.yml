@@ -1,0 +1,7 @@
+---
+- name: Step73 safe discovery of existing Streaming alert delivery infrastructure
+  hosts: worker3
+  gather_facts: false
+  become: false
+  roles:
+    - olist_kafka73

@@ -1,0 +1,6 @@
+---
+- name: Restart Step75 Web Console
+  ansible.builtin.systemd:
+    name: '{{ web_console_kafka75_service }}'
+    state: restarted
+  become: true

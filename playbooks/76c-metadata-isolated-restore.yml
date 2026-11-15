@@ -1,0 +1,6 @@
+---
+- name: Step76 phase C isolated restore proof for metadata logical backups
+  hosts: worker3
+  gather_facts: false
+  roles:
+    - olist_metadata76_restore

@@ -1,0 +1,6 @@
+---
+- name: Step74 guarded proof of Step66 watchdog recovery
+  hosts: master
+  gather_facts: false
+  roles:
+    - role: olist_kafka74

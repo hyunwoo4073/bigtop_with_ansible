@@ -1,0 +1,7 @@
+---
+- name: Step76 phase B protected catalog metadata logical backup and verification
+  hosts: worker3
+  gather_facts: false
+  become: false
+  roles:
+    - olist_metadata76_backup

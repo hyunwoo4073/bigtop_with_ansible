@@ -1,0 +1,6 @@
+---
+olist_metadata76_es_mode: preflight
+olist_metadata76_es_backup_id: ''
+olist_metadata76_es_allow_restart: false
+olist_metadata76_es_allow_restore: false
+olist_metadata76_es_script_path: /usr/local/libexec/step76_d4_es.py

@@ -1,3 +1,4 @@
+import KafkaHealthPanel75 from './KafkaHealthPanel75'
 import React, { useEffect, useState } from 'react'
 import './kafka-operations.css'
 
@@ -79,6 +80,7 @@ export default function KafkaOperationsView({ uiLinks = [] }) {
         <div className="card"><small>Step65 committed lag</small><strong>{showOffset(streaming.lag_total)}</strong><span>Step68 recording rule 기준 · 미수집 시 —</span></div>
         <div className="card"><small>Collector (Kafka / Spark)</small><strong>{['kafka', 'spark'].map(k => streaming.collectors?.[k] == null ? '?' : streaming.collectors[k] ? 'OK' : 'FAIL').join(' / ')}</strong><span>최종 관측: {['kafka', 'spark'].map(k => `${k} ${streaming.collector_age_seconds?.[k] ?? '?'}s`).join(' · ')}</span></div>
       </div>
+      <KafkaHealthPanel75 />
       <section className="card">
         <h3>Kafka Brokers · TCP connectivity</h3>
         <p>Kafka 메타데이터/리더/ISR 건강 상태를 의미하지 않습니다.</p>

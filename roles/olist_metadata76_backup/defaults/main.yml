@@ -1,0 +1,6 @@
+---
+olist_metadata76_backup_mode: verify
+olist_metadata76_backup_id: ''
+olist_metadata76_backup_pg_database: iceberg_rest56
+olist_metadata76_backup_mysql_database: openmetadata_db
+olist_metadata76_backup_root: /var/backups/bigtop-step76

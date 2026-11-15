@@ -1,0 +1,71 @@
+---
+- name: Restrict Step76 to non-destructive discovery
+  ansible.builtin.assert:
+    that:
+      - olist_metadata76_mode == 'preflight'
+    fail_msg: Step76 discovery only. Backup and isolated restore require a separate, verified phase.
+
+- name: Discover worker3 Iceberg REST PostgreSQL metadata database
+  ansible.builtin.script:
+    cmd: "{{ role_path }}/files/step76_probe.py pg {{ olist_metadata76_pg_database }}"
+  become: true
+  become_user: postgres
+  register: olist_metadata76_pg_probe
+  changed_when: false
+  failed_when: false
+
+- name: Discover metadata VM OpenMetadata MySQL persistent database
+  ansible.builtin.script:
+    cmd: "{{ role_path }}/files/step76_probe.py mysql {{ olist_metadata76_mysql_database }}"
+  delegate_to: metadata
+  become: true
+  register: olist_metadata76_mysql_probe
+  changed_when: false
+  failed_when: false
+
+- name: Discover metadata VM Elasticsearch and OpenMetadata status
+  ansible.builtin.script:
+    cmd: "{{ role_path }}/files/step76_probe.py search bigtop-openmetadata"
+  delegate_to: metadata
+  become: true
+  register: olist_metadata76_search_probe
+  changed_when: false
+  failed_when: false
+
+- name: Discover Iceberg REST warehouse on HDFS
+  ansible.builtin.script:
+    cmd: "{{ role_path }}/files/step76_probe.py hdfs {{ olist_metadata76_hdfs_warehouse }}"
+  delegate_to: master
+  become: true
+  become_user: root
+  environment:
+    HADOOP_CONF_DIR: /etc/hadoop/conf
+  register: olist_metadata76_hdfs_probe
+  changed_when: false
+  failed_when: false
+
+- name: Display sanitized Step76 metadata topology and backup feasibility
+  ansible.builtin.debug:
+    msg:
+      catalog_postgres: "{{ olist_metadata76_pg_probe.stdout | default('{}') | from_json }}"
+      openmetadata_mysql: "{{ olist_metadata76_mysql_probe.stdout | default('{}') | from_json }}"
+      openmetadata_search: "{{ olist_metadata76_search_probe.stdout | default('{}') | from_json }}"
+      iceberg_hdfs_warehouse: "{{ olist_metadata76_hdfs_probe.stdout | default('{}') | from_json }}"
+      scope: Read-only inventory. No backup, restore, service restart, or volume modification.
+
+- name: Require all metadata stores discovered and sufficient free space
+  ansible.builtin.assert:
+    that:
+      - olist_metadata76_pg_probe.rc == 0
+      - olist_metadata76_mysql_probe.rc == 0
+      - olist_metadata76_search_probe.rc == 0
+      - olist_metadata76_hdfs_probe.rc == 0
+      - ((olist_metadata76_pg_probe.stdout | from_json).storage.free_mib | int) >= (olist_metadata76_min_free_mib | int)
+      - ((olist_metadata76_mysql_probe.stdout | from_json).storage.free_mib | int) >= (olist_metadata76_min_free_mib | int)
+    fail_msg: >-
+      Step76 discovery incomplete. Do not create backups or attempt restore
+      until the failed component and disk prerequisites are addressed.
+
+- name: Announce safe Step76 discovery completion
+  ansible.builtin.debug:
+    msg: STEP76_PREFLIGHT_PASS

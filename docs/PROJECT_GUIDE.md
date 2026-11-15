@@ -1,6 +1,6 @@
 # Bigtop Data Platform — 상세 아키텍처·운영·Playbook 가이드
 
-> **문서 범위:** 2026-11-14까지 01~72번(64-A/B/C, 65-B 포함). Olist Lakehouse(45~63), Kafka KRaft·CDC(64~65), 보호형 Watchdog·관측·정상 복구 검증(66~69), **Kafka를 Web Console Services에 통합(70)**, **격리 CDC Replay/순서·중복 정합성 검증(71)**, **Iceberg MERGE 직후 장애 복구 테스트 구현(72, 실제 VM 실행 미확인)**까지 포함한다. Step71의 최종 상태 멱등성 확인과 Step72의 미완료 Batch 장애 복구 증명은 구분한다.
+> **문서 범위:** 2026-11-15 현재 01~76번(64-A/B/C, 65-B 포함). Step72 장애 복구 실증, Step74 Watchdog 복구, Step75 Kafka UI, Step76 메타데이터 DR 실습 완료. Step73 실제 Slack 전달은 별도 확인 필요; Step76 전체 플랫폼 DR은 미입증.
 > **빠른 개요:** [프로젝트 README](../README.md)  
 > **이 문서의 목적:** 처음 보는 사람이 왜 이 플랫폼을 구축했는지, 각 서버와 컴포넌트가 왜 필요한지, 어떤 Playbook이 무엇을 바꾸는지, 일상 운영·복구·다음 개발을 어떻게 이어갈지 이해하도록 한다.
 
@@ -20,11 +20,11 @@
 - **64-A Kafka 실측:** Kafka 4.2.2 3노드 KRaft 설치 후 `STEP64A_KAFKA_CLI_JAVA17_OK`·`STEP64A_KAFKA_PRODUCE_CONSUME_PASS`, RF3/ISR3/minISR2 로그 확인. 초기 9093 충돌을 피하려 Controller 포트 19093 적용.
 - **64-B/64-C:** 64-B Kafka 3서비스 active·Metadata Quorum·`STEP64B_PREFLIGHT_PASS` 실제 로그와 모드 변수 수정 이후 사용자 확인. Kafbat UI는 사용자 화면/기능 질문이 있었으나 64-C의 `verify` 성공 로그는 별도 제공되지 않았다. 64-C의 최초 9개 테스트 중 1개는 프로젝트 전역 `.jar/.tar` 존재를 잘못 실패 처리하는 테스트 결함이므로 이 문서 묶음에 수정본을 포함한다.
 - **64 CDC:** `AvailableNow` Kafka→Spark→Iceberg→Trino 통과를 사용자 확인. 520행(유효512/삭제8) 결과.
-- **65~69 Streaming 운영:** 과거 `produce/verify` 별도 Spark 앱은 자원 부족으로 YARN `ACCEPTED` 대기했으나, 65-B 경량 Kafka CLI + Trino/HDFS Verifier 도입 후 521/512/9, Kafka End/Checkpoint=24, Snapshot 불변을 실제 검증했다. Step67 메트릭 수집/Step68 Lag 관측/Step69 안정성 비교도 통과했다. Step71 완료 후 Step65 복구는 사용자 확인. 실제 미완료 Batch 재처리 증빙은 Step72 별도 테스트로 남겨둔다.
+- **65~69 Streaming 운영:** 과거 `produce/verify` 별도 Spark 앱은 자원 부족으로 YARN `ACCEPTED` 대기했으나, 65-B 경량 Kafka CLI + Trino/HDFS Verifier 도입 후 521/512/9, Kafka End/Checkpoint=24, Snapshot 불변을 실제 검증했다. Step67 메트릭 수집/Step68 Lag 관측/Step69 안정성 비교도 통과했다. Step71 완료 후 Step65 복구는 사용자 확인. Step72의 고의 실패 후 재처리 검증은 사용자가 완료했다고 보고했다. 단, 범용 Exactly-once 보장을 뜻하지 않는다.
 - **70 Web Console:** 기존 React/FastAPI를 확장해 Kafka Broker 3개를 **Services**에 추가했다. 별도 Kafka 최상위 메뉴 대신 서비스 상태/Topic/Consumer Group/Streaming Lag 화면을 기존 UI로 통합하고 Kafbat/Grafana를 상세 링크로 유지했다. 초회 배포에서 웹 서비스 재시작 SSH 오류/18090 연결 거부가 있었으나 사용자 최종 정상 반영을 확인했다. Broker 운영 제어는 제공하지 않는다.
 - **71 CDC Replay 정합성:** Step71 별도 Topic·테이블·체크포인트를 생성. `publish` Offset `0→9` 실제 PASS, Spark 초기화 `FINISHED/SUCCEEDED`와 최종 `run/verify/baseline/replay/run/verify_replay` 성공 및 Step65 재기동은 사용자 확인. Replay 최종 3행(유효2/삭제1), Snapshot 불변 검증. Python 캐시 디렉터리 권한 문제는 문법 검사를 파일 쓰기 없는 방식으로 수정.
-- **72 장애 주입/복구:** Spark `foreachBatch`가 Iceberg MERGE 완료 직후, Spark 배치 체크포인트 커밋 전에 실패하도록 하는 **독립** 테스트. 코드·Playbook·`run_step72_once.sh` 및 단위 테스트 준비 완료, **실제 VM에서 `apply/fault/recover/verify` 실행 로그 없음**. 성공으로 간주하지 않는다.
-- **현재 리소스 제약:** 5 VM 환경에서 Spark App은 사실상 1개만 동시에 실행 가능. Step71 초기화 작업은 Step65 스트리밍 점유로 YARN `ACCEPTED` 대기했으며 `FINISHED/SUCCEEDED`를 확인했다. 후속 실험은 Step65 명시적 중지, 격리 Spark 단발성 실행, Step65 체크포인트 그대로 복구 순서.
+- **72 장애 주입/복구:** Spark `foreachBatch`가 Iceberg MERGE 완료 직후, Spark 배치 체크포인트 커밋 전에 실패하도록 하는 **독립** 테스트. 코드·Playbook·`run_step72_once.sh` 및 단위 테스트, 사용자 전체 검증 완료 보고. 세부 실행 로그는 별도 증빙으로 보존한다.
+- **현재 리소스 제약:** 5 VM 환경에서 Spark App은 사실상 1개만 동시에 실행 가능. Step71 YARN `ACCEPTED` 자원 대기 뒤 완료 확인. Step72는 Step65 중지 후 별도 격리 앱으로 실행·검증하고 Step65를 복구했다고 사용자 확인.
 - **아직 별도 확인 필요:** 48번/51번 Timer 활성화, 38/43/44번, Kafka 64-B Timer/메타데이터 주기 실행, Kafbat 64-C 실배포 verify, Gravitino/HDFS/DB 백업 복원.
 - **HA 범위:** 단일 NameNode/ResourceManager 기반의 실습 구성이며 HA를 구축했다고 주장하지 않는다.
 
@@ -801,7 +801,7 @@ curl -fsSG http://127.0.0.1:9090/api/v1/query --data-urlencode 'query=bigtop_oli
 |---|---|---|
 | **70** | `playbooks/70-kafka-web-console.yml`, `roles/web_console_kafka/` | 기존 Web Console(FastAPI/React)의 **Services 그룹**에 Kafka Broker 3개 등록, 조회 전용 `/api` Kafka 라우트 및 Topic/Consumer/Streaming 상태와 Kafbat/Grafana 링크. 최초 apply 중 웹 서비스 재시작 SSH 오류 발생 후 사용자 최종 정상 반영 확인. |
 | **71** | `playbooks/71-cdc-consistency.yml`, `roles/olist_kafka71/` | Topic `bigtop_olist_step71_cdc_v1`, table `shared.olist71_cdc.fact_cdc_consistency_v1`, Checkpoint `.../step71/v1` 사용. 초기 9개 발행 `STEP71_PUBLISH_PASS` 실측, 전체 verify/replay 단계와 Step65 복구는 사용자 완료 확인. |
-| **72** | `playbooks/72-cdc-crash-recovery.yml`, `roles/olist_kafka72/`, `scripts/run_step72_once.sh` | Topic `bigtop_olist_step72_crash_v1`, table `shared.olist72_recovery.fact_cdc_crash_v1`, Checkpoint `.../step72/v1`. 배포/실험 **미확인**. `fault`는 Iceberg 반영 직후 고의 실패를 검사하며 실행 로그가 있어야만 PASS. |
+| **72** | `playbooks/72-cdc-crash-recovery.yml`, `roles/olist_kafka72/`, `scripts/run_step72_once.sh` | Topic `bigtop_olist_step72_crash_v1`, table `shared.olist72_recovery.fact_cdc_crash_v1`, Checkpoint `.../step72/v1`. 사용자 실험 완료 확인. `fault`는 Iceberg 반영 직후 고의 실패를 검사하며 실행 로그가 있어야만 PASS. |
 
 ```bash
 cd ~/bigtop-cluster-ansible
@@ -813,7 +813,7 @@ cd ~/bigtop-cluster-ansible
 # 71: 완료됨. 불변 baseline 및 Replay Guard 때문에 publish/replay/apply를 무작정 재실행하지 말 것.
 # 순서: apply → publish → run → verify → baseline → replay → run → verify_replay
 
-# 72: 다음 세션에서만; Step65 정상 중지+YARN Spark Active 0 확인 후
+# 72: 완료한 실습. 재실행하지 말 것; 과거 실행 순서: Step65 정상 중지+YARN Spark Active 0 확인 후
 # .venv/bin/ansible-playbook -i inventory/hosts.ini \
 #   playbooks/65-kafka-streaming-operations.yml -e olist_kafka65_mode=stop
 # bash scripts/run_step72_once.sh
@@ -822,9 +822,32 @@ cd ~/bigtop-cluster-ansible
 
 **71번 검증 의미:** 동일 9개 이벤트를 다시 발행(Offset 9→18)한 뒤 최종 3행(유효 2, tombstone 1)과 Iceberg Snapshot 불변을 비교한다. `event_seq` 우선 규칙을 통해 동일 PK에 대한 최신 상태를 보존한다. 이는 특정 입력의 **최종 상태 멱등성 검증**이며 범용 Exactly-once 트랜잭션을 의미하지 않는다.
 
-**72번 검증 의미:** 한 배치에서 Iceberg `MERGE`를 성공시킨 다음 Spark 체크포인트 `commits/0`를 기록하기 전에 의도적으로 실패시키고, 동일 체크포인트로 재시작할 때 중복 `MERGE`가 없어야 한다. 증빙 파일 `_AFTER_MERGE_FAULT.json`과 `offsets/0` 존재, `commits/0` 부재, 최종 Snapshot/데이터 SHA-256 동등성이 모두 필요하다. **실제 배포/실행 전이므로 PASS 처리하지 않는다.**
+**72번 검증 의미:** 한 배치에서 Iceberg `MERGE`를 성공시킨 다음 Spark 체크포인트 `commits/0`를 기록하기 전에 의도적으로 실패시키고, 동일 체크포인트로 재시작할 때 중복 `MERGE`가 없어야 한다. 증빙 파일 `_AFTER_MERGE_FAULT.json`과 `offsets/0` 존재, `commits/0` 부재, 최종 Snapshot/데이터 SHA-256 동등성이 모두 필요하다. **사용자가 전체 시험 완료를 보고했으며, 범용 Exactly-once를 증명하는 것은 아니다.**
 
 **운영 제한:** 이 VM에서는 Step65 + Step71/72 Spark 앱을 동시에 유지할 수 없다. 실험 전 Step65 `stop` (Checkpoint 보존), YARN `ACCEPTED` 포함 활성 App 0 확인, 일회성 배치 실행, 작업 종료 후 Step65 `start/status/verify`를 수행한다. YARN `ACCEPTED`는 장애가 아니라 자원 할당 대기 상태일 수 있다. Kafka Topic, HDFS 체크포인트, Iceberg 테이블을 삭제하거나 Replay Guard를 우회하지 않는다.
+
+<!-- DAILY_UPDATE_2026_11_15_START -->
+### 6.10 Step73~76 — 알림·Watchdog·Kafka 운영·메타데이터 DR (2026-11-15)
+
+| 단계 | 소스·실행 진입점 | 완료 조건 및 실제 확인 |
+|---|---|---|
+| **73** | `playbooks/73-alert-delivery.yml`, `roles/olist_kafka73/`, `scripts/run_step73_delivery.sh` | Prometheus, Alertmanager API, Step68 Rule 7개, Receiver `slack-notifications`, route inspect 정상. `STEP73_PREFLIGHT_PASS`, `STEP73_ROUTE_INSPECT_PASS`; 실제 Slack Firing/Resolved 도착은 증빙 미제공 |
+| **74** | `playbooks/74-watchdog-recovery-proof.yml`, `roles/olist_kafka74/`, `scripts/run_step74_watchdog_proof.sh` | Step66의 desired-state·중복 제출 방지·제한적 복구를 사용해 실장애 복구 테스트 사용자 성공 확인. 종료 후 `olist_kafka66_mode=disable` → **자동 Watchdog 비활성화** |
+| **75** | `playbooks/75-kafka-operations-ui.yml`, `roles/web_console_kafka75/`, `roles/web_console/files/kafka_ops75.py`, `KafkaHealthPanel75.jsx` | Services > Kafka에서 `Inspect Kafka cluster` 노출 및 조회 사용자 확인. Broker·ISR·Leaderless·KRaft Quorum은 읽기 전용, Consumer Lag·Kafbat 링크는 기존 API/UI 유지 |
+| **76A** | `playbooks/76-metadata-backup-dr.yml`, `roles/olist_metadata76/` | 실제 Catalog DB·OpenMetadata DB/ES·HDFS 범위 사전 점검 PASS |
+| **76B** | `playbooks/76b-metadata-logical-backup.yml`, `scripts/run_step76_backup.sh` | worker3 PostgreSQL `iceberg_rest56` + metadata Docker MySQL `openmetadata_db` 논리 덤프, SHA-256 검증 PASS |
+| **76C** | `playbooks/76c-metadata-isolated-restore.yml`, `scripts/run_step76_restore.sh` | 원본을 덮어쓰지 않는 임시 DB 복원, 테이블·일부 행 비교 및 임시 자원 정리 PASS |
+| **76 D1~D2** | `playbooks/76d-metadata-dr-preflight.yml`, `playbooks/76d-offhost-copy.yml`, `scripts/run_step76_offhost.sh` | 원격 worker1에 두 DB 덤프 복제, SHA-256 검증. 초기 원격 경로 누락 후 수정/재검증 PASS |
+| **76 D3** | `playbooks/76d-hdfs-metadata-proof.yml`, `scripts/run_step76_hdfs.sh` | HDFS Iceberg `catalog_smoke` 단일 테이블의 메타데이터·데이터 파일을 worker1에 보관, 격리 복원 체크섬 PASS. 전체 Warehouse의 시점 일치 복구와 다름 |
+| **76 D4** | `playbooks/76d-openmetadata-es-snapshot.yml`, `scripts/run_step76_es.sh` | OpenMetadata Elasticsearch Snapshot/단일 인덱스 격리 복원 PASS. `/_cluster/health.status`의 문자열(`yellow`)과 HTTP status 숫자를 혼동한 초기 버그 수정. ES 컨테이너 재생성 가능 작업이므로 일상적으로 재실행하지 말 것 |
+| **76 D5** | `scripts/run_step76_dr_final.sh`, `scripts/step76_dr_final.py`, `docs/76e-dr-final-runbook.md` | DB 백업·임시 복원·원격 복제·HDFS 단일 테이블·ES 스냅샷 **5개 모두 PASS**, `STEP76_D5_LAB_EVIDENCE_PASS`. `STEP76_D5_FULL_DR_NOT_PROVEN`은 의도된 한계 안내 |
+
+**2026-11-15 증빙:** 백업 ID `20261115T082737Z-dc572b3b`, 보존 보고서 `artifacts/step76/dr-final-evidence-20261115T082737Z-dc572b3b.md` (Git 제외). 실습 범위의 복구 검증 PASS이지만 Elasticsearch Snapshot 원격 보관, 전체 Iceberg Warehouse의 동일 시점 복구, 물리 호스트 장애 복구 및 RPO/RTO 실측은 미완료다. 같은 물리 호스트에 있는 다른 VirtualBox VM(`worker1`)으로 복제한 것만으로 독립 DR 사이트를 확보한 것은 아니다.
+
+**DB/컨테이너 아키텍처:** `worker3` PostgreSQL의 Web Console 운영용 DB와 Catalog DB(`iceberg_rest56`)는 용도별로 구분한다. `metadata` VM의 OpenMetadata Server는 별도 **MySQL(`openmetadata_db`) 컨테이너**를 메타데이터 DB로, **Elasticsearch 컨테이너**를 검색 인덱스로 이용한다. Kafbat UI도 컨테이너지만, **Kafka Broker 3개는 Docker가 아닌 `worker1/2/3` systemd**로 실행한다. HDFS Iceberg Metadata/Manifest/Data는 DB 덤프와 별도 복구 대상이다.
+
+**운영 재실행 원칙:** 백업·복제·스냅샷/복구 증빙은 재실행으로 덮어쓰지 않는다. 확인이 필요하면 각 단계의 `verify`만 수행하고, 실패 시에는 원인·원격 경로·SHA-256부터 확인한다. 장애 주입, DB 복원, ES `configure`는 일상 점검 명령이 아니다. 전체 `make validate`는 각 단계에서 반복하지 않고 최종 Git 커밋 전에 한 번 실행한다.
+<!-- DAILY_UPDATE_2026_11_15_END -->
 
 ## 7. 주요 API, Web UI와 서비스 점검
 
@@ -1240,28 +1263,29 @@ sudo journalctl -u bigtop-trino57 -n 100 --no-pager
 | Kafka Kafbat Web UI(64-C) | **사용자 UI 언급, 최종 검증 로그 미제공** | Docker :18081, 읽기 전용; 최초 8/9 테스트 실패는 잘못된 전역 바이너리 검사로 수정본 동봉 |
 | Kafka AvailableNow Iceberg CDC(64) | **사용자 통과 확인** | 520행(유효512/삭제8), 체크포인트 유지, Gold와 분리 |
 | Kafka Spark Iceberg CDC(65/65-B) | **경량 Verify PASS; 재기동 후 데이터 불변 확인** | 521/512/9, Kafka End=Checkpoint=24, Snapshot 7676611440228973561; 별도 YARN 배치 없이 확인. 새 App RUNNING 최종 확인은 별도 |
-| Spark/YARN Watchdog(66) | **구현·테스트 준비; 실제 동작 미확인** | 의도 상태/중복 submit 방지/타이머 opt-in 설계. enable 여부·자동 복구 테스트 기록 미제공 |
+| Spark/YARN Watchdog(66) | **Step74 복구 검증 성공** | 시험 완료 후 `olist_kafka66_mode=disable`, 상시 자동 재시작 비활성화 |
 | Kafka/Spark Progress(67) | **설치·Timer·Prometheus PASS** | master/worker3 oneshot PASS, 60초 `active/waiting`, 양쪽 collector_success=1 |
 | Streaming Lag/Alerts(68) | **사용자 Apply/Verify 확인** | Recording/Alert Rule + Grafana 설치 보고, Offset Lag=0. Alertmanager 전달 실증 별도 |
 | Recovery Evidence(69) | **baseline/after/compare PASS** | stop/start 후 24→24, Batch 2→2, Iceberg 521/512/9 Snapshot 불변. 미완료 Batch 재처리 미검증 |
 | Kafka Web Console 통합(70) | **사용자 UI 정상 반영 확인** | Services 내 Broker 3개를 일반 서비스처럼 등록하고 Topic/Consumer/Streaming 조회 및 Kafbat 링크; 최초 apply 후 Handler 연결 실패/18090 거부가 있었으나 이후 정상 복구 확인 |
 | CDC Consistency·Replay(71) | **사용자 전체 PASS 확인** | 초기 Kafka 9개 발행 `0→9` 실측, I/U/D·중복·역순/Replay 최종 3행(유효2/삭제1)·동일 Snapshot 검증; Step65 스트리밍 복구 사용자 확인 |
-| 장애 커밋 경계 복구 실험(72) | **코드·Playbook·실행 SH 준비, VM 실행 미확인** | 별도 Topic/Checkpoint/테이블에서 Iceberg MERGE 완료 후 Spark Checkpoint Commit 전 의도 실패 → 재실행 비교; `fault/verify` 결과 아직 없음 |
+| 장애 커밋 경계 복구 실험(72) | **사용자 검증 완료 확인** | Step65 중지·일회성 실험·기존 Checkpoint 복구 완료 보고. 실습 시나리오 범위 |
 
 | 범용 Spark OpenLineage Listener / 컬럼 계보 | **미구축** | 51번 파일 단위 계보와 구분 |
 | 내부 사용자별 Catalog/Trino RBAC·강제 승인 후 조회 | **미구축** | REST/Trino는 구축됐지만 BI 소비자 접근 강제, multi-table 공개 정책은 아직 없음 |
 | 48 Scheduler/51 Reconcile Timer 주기 실행 | **상태 별도 확인** | 기본 비활성; 설치·수동 실행과 주기 자동 실행은 다름 |
-| OpenMetadata 전용 백업·복원 | 미구축 | 41번 Docker 볼륨 영속화만 확인 |
+| OpenMetadata 전용 백업·복원 | **Step76 실습 검증 PASS** | Docker MySQL 덤프·임시 DB 복원 및 Elasticsearch Snapshot·격리 복원. ES off-host 미완료 |
 | REST Iceberg OpenMetadata/Grafana 통합(61) | **사용자 완료 확인** | 8 Iceberg 자산·8 계보 관계 및 Gold 릴리스 관측; Timer 주기 실행은 별도 점검 |
-| Gravitino Catalog DB·Iceberg HDFS Metadata 백업·복구 | **운영 검증 필요** | Web Console PostgreSQL 논리 백업 대상과 구분 |
+| Gravitino Catalog DB·Iceberg HDFS Metadata 백업·복구 | **Step76 부분 범위 PASS** | `iceberg_rest56` PostgreSQL 백업·복원·worker1 사본 및 HDFS 단일 smoke 테이블 검증. 전체 Warehouse DR 별도 |
 | 실운영 인증·TLS·RBAC | 미구축 또는 보강 필요 | 실습용 Basic Auth·Bot 토큰 중심 |
 
-### 12.2 다음 세션 우선순위 (Step70·71 완료, Step72 미실행)
+### 12.2 다음 세션 우선순위 (Step76 LAB 완료, Step77 대기)
 
-1. **Step72 통제된 장애 복구 실험 실행:** Step65 스트리밍 정상 종료 → 활성 Spark App 0 확인 → Step72 `preflight/apply/publish/fault/inspect_fault/recover/verify` 순차 실행 → `STEP72_ALL_PHASES_PASS` 및 증빙 보존 → Step65 `start/status(RUNNING)/verify`. **아직 실제 VM 결과 없음**.
-2. **Kafka Services 운영 검증 보강:** Step70 UI가 실제 Services에 통합됐으므로 Kafka Broker 3개 상태, Topic/Consumer Group 조회, Kafbat 및 Grafana 링크, 기존 서비스별 권한/관리 기능의 일관성을 운영 관점에서 보강한다.
-3. **66/68 운영 알림·복구 검증:** Watchdog 활성화 상태와 통제된 자동 복구·Alertmanager receiver 전달을 별도 확인한다.
-4. **클러스터 자원·거버넌스·백업:** Spark App 동시 실행 병목, YARN 큐, Iceberg/Gravitino/OpenMetadata 백업 복원, 내부 RBAC/감사, 38/43/44/48/51 미검증 항목을 정리한다.
+1. **Step77 인증/권한 현황 수집:** Web Console, Trino, Iceberg REST Catalog, OpenMetadata를 구분하고 현재 인증·권한·Audit 적용 지점을 점검한다. 새 서비스를 설치하기보다 기존 인증정보 및 최소권한 구조부터 설계한다.
+2. **Step73 실전 전달 증빙 보강:** Alertmanager `slack-notifications` 경로는 확인했으나 실제 Slack 메시지 Firing/Resolved 도착은 미확인. 임시 테스트만 별도 승인 후 수행한다.
+3. **Step76 운영 DR 후속:** Elasticsearch Snapshot 원격 백업, 전체 Iceberg Warehouse 일관 복구, 실제 장애 시 RPO/RTO 측정. 현재 `STEP76_D5_LAB_EVIDENCE_PASS`는 이 범위까지 증명하지 않는다.
+4. **정리:** 38/43/44, 48/51 Timer 등 오래된 미확인 이력; 소형 VM의 Spark 단일 앱 자원 제약, 문서/테스트·권한 경계 개선.
+
 
 ## 13. 문서 유지보수 규칙
 
@@ -1301,4 +1325,4 @@ sudo journalctl -u bigtop-trino57 -n 100 --no-pager
 
 ---
 
-**요약(2026-11-08):** 5대 VM 내부망 기반 HDFS/YARN/Spark, Iceberg/Gravitino/Trino, Gold WAP, OpenMetadata/Prometheus/Grafana, Kafka 4.2.2 KRaft를 통합하고 Step65 경량 Kafka 발행/검증 및 데이터 정합성(521/512/9)을 확인했다. Step67 수집기 60초 Timer/Prometheus, Step68 Lag/Alert Rule 사용자 적용 확인, Step69 정상 종료·재시작 후 Offset/Checkpoint/Trino 안정성 비교까지 진행했다. **새 App `RUNNING` 상태, Step66 자동 복구와 Step68 실제 알림 전달, 미완료 Batch 재처리 및 재차 Replay 멱등성은 다음 단계 확인 대상**이다.
+**요약(2026-11-15):** Step72·74·75 사용자 검증 완료, Step73 Alertmanager 라우팅 확인(실제 Slack 수신 별도 확인), Step76 DB 백업/격리 복원·원격 사본·HDFS 단일 테이블·Elasticsearch Snapshot 및 D5 통합 5/5 PASS. 전체 플랫폼 DR은 미입증. 다음 Step77 인증·권한 점검.

@@ -1,0 +1,25 @@
+---
+- name: Require non-disruptive Step73 discovery mode
+  ansible.builtin.assert:
+    that:
+      - olist_kafka73_mode == 'preflight'
+    fail_msg: Step73 preflight requested but mode value does not match.
+
+- name: Inspect live Prometheus and Alertmanager APIs without changing state
+  ansible.builtin.script: >-
+    {{ role_path }}/files/step73_discover.py
+    --prometheus {{ olist_kafka73_prometheus_url | quote }}
+    --alertmanager {{ olist_kafka73_alertmanager_url | quote }}
+  register: olist_kafka73_probe
+  changed_when: false
+  failed_when: false
+
+- name: Print sanitized Step73 preflight report
+  ansible.builtin.debug:
+    var: olist_kafka73_probe.stdout_lines
+
+- name: Require discovered Step68 rules and Alertmanager routing infrastructure
+  ansible.builtin.assert:
+    that:
+      - olist_kafka73_probe.rc == 0
+    fail_msg: Step73 discovery has blockers; use the sanitized report before attempting alert injection.

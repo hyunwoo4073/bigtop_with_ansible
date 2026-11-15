@@ -1,0 +1,7 @@
+---
+- name: Step76 D4 OpenMetadata Elasticsearch snapshot and safe restore proof
+  hosts: metadata
+  gather_facts: false
+  become: true
+  roles:
+    - role: olist_metadata76_es

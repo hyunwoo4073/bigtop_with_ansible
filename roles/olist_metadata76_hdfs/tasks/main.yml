@@ -1,0 +1,26 @@
+---
+- name: Require fixed scope and known D3 phase
+  ansible.builtin.assert:
+    that:
+      - olist_metadata76_hdfs_mode in ['preflight', 'capture', 'copy', 'restore', 'verify']
+      - olist_metadata76_hdfs_backup_id is match('^[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}$')
+    fail_msg: D3 accepts only a fixed smoke table and a valid Step76 backup identity.
+
+- name: Orchestrate HDFS smoke-table recovery proof from worker3
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/step76_hdfs_offhost.py"
+      - "{{ olist_metadata76_hdfs_mode }}"
+      - "{{ olist_metadata76_hdfs_backup_id }}"
+      - "{{ role_path }}/files/step76_hdfs_remote.py"
+  environment:
+    STEP76_ALLOW_HDFS_CAPTURE: "{{ lookup('env', 'STEP76_ALLOW_HDFS_CAPTURE') }}"
+    STEP76_ALLOW_HDFS_COPY: "{{ lookup('env', 'STEP76_ALLOW_HDFS_COPY') }}"
+    STEP76_ALLOW_HDFS_RESTORE: "{{ lookup('env', 'STEP76_ALLOW_HDFS_RESTORE') }}"
+  register: olist_metadata76_hdfs_result
+  changed_when: olist_metadata76_hdfs_mode in ['capture', 'copy', 'restore']
+
+- name: Display sanitized Step76 D3 proof
+  ansible.builtin.debug:
+    msg: "{{ olist_metadata76_hdfs_result.stdout | from_json }}"

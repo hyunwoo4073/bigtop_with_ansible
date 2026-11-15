@@ -1,0 +1,24 @@
+---
+- name: Require supported Step75 mode
+  ansible.builtin.assert:
+    that:
+      - web_console_kafka75_mode in ['plan', 'preflight', 'apply', 'verify']
+
+- name: Explain Step75 read-only integration
+  ansible.builtin.debug:
+    msg: >-
+      Step75 adds Kafka metadata health via the existing Web Console.
+      Only the Web Console is restarted during apply; Kafka/Spark are untouched.
+  when: web_console_kafka75_mode == 'plan'
+
+- name: Preflight existing Step70 installation
+  ansible.builtin.include_tasks: preflight.yml
+  when: web_console_kafka75_mode in ['preflight', 'apply']
+
+- name: Apply only Step75 Kafka UI and router files
+  ansible.builtin.include_tasks: apply.yml
+  when: web_console_kafka75_mode == 'apply'
+
+- name: Verify Step75 read-only APIs and authentication boundary
+  ansible.builtin.include_tasks: verify.yml
+  when: web_console_kafka75_mode == 'verify'

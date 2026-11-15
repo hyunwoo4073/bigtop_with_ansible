@@ -187,3 +187,8 @@ def kafka_group_lag(group_name: str):
     return {'ok': True, 'read_only': True, 'group': group_name,
             'partitions': entries[:MAX_ITEMS], 'truncated': len(entries) > MAX_ITEMS,
             'total_lag': total_lag}
+
+
+# Step75: only add a nested read-only router; retain all Step70 endpoints.
+from kafka_ops75 import router as kafka_ops75_router
+router.include_router(kafka_ops75_router)

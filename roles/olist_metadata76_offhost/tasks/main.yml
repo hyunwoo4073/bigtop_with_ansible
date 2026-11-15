@@ -1,0 +1,27 @@
+---
+- name: Restrict Step76 offhost copy to existing protected backup sets
+  ansible.builtin.assert:
+    that:
+      - olist_metadata76_offhost_mode in ['preflight', 'copy', 'verify']
+      - olist_metadata76_offhost_backup_id is match('^[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}$')
+      - olist_metadata76_offhost_target_host in ['worker1', 'worker2']
+    fail_msg: Only known Step76 backup identities and offhost worker nodes are allowed.
+
+- name: Stream existing protected backup sets through SSH without local disk staging
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/step76d_offhost_copy.py"
+      - "{{ olist_metadata76_offhost_mode }}"
+      - "{{ olist_metadata76_offhost_backup_id }}"
+      - "{{ olist_metadata76_offhost_target_host }}"
+      - "{{ playbook_dir }}/../roles/olist_metadata76_offhost/files/step76_offhost_remote.py"
+  environment:
+    STEP76_ALLOW_OFFHOST_COPY: "{{ lookup('env', 'STEP76_ALLOW_OFFHOST_COPY') | default('', true) }}"
+  register: olist_metadata76_offhost_result
+  changed_when: olist_metadata76_offhost_mode == 'copy'
+  no_log: false
+
+- name: Verify Step76 offhost backup result and report without secret contents
+  ansible.builtin.debug:
+    msg: "{{ olist_metadata76_offhost_result.stdout | from_json }}"

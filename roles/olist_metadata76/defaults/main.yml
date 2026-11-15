@@ -1,0 +1,6 @@
+---
+olist_metadata76_mode: preflight
+olist_metadata76_pg_database: iceberg_rest56
+olist_metadata76_mysql_database: openmetadata_db
+olist_metadata76_hdfs_warehouse: /data/olist/iceberg-rest
+olist_metadata76_min_free_mib: 1024
