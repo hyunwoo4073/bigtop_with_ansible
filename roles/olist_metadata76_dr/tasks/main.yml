@@ -1,0 +1,89 @@
+---
+- name: Require explicit non-destructive Phase D scope and backup identity
+  ansible.builtin.assert:
+    that:
+      - olist_metadata76_dr_mode == 'preflight'
+      - olist_metadata76_dr_backup_id is match('^[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}$')
+      - olist_metadata76_dr_target_host in ['worker1', 'worker2']
+      - olist_metadata76_dr_hdfs_warehouse == '/data/olist/iceberg-rest'
+      - (olist_metadata76_dr_min_free_mib | int) >= 1024
+    fail_msg: Step76 Phase D discovery accepts fixed backup and warehouse paths only.
+
+- name: Verify existing protected PostgreSQL dump manifest and checksum on worker3
+  ansible.builtin.script:
+    cmd: >-
+      {{ role_path }}/files/step76_dr_probe.py source pg
+      {{ olist_metadata76_dr_backup_id }}
+  delegate_to: worker3
+  become: true
+  become_user: root
+  register: olist_metadata76_dr_pg_report
+  changed_when: false
+
+- name: Verify existing protected OpenMetadata MySQL dump manifest and checksum on metadata
+  ansible.builtin.script:
+    cmd: >-
+      {{ role_path }}/files/step76_dr_probe.py source mysql
+      {{ olist_metadata76_dr_backup_id }}
+  delegate_to: metadata
+  become: true
+  become_user: root
+  register: olist_metadata76_dr_mysql_report
+  changed_when: false
+
+- name: Inspect Elasticsearch snapshot repositories without changing search state
+  ansible.builtin.script:
+    cmd: "{{ role_path }}/files/step76_dr_probe.py elasticsearch inspect"
+  delegate_to: metadata
+  become: true
+  become_user: root
+  register: olist_metadata76_dr_es_report
+  changed_when: false
+
+- name: Inspect HDFS warehouse metadata directory scope as Hadoop user
+  ansible.builtin.script:
+    cmd: >-
+      {{ role_path }}/files/step76_dr_probe.py hdfs
+      {{ olist_metadata76_dr_hdfs_warehouse }}
+  delegate_to: master
+  become: true
+  become_user: root
+  register: olist_metadata76_dr_hdfs_report
+  changed_when: false
+
+- name: Inspect off-host target disk and available tools
+  ansible.builtin.script:
+    cmd: >-
+      {{ role_path }}/files/step76_dr_probe.py target
+      {{ olist_metadata76_dr_min_free_mib }}
+  delegate_to: "{{ olist_metadata76_dr_target_host }}"
+  become: true
+  become_user: root
+  register: olist_metadata76_dr_target_report
+  changed_when: false
+
+- name: Require all inventories to be readable and backup identities consistent
+  ansible.builtin.assert:
+    that:
+      - (olist_metadata76_dr_pg_report.stdout | from_json).ok | bool
+      - (olist_metadata76_dr_mysql_report.stdout | from_json).ok | bool
+      - (olist_metadata76_dr_es_report.stdout | from_json).ok | bool
+      - (olist_metadata76_dr_hdfs_report.stdout | from_json).ok | bool
+      - (olist_metadata76_dr_target_report.stdout | from_json).ok | bool
+      - (olist_metadata76_dr_pg_report.stdout | from_json).backup_id == olist_metadata76_dr_backup_id
+      - (olist_metadata76_dr_mysql_report.stdout | from_json).backup_id == olist_metadata76_dr_backup_id
+    fail_msg: Phase D inventory incomplete. No files copied or service state changed.
+
+- name: Report sanitized Phase D readiness inventory
+  ansible.builtin.debug:
+    msg:
+      postgresql: "{{ olist_metadata76_dr_pg_report.stdout | from_json }}"
+      openmetadata_mysql: "{{ olist_metadata76_dr_mysql_report.stdout | from_json }}"
+      elasticsearch: "{{ olist_metadata76_dr_es_report.stdout | from_json }}"
+      hdfs: "{{ olist_metadata76_dr_hdfs_report.stdout | from_json }}"
+      offhost_target: "{{ olist_metadata76_dr_target_report.stdout | from_json }}"
+      note: >-
+        This is inventory only. No ES snapshot, HDFS archive, off-host copy,
+        service restart, or restore has occurred. A VM on the same physical host
+        is not an independent disaster-recovery site.
+      result: STEP76_DR_PREFLIGHT_PASS

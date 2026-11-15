@@ -1,0 +1,17 @@
+# Managed only by Step73 synthetic alert test. Expires automatically.
+groups:
+  - name: bigtop-olist-step73-synthetic
+    interval: 15s
+    rules:
+      - alert: BigtopOlistStep73DeliveryProbe
+        expr: vector(time()) < {{ olist_kafka73_probe_expires_at | int }}
+        for: 0m
+        labels:
+          step73_probe: "true"
+          step73_probe_id: "{{ olist_kafka73_probe_id }}"
+{% for key, val in olist_kafka73_probe_labels.items() %}
+          {{ key }}: {{ val | to_json }}
+{% endfor %}
+        annotations:
+          summary: "Step73 synthetic alert delivery test"
+          description: "Safe, automatically expiring lab alert; no production workload failure"

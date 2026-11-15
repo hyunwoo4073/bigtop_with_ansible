@@ -1,0 +1,7 @@
+---
+- name: Step76 read-only inventory for catalog metadata backup and DR
+  hosts: worker3
+  gather_facts: false
+  become: false
+  roles:
+    - olist_metadata76

@@ -1,0 +1,50 @@
+---
+- name: Retrieve Step75 Kafka cluster health metadata
+  ansible.builtin.uri:
+    url: '{{ web_console_kafka75_internal_url }}/api/ops/kafka/cluster-health'
+    status_code: 200
+    return_content: true
+    timeout: 100
+  register: web_console_kafka75_health
+  changed_when: false
+
+- name: Require real Kafka topic ISR and quorum metadata
+  ansible.builtin.assert:
+    that:
+      - web_console_kafka75_health.json.read_only | bool
+      - web_console_kafka75_health.json.ok | bool
+      - web_console_kafka75_health.json.partition_health.parse_complete | bool
+      - web_console_kafka75_health.json.quorum.parse_complete | bool
+      - web_console_kafka75_health.json.broker_metadata.parse_complete | bool
+    fail_msg: 'Step75 metadata incomplete; inspect json.errors before proceeding'
+
+- name: Confirm Step70 group lag endpoint still serves read-only data
+  ansible.builtin.uri:
+    url: '{{ web_console_kafka75_internal_url }}/api/ops/kafka/groups'
+    status_code: 200
+    return_content: true
+    timeout: 30
+  register: web_console_kafka75_groups
+  changed_when: false
+
+- name: Require previous group API intact
+  ansible.builtin.assert:
+    that:
+      - web_console_kafka75_groups.json.read_only | bool
+
+- name: Confirm anonymous public request is still rejected
+  ansible.builtin.uri:
+    url: '{{ web_console_kafka75_public_url }}/api/ops/kafka/cluster-health'
+    status_code: 401
+    timeout: 12
+  changed_when: false
+
+- name: Show Step75 verification result
+  ansible.builtin.debug:
+    msg:
+      - 'STEP75_VERIFY_PASS'
+      - >-
+        brokers={{ web_console_kafka75_health.json.broker_metadata.broker_count }}
+        partitions={{ web_console_kafka75_health.json.partition_health.partition_count }}
+        under_replicated={{ web_console_kafka75_health.json.partition_health.under_replicated_count }}
+        no_leader={{ web_console_kafka75_health.json.partition_health.leader_missing_count }}

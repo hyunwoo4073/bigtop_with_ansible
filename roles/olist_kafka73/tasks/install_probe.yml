@@ -1,0 +1,97 @@
+---
+- name: Require bounded and labeled synthetic alert probe
+  ansible.builtin.assert:
+    that:
+      - olist_kafka73_probe_id is match('^p[0-9]{10}$')
+      - (olist_kafka73_probe_expires_at | int) > ((lookup('pipe', 'date +%s') | int) + 120)
+      - (olist_kafka73_probe_expires_at | int) < ((lookup('pipe', 'date +%s') | int) + 1800)
+      - olist_kafka73_probe_labels is mapping
+      - "'step73_probe' not in olist_kafka73_probe_labels"
+      - "'step73_probe_id' not in olist_kafka73_probe_labels"
+      - "'alertname' not in olist_kafka73_probe_labels"
+    fail_msg: Invalid probe identity, expiry, or labels.
+
+- name: Confirm test rule path does not already exist
+  ansible.builtin.stat:
+    path: "{{ olist_kafka73_probe_rule_file }}"
+  become: true
+  register: olist_kafka73_existing_rule
+
+- name: Prevent replacing any existing rule file
+  ansible.builtin.assert:
+    that:
+      - not olist_kafka73_existing_rule.stat.exists
+    fail_msg: Probe file already exists; inspect and remove only the previous Step73 probe first.
+
+- name: Read existing Prometheus config privately
+  ansible.builtin.slurp:
+    src: "{{ olist_kafka73_prometheus_config }}"
+  become: true
+  register: olist_kafka73_prom_cfg
+  no_log: true
+
+- name: Confirm existing glob loads Step73 rule path
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - 'import fnmatch,json,sys; sys.exit(0 if any(fnmatch.fnmatchcase(sys.argv[1], pat) for pat in json.loads(sys.argv[2])) else 1)'
+      - "{{ olist_kafka73_probe_rule_file }}"
+      - "{{ ((olist_kafka73_prom_cfg.content | b64decode | from_yaml).rule_files | default([], true)) | to_json }}"
+  changed_when: false
+
+- name: Create staging file for syntax validation
+  ansible.builtin.tempfile:
+    state: file
+    suffix: .step73.yml
+  become: true
+  register: olist_kafka73_staging
+
+- name: Render, validate and install expiring test alert
+  block:
+    - name: Render dedicated synthetic alert into temporary file
+      ansible.builtin.template:
+        src: step73-probe-rules.yml.j2
+        dest: "{{ olist_kafka73_staging.path }}"
+        owner: root
+        group: root
+        mode: '0600'
+      become: true
+
+    - name: Check synthetic alert syntax before installation
+      ansible.builtin.command:
+        argv: [/usr/bin/promtool, check, rules, "{{ olist_kafka73_staging.path }}"]
+      become: true
+      changed_when: false
+
+    - name: Install only Step73 synthetic alert file
+      ansible.builtin.copy:
+        src: "{{ olist_kafka73_staging.path }}"
+        remote_src: true
+        dest: "{{ olist_kafka73_probe_rule_file }}"
+        owner: root
+        group: root
+        mode: '0644'
+      become: true
+
+    - name: Validate full Prometheus configuration
+      ansible.builtin.command:
+        argv: [/usr/bin/promtool, check, config, "{{ olist_kafka73_prometheus_config }}"]
+      become: true
+      changed_when: false
+
+    - name: Reload existing Prometheus without restarting it
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, reload, prometheus]
+      become: true
+      changed_when: true
+  always:
+    - name: Delete temporary Step73 staging file
+      ansible.builtin.file:
+        path: "{{ olist_kafka73_staging.path }}"
+        state: absent
+      become: true
+
+- name: Report synthetic probe installation
+  ansible.builtin.debug:
+    msg: "STEP73_PROBE_INSTALLED: expiry={{ olist_kafka73_probe_expires_at }}"

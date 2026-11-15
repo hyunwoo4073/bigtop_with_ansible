@@ -1,0 +1,6 @@
+---
+- name: Step76 D3 HDFS Iceberg smoke-table off-host recovery proof
+  hosts: worker3
+  gather_facts: false
+  roles:
+    - olist_metadata76_hdfs

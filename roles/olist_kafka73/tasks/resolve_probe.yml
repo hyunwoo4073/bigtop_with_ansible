@@ -1,0 +1,54 @@
+---
+- name: Verify Step73 probe file exists before resolution
+  ansible.builtin.stat:
+    path: "{{ olist_kafka73_probe_rule_file }}"
+  register: olist_kafka73_resolve_stat
+  become: true
+
+- name: Require owned temporary probe before resolution
+  ansible.builtin.assert:
+    that:
+      - olist_kafka73_resolve_stat.stat.exists
+
+- name: Read existing temporary probe privately
+  ansible.builtin.slurp:
+    src: "{{ olist_kafka73_probe_rule_file }}"
+  register: olist_kafka73_resolve_content
+  become: true
+  no_log: true
+
+- name: Refuse to modify an unexpected Prometheus file
+  ansible.builtin.assert:
+    that:
+      - "'Managed only by Step73 synthetic alert test' in (olist_kafka73_resolve_content.content | b64decode)"
+      - "'BigtopOlistStep73DeliveryProbe' in (olist_kafka73_resolve_content.content | b64decode)"
+
+- name: Render an always-inactive expression without changing alert identity
+  ansible.builtin.replace:
+    path: "{{ olist_kafka73_probe_rule_file }}"
+    regexp: '^        expr: vector\(time\(\)\) < [0-9]+$'
+    replace: '        expr: vector(0) > 1'
+  register: olist_kafka73_resolve_replace
+  become: true
+
+- name: Require actual transition to inactive expression
+  ansible.builtin.assert:
+    that:
+      - olist_kafka73_resolve_replace.changed
+    fail_msg: Probe expression already changed or unexpected; use cleanup after inspection.
+
+- name: Check Prometheus configuration following synthetic resolution
+  ansible.builtin.command:
+    argv: [/usr/bin/promtool, check, config, "{{ olist_kafka73_prometheus_config }}"]
+  become: true
+  changed_when: false
+
+- name: Reload Prometheus so it sends resolved state to Alertmanager
+  ansible.builtin.command:
+    argv: [/usr/bin/systemctl, reload, prometheus]
+  become: true
+  changed_when: true
+
+- name: Report synthetic alert resolution request
+  ansible.builtin.debug:
+    msg: STEP73_RESOLVE_REQUESTED

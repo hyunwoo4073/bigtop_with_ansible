@@ -1,0 +1,45 @@
+---
+- name: Check for dedicated Step73 rule file
+  ansible.builtin.stat:
+    path: "{{ olist_kafka73_probe_rule_file }}"
+  become: true
+  register: olist_kafka73_remove_stat
+
+- name: Read dedicated rule file before deleting it
+  ansible.builtin.slurp:
+    src: "{{ olist_kafka73_probe_rule_file }}"
+  become: true
+  register: olist_kafka73_remove_content
+  when: olist_kafka73_remove_stat.stat.exists
+  no_log: true
+
+- name: Refuse to remove unexpected configuration
+  ansible.builtin.assert:
+    that:
+      - "'Managed only by Step73 synthetic alert test' in (olist_kafka73_remove_content.content | b64decode)"
+      - "'BigtopOlistStep73DeliveryProbe' in (olist_kafka73_remove_content.content | b64decode)"
+  when: olist_kafka73_remove_stat.stat.exists
+
+- name: Delete only owned temporary probe rule
+  ansible.builtin.file:
+    path: "{{ olist_kafka73_probe_rule_file }}"
+    state: absent
+  become: true
+  register: olist_kafka73_deleted
+
+- name: Validate main Prometheus config after cleanup
+  ansible.builtin.command:
+    argv: [/usr/bin/promtool, check, config, "{{ olist_kafka73_prometheus_config }}"]
+  become: true
+  changed_when: false
+
+- name: Reload Prometheus to resolve synthetic test alert
+  ansible.builtin.command:
+    argv: [/usr/bin/systemctl, reload, prometheus]
+  become: true
+  changed_when: true
+  when: olist_kafka73_deleted.changed
+
+- name: Confirm dedicated Step73 rule cleanup
+  ansible.builtin.debug:
+    msg: STEP73_PROBE_CLEANUP_PASS

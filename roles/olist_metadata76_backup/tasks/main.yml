@@ -1,0 +1,55 @@
+---
+- name: Require explicit Step76 phase B mode and safe backup identity
+  ansible.builtin.assert:
+    that:
+      - olist_metadata76_backup_mode in ['backup', 'verify']
+      - olist_metadata76_backup_id is match('^[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}$')
+      - olist_metadata76_backup_pg_database == 'iceberg_rest56'
+      - olist_metadata76_backup_mysql_database == 'openmetadata_db'
+      - olist_metadata76_backup_root == '/var/backups/bigtop-step76'
+    fail_msg: Step76 phase B accepts only fixed production source databases and root-owned backup storage.
+
+- name: Create or verify protected worker3 PostgreSQL logical backup
+  ansible.builtin.script:
+    cmd: >-
+      {{ role_path }}/files/step76_logical_backup.py
+      {{ olist_metadata76_backup_mode }} pg
+      {{ olist_metadata76_backup_id }}
+      {{ olist_metadata76_backup_pg_database }}
+  delegate_to: worker3
+  become: true
+  become_user: root
+  register: olist_metadata76_backup_pg_result
+  changed_when: olist_metadata76_backup_mode == 'backup'
+
+- name: Create or verify protected metadata-node OpenMetadata MySQL logical backup
+  ansible.builtin.script:
+    cmd: >-
+      {{ role_path }}/files/step76_logical_backup.py
+      {{ olist_metadata76_backup_mode }} mysql
+      {{ olist_metadata76_backup_id }}
+      {{ olist_metadata76_backup_mysql_database }}
+  delegate_to: metadata
+  become: true
+  become_user: root
+  register: olist_metadata76_backup_mysql_result
+  changed_when: olist_metadata76_backup_mode == 'backup'
+
+- name: Require both backup tools to return matching and verified manifests
+  ansible.builtin.assert:
+    that:
+      - (olist_metadata76_backup_pg_result.stdout | from_json).ok | bool
+      - (olist_metadata76_backup_mysql_result.stdout | from_json).ok | bool
+      - (olist_metadata76_backup_pg_result.stdout | from_json).backup_id == olist_metadata76_backup_id
+      - (olist_metadata76_backup_mysql_result.stdout | from_json).backup_id == olist_metadata76_backup_id
+    fail_msg: Incomplete backup. Do not treat Step76 as complete or attempt restore.
+
+- name: Report protected Step76 phase B results without credentials or dump contents
+  ansible.builtin.debug:
+    msg:
+      postgres: "{{ olist_metadata76_backup_pg_result.stdout | from_json }}"
+      openmetadata_mysql: "{{ olist_metadata76_backup_mysql_result.stdout | from_json }}"
+      note: >-
+        Backup sets remain on their original hosts only. HDFS data and Iceberg metadata files,
+        Elasticsearch search index, and off-host DR copies are not protected by this phase.
+      result: "STEP76_LOGICAL_{{ olist_metadata76_backup_mode | upper }}_PASS"

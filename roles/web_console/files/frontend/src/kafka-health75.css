@@ -1,0 +1,13 @@
+.k75-panel { display: grid; gap: 12px; }
+.k75-panel h4 { margin: 8px 0; }
+.k75-cards { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; }
+.k75-metric { border: 1px solid var(--border); border-radius: 7px; padding: 12px; display: grid; gap: 6px; min-width: 0; }
+.k75-metric small, .k75-metric span { color: var(--muted); font-size: 12px; }
+.k75-metric strong { font-size: 24px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.k75-note { font-size: 12px; }
+.k75-columns { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.k75-mini-list { display: grid; gap: 7px; }
+.k75-mini-list > div { display: flex; justify-content: space-between; align-items: start; gap: 8px; border-bottom: 1px solid var(--border); padding: 7px 0; }
+.k75-mini-list code { overflow-wrap: anywhere; text-align: right; }
+@media (max-width: 1000px) { .k75-cards { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 650px) { .k75-cards, .k75-columns { grid-template-columns: 1fr; } }

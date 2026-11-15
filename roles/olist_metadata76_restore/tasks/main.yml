@@ -1,0 +1,61 @@
+---
+- name: Require explicitly bounded Step76 phase C inputs
+  ansible.builtin.assert:
+    that:
+      - olist_metadata76_restore_mode in ['preflight', 'restore', 'verify']
+      - olist_metadata76_restore_component in ['both', 'pg', 'mysql']
+      - olist_metadata76_restore_id is match('^[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}$')
+      - olist_metadata76_restore_backup_root == '/var/backups/bigtop-step76'
+    fail_msg: Invalid Step76 restore selection. Never target production databases.
+
+- name: Verify or restore PostgreSQL catalog backup in isolated scratch database
+  ansible.builtin.script:
+    cmd: >-
+      {{ role_path }}/files/step76_isolated_restore.py
+      {{ olist_metadata76_restore_mode }} pg {{ olist_metadata76_restore_id }}
+  delegate_to: worker3
+  become: true
+  become_user: root
+  register: olist_metadata76_restore_pg_result
+  changed_when: olist_metadata76_restore_mode == 'restore'
+  when: olist_metadata76_restore_component in ['both', 'pg']
+
+- name: Verify or restore OpenMetadata MySQL backup in isolated scratch database
+  ansible.builtin.script:
+    cmd: >-
+      {{ role_path }}/files/step76_isolated_restore.py
+      {{ olist_metadata76_restore_mode }} mysql {{ olist_metadata76_restore_id }}
+  delegate_to: metadata
+  become: true
+  become_user: root
+  register: olist_metadata76_restore_mysql_result
+  changed_when: olist_metadata76_restore_mode == 'restore'
+  when: olist_metadata76_restore_component in ['both', 'mysql']
+
+- name: Require PostgreSQL restore proof result
+  ansible.builtin.assert:
+    that:
+      - (olist_metadata76_restore_pg_result.stdout | from_json).ok | bool
+      - (olist_metadata76_restore_pg_result.stdout | from_json).backup_id == olist_metadata76_restore_id
+  when: olist_metadata76_restore_component in ['both', 'pg']
+
+- name: Require MySQL restore proof result
+  ansible.builtin.assert:
+    that:
+      - (olist_metadata76_restore_mysql_result.stdout | from_json).ok | bool
+      - (olist_metadata76_restore_mysql_result.stdout | from_json).backup_id == olist_metadata76_restore_id
+  when: olist_metadata76_restore_component in ['both', 'mysql']
+
+- name: Report sanitized Step76 phase C restore evidence
+  ansible.builtin.debug:
+    msg:
+      postgres: >-
+        {{ (olist_metadata76_restore_pg_result.stdout | from_json)
+        if olist_metadata76_restore_component in ['both', 'pg'] else 'not-selected' }}
+      openmetadata_mysql: >-
+        {{ (olist_metadata76_restore_mysql_result.stdout | from_json)
+        if olist_metadata76_restore_component in ['both', 'mysql'] else 'not-selected' }}
+      warning: >-
+        Scratch databases are isolated by database name and restricted role,
+        but share the existing DB servers. This is NOT off-host disaster recovery.
+      result: "STEP76_ISOLATED_{{ olist_metadata76_restore_mode | upper }}_PASS"

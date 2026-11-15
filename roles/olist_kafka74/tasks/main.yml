@@ -1,0 +1,120 @@
+---
+- name: Guard scope of Step74 watchdog recovery proof
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == 'master'
+      - olist_kafka74_mode in ['apply', 'inspect', 'fault', 'verify']
+      - olist_kafka74_user == 'hadoop'
+      - olist_kafka74_remote_script == '/opt/bigtop-iceberg/step65/step74_proof.py'
+    fail_msg: Step74 operates only on Step65 on master as user hadoop.
+
+- name: Check existing Step66 controller, watchdog, timer, and Step65 state directory
+  ansible.builtin.stat:
+    path: '{{ item }}'
+  loop:
+    - /opt/bigtop-iceberg/step65/step65_yarn_control.py
+    - /opt/bigtop-iceberg/step65/step66_watchdog.py
+    - /etc/systemd/system/bigtop-olist-step66-watchdog.timer
+    - /var/lib/bigtop-olist-step65
+  register: olist_kafka74_prereqs
+
+- name: Refuse if Step66 is absent
+  ansible.builtin.assert:
+    that:
+      - olist_kafka74_prereqs.results[0].stat.isreg | default(false)
+      - olist_kafka74_prereqs.results[1].stat.isreg | default(false)
+      - olist_kafka74_prereqs.results[2].stat.isreg | default(false)
+      - olist_kafka74_prereqs.results[3].stat.isdir | default(false)
+    fail_msg: Install existing Step66 watchdog first; Step74 must not replace Step65 lifecycle files.
+
+- name: Install independent Step74 proof script only
+  ansible.builtin.copy:
+    src: step74_proof.py
+    dest: '{{ olist_kafka74_remote_script }}'
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  when: olist_kafka74_mode == 'apply'
+
+- name: Require Step74 proof script for inspection or recovery test
+  ansible.builtin.stat:
+    path: '{{ olist_kafka74_remote_script }}'
+  register: olist_kafka74_script_stat
+  when: olist_kafka74_mode != 'apply'
+
+- name: Reject operations before Step74 apply
+  ansible.builtin.assert:
+    that:
+      - olist_kafka74_script_stat.stat.isreg | default(false)
+  when: olist_kafka74_mode != 'apply'
+
+- name: Require explicit exact application ID and opt-in for destructive fault injection
+  ansible.builtin.assert:
+    that:
+      - olist_kafka74_confirm_fault == 'YES'
+      - olist_kafka74_expected_app_id is match('^application_[0-9]+_[0-9]+$')
+    fail_msg: Fault injection requires expected YARN app ID and explicit YES confirmation.
+  when: olist_kafka74_mode == 'fault'
+
+- name: Inspect Step65 and Step66 state without mutation
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - '{{ olist_kafka74_remote_script }}'
+      - inspect
+  become: true
+  become_user: '{{ olist_kafka74_user }}'
+  register: olist_kafka74_inspect
+  changed_when: false
+  when: olist_kafka74_mode == 'inspect'
+
+- name: Show read-only recovery readiness report
+  ansible.builtin.debug:
+    msg: '{{ olist_kafka74_inspect.stdout_lines }}'
+  when: olist_kafka74_mode == 'inspect'
+
+- name: Inject one explicitly approved failure for exact Step65 YARN app ID
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - '{{ olist_kafka74_remote_script }}'
+      - fault
+      - --expected-app-id
+      - '{{ olist_kafka74_expected_app_id }}'
+      - --confirm
+      - '{{ olist_kafka74_confirm_fault }}'
+  become: true
+  become_user: '{{ olist_kafka74_user }}'
+  register: olist_kafka74_fault
+  changed_when: "'STEP74_FAULT_INJECTED:' in olist_kafka74_fault.stdout"
+  when: olist_kafka74_mode == 'fault'
+
+- name: Show exact-app fault injection result
+  ansible.builtin.debug:
+    msg: '{{ olist_kafka74_fault.stdout_lines }}'
+  when: olist_kafka74_mode == 'fault'
+
+- name: Verify automatic restoration, one active app, and checkpoint directory preservation
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - '{{ olist_kafka74_remote_script }}'
+      - verify
+      - --wait-seconds
+      - '{{ olist_kafka74_wait_seconds | string }}'
+  become: true
+  become_user: '{{ olist_kafka74_user }}'
+  register: olist_kafka74_verification
+  changed_when: false
+  when: olist_kafka74_mode == 'verify'
+
+- name: Show Step74 verified recovery evidence
+  ansible.builtin.debug:
+    msg: '{{ olist_kafka74_verification.stdout_lines }}'
+  when: olist_kafka74_mode == 'verify'
+
+- name: Report Step74 safe installation
+  ansible.builtin.debug:
+    msg: STEP74_APPLY_PASS - inspect-only artifact installed; Step66 configuration unchanged
+  when: olist_kafka74_mode == 'apply'

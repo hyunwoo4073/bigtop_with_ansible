@@ -1,0 +1,9 @@
+---
+web_console_kafka75_mode: plan
+web_console_kafka75_dir: /opt/bigtop-web-console
+web_console_kafka75_user: bae
+web_console_kafka75_frontend_dir: /opt/bigtop-web-console/frontend-src
+web_console_kafka75_service: bigtop-web-console
+web_console_kafka75_internal_url: http://127.0.0.1:18090
+web_console_kafka75_public_url: http://127.0.0.1:1337
+web_console_kafka75_kafka_bin: /opt/bigtop-kafka-kraft64/kafka/bin

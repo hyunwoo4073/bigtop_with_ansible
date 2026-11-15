@@ -1,0 +1,26 @@
+---
+- name: Require explicit supported Step73 mode
+  ansible.builtin.assert:
+    that:
+      - olist_kafka73_mode in ['preflight', 'inspect_route', 'install_probe', 'resolve_probe', 'remove_probe']
+    fail_msg: Use preflight, inspect_route, install_probe, resolve_probe, or remove_probe.
+
+- name: Discover existing Step73 dependencies
+  ansible.builtin.include_tasks: preflight.yml
+  when: olist_kafka73_mode == 'preflight'
+
+- name: Inspect sanitized existing routing configuration
+  ansible.builtin.include_tasks: inspect_route.yml
+  when: olist_kafka73_mode == 'inspect_route'
+
+- name: Install only temporary Step73 alert probe
+  ansible.builtin.include_tasks: install_probe.yml
+  when: olist_kafka73_mode == 'install_probe'
+
+- name: Turn a firing Step73 probe into a resolved condition
+  ansible.builtin.include_tasks: resolve_probe.yml
+  when: olist_kafka73_mode == 'resolve_probe'
+
+- name: Remove only temporary Step73 alert probe
+  ansible.builtin.include_tasks: remove_probe.yml
+  when: olist_kafka73_mode == 'remove_probe'

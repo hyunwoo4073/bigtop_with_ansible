@@ -1,0 +1,6 @@
+---
+olist_metadata76_dr_mode: preflight
+olist_metadata76_dr_backup_id: ''
+olist_metadata76_dr_target_host: worker1
+olist_metadata76_dr_hdfs_warehouse: /data/olist/iceberg-rest
+olist_metadata76_dr_min_free_mib: 2048

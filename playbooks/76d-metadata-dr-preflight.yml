@@ -1,0 +1,6 @@
+---
+- name: Step76 Phase D non-destructive off-host DR and metadata scope discovery
+  hosts: worker3
+  gather_facts: false
+  roles:
+    - role: olist_metadata76_dr

@@ -1,0 +1,7 @@
+---
+olist_kafka74_mode: inspect
+olist_kafka74_user: hadoop
+olist_kafka74_remote_script: /opt/bigtop-iceberg/step65/step74_proof.py
+olist_kafka74_expected_app_id: ''
+olist_kafka74_confirm_fault: 'NO'
+olist_kafka74_wait_seconds: 540

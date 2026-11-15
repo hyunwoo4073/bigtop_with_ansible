@@ -1,0 +1,45 @@
+---
+- name: Stat existing Web Console files and Kafka CLI
+  ansible.builtin.stat:
+    path: '{{ item }}'
+  loop:
+    - '{{ web_console_kafka75_dir }}/app.py'
+    - '{{ web_console_kafka75_dir }}/kafka_ops70.py'
+    - '{{ web_console_kafka75_frontend_dir }}/package.json'
+    - '{{ web_console_kafka75_frontend_dir }}/src/KafkaOperationsView.jsx'
+    - '{{ web_console_kafka75_kafka_bin }}/kafka-topics.sh'
+    - '{{ web_console_kafka75_kafka_bin }}/kafka-metadata-quorum.sh'
+    - '{{ web_console_kafka75_kafka_bin }}/kafka-broker-api-versions.sh'
+  register: web_console_kafka75_stat
+  changed_when: false
+
+- name: Require existing Step70 UI and local Kafka admin CLI
+  ansible.builtin.assert:
+    that:
+      - web_console_kafka75_stat.results | map(attribute='stat.exists') | min
+    fail_msg: 'Step75 requires existing Step70 Web Console and Kafka CLI on worker3'
+
+- name: Require npm available for existing frontend build
+  ansible.builtin.command:
+    cmd: npm --version
+  register: web_console_kafka75_npm
+  changed_when: false
+
+- name: Verify existing Step70 overview endpoint is working
+  ansible.builtin.uri:
+    url: '{{ web_console_kafka75_internal_url }}/api/ops/kafka/overview'
+    status_code: 200
+    return_content: true
+    timeout: 12
+  register: web_console_kafka75_existing_api
+  changed_when: false
+
+- name: Confirm existing overview contract
+  ansible.builtin.assert:
+    that:
+      - web_console_kafka75_existing_api.json.read_only | bool
+      - web_console_kafka75_existing_api.json.streaming.topic == 'bigtop_olist_step65_cdc_v1'
+
+- name: Report Step75 preflight passed
+  ansible.builtin.debug:
+    msg: 'STEP75_PREFLIGHT_PASS'

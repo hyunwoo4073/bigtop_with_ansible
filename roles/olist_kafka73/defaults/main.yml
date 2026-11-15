@@ -1,0 +1,12 @@
+---
+olist_kafka73_mode: preflight
+olist_kafka73_prometheus_url: http://127.0.0.1:9090
+olist_kafka73_alertmanager_url: http://127.0.0.1:9093
+olist_kafka73_prometheus_config: /etc/prometheus/prometheus.yml
+olist_kafka73_probe_rule_file: /etc/prometheus/rules/bigtop-olist-step73-probe.yml
+olist_kafka73_probe_expires_at: 0
+olist_kafka73_probe_id: none
+olist_kafka73_probe_labels:
+  severity: warning
+  component: step73
+  service: kafka-streaming
